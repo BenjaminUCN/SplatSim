@@ -41,7 +41,9 @@ pip install torch torchvision torchaudio --index-url https://download.pytorch.or
 Note: If nothing is inside the `submodules/` folder, run `git submodule update --init --recursive`
 
 ```bash
-pip install submodules/gaussian-splatting-wrapper/gaussian_splatting/submodules/diff-gaussian-rasterization submodules/pybullet-URDF-models submodules/pybullet-playground-wrapper/ submodules/ghalton
+CC=gcc-11 CXX=g++-11 pip install --no-build-isolation submodules/gaussian-splatting-wrapper/gaussian_splatting/submodules/diff-gaussian-rasterization
+pip install submodules/pybullet-URDF-models 
+pip install submodules/pybullet-playground-wrapper/ submodules/ghalton
 
 # This needs editable mode for some reason
 pip install -e submodules/gaussian-splatting-wrapper
@@ -60,9 +62,9 @@ pip install submodules/simple-knn/ --no-build-isolation
 QOL to clean up git status
 ```bash
 echo '*.egg-info' >> .git/modules/submodules/ghalton/info/exclude
+echo '*.egg-info' >> .git/modules/submodules/gello_software/modules/third_party/DynamixelSDK/info/exclude
 echo '*.egg-info' >> .git/modules/submodules/pybullet-URDF-models/info/exclude
 echo 'build/*' >> .git/modules/submodules/pybullet-URDF-models/info/exclude
-echo '*.egg-info' >> .git/modules/submodules/gello_software/modules/third_party/DynamixelSDK/info/exclude
 ```
 
 ### Install other dependencies

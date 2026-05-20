@@ -47,8 +47,8 @@ robot_iphone_w_engine_new:
   - [0, 0.0, -1.5707963267948966, 1.5707963267948966, -1.5707963267948966, -1.5707963267948966,
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
     0.0]
-  source_path: /home/jennyw2/code/Hierarchical-Localization/outputs/small_engine_on_table_new_all_views_images_500_40match_800height_stdangle/sfm_disk_disk+lightglue/undistorted
-  model_path: /home/jennyw2/code/gaussian-splatting/output/small_engine_on_table_new_all_views_images_500_40match_800height_stdangle
+  source_path: /home/magister/data/sfm_disk_disk+lightglue/undistorted
+  model_path: /home/magister/data/small_engine_on_table_new_all_views_images_500_40match_800height_stdangle
   use_gripper: true
   is_articulated: true
   use_fixed_base: true
