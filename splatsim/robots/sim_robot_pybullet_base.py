@@ -314,11 +314,11 @@ class PybulletRobotServerBase:
         # random quaternion for the orientation of the object
         quat = self.pybullet_client.getQuaternionFromEuler([0, 0, 0])
 
-        class MockModelsLib:
-            model_name_list = {}
+        #class MockModelsLib:
+            #model_name_list = {}
 
-        models_lib = MockModelsLib
-        # models_lib = md.model_lib()
+        #models_lib = MockModelsLib
+        models_lib = md.model_lib()
         self.object_name_list = list(
             map(
                 lambda object_cfg: object_cfg["object_name"],

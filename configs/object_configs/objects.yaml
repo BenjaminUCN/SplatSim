@@ -1,3 +1,80 @@
+xarm5_lite:
+  urdf_path:
+  - /home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_mod.urdf
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0, -3.1381019950858047, 0.4660029102824859, -1.8238690683340744, 0.41015237421866746,
+    1.5707963267948966, 0]
+  source_path: /home/magister/data/Colmaps/260409_1748
+  model_path: /home/magister/SplatSim/output/fc383e6c-f
+  transformation:
+    matrix:
+    - [-0.33638, -0.03429, -0.032829, -0.132198]
+    - [0.018258, 0.123399, -0.315981, -0.079945]
+    - [0.04382, -0.314646, -0.120345, 0.800854]
+    - [0, 0, 0, 1]
+  aabb:
+    bounding_box:
+    - [-0.7985, -0.119, -0.0009]
+    - [0.0629, 0.0854, 0.5963]
+    urdf_bbox_adjustment:
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+xarm5_lite_plant_v0:
+  urdf_path:
+  - /home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0, -3.1381019950858047, 0.4660029102824859, -1.8238690683340744, 0.2788963267948966,
+    1.5707963267948966, 0]
+  source_path: /home/magister/data/Colmaps/260419_1317
+  model_path: /home/magister/data/Colmaps/260419_1317/output
+  transformation:
+    matrix:
+    - [0.383197, 0.048053, 0.079181, 0.192037]
+    - [-0.065464, -0.097901, 0.376229, -0.019372]
+    - [0.065522, -0.378847, -0.087181, 0.726467]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.8073, -0.119, -0.0009]
+    - [0.0629, 0.0893, 0.5979]
+    urdf_bbox_adjustment:
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+xarm5_lite_plant_v1:
+  urdf_path:
+  - /home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, -3.1415, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: /home/magister/data/Colmaps/260507_1800
+  model_path: /home/magister/data/Colmaps/260507_1800/output
+  transformation:
+    matrix:
+    - [0.20275, -0.031258, 0.148612, -0.118648]
+    - [-0.151861, -0.040362, 0.198694, -0.091142]
+    - [-0.000839, -0.248121, -0.051044, 0.74572]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.1504, -0.1012, -0.0008]
+    - [0.6029, 0.1192, 0.6087]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
 robot_iphone:
   transformation:
     matrix:
@@ -93,7 +170,7 @@ plastic_apple:
     bounding_box:
     - [-0.040464000284671786, -0.04481899875402451, -0.003991999986581507]
     - [0.042181999862194064, 0.03782700139284134, 0.07506100225448609]
-  ply_path: /home/jennyw2/data/output/plastic_apple/point_cloud/iteration_7000/point_cloud.ply
+  ply_path: /home/magister/SplatSim/output/plastic_apple/point_cloud/iteration_7000/point_cloud.ply
 plastic_banana:
   transformation:
     matrix:

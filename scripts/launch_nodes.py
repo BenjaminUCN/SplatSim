@@ -187,6 +187,19 @@ def launch_robot_server(args: Args):
         server = MujocoRobotServer(
             xml_path=xml, gripper_xml_path=gripper_xml, port=port, host=args.hostname
         )
+    
+    elif args.robot == "sim_xarm5_splat_camera":
+        from splatsim.robots.sim_xarm5_pybullet_splat_camera import XArm5PybulletRobotServerCamera
+
+        server = XArm5PybulletRobotServerCamera(
+            port=port,
+            host=args.hostname,
+            #camera_names=["base_rgb","wrist_rgb","apple_rgb"],
+            camera_names=["base_rgb","wrist_rgb"],
+            robot_name=args.robot_name,
+            cam_i=347,
+            use_gripper=use_gripper,
+        )
 
     else:
         if args.robot == "xarm":

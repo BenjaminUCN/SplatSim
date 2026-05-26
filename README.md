@@ -231,6 +231,20 @@ Run this script below again. The last visualization that compares the two point 
 python scripts/articulated_robot_pipeline.py --robot_name your_robot_name
 ```
 
+<details>
+<summary>Note if using WSL</summary>
+
+Run this before running the script:
+```bash
+export DISPLAY=:0
+export WAYLAND_DISPLAY=
+export XDG_SESSION_TYPE=x11
+
+export LIBGL_ALWAYS_SOFTWARE=1
+export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
+```
+</details>
+
 Note: `urdf_bbox_adjustment` can handle cases where your physical robot has an additional attachment compared to the URDF. You can check its effects in the same final visualization
 
 #### Your custom robot can now follow the same recorded joint state trajectories!

@@ -59,6 +59,19 @@ PORT_CONFIG_MAP: Dict[str, DynamixelRobotConfig] = {
     #     joint_signs=(1, 1, 1, 1, 1, 1, 1),
     #     gripper_config=(8, 279, 279 - 50),
     # ),
+    # xArm5 lite
+    "/dev/ttyACM0": DynamixelRobotConfig(
+        joint_ids=(1, 2, 3, 4, 5),
+        joint_offsets=(
+            5 * np.pi / 2,
+            2 * np.pi / 2,
+            3 * np.pi / 2,
+            2 * np.pi / 2, #1 * np.pi / 2
+            2 * np.pi / 2,
+        ),
+        joint_signs=(1, 1, -1, 1, 1),
+        gripper_config= (6, 15.79609375, -26.00390625),#gripper_config=(6, 15.79609375, -26.00390625)
+    ),
     # panda
     # "/dev/cu.usbserial-FT3M9NVB": DynamixelRobotConfig(
     "/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT3M9NVB-if00-port0": DynamixelRobotConfig(
