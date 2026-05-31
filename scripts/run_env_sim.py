@@ -48,6 +48,15 @@ class Args:
     bimanual: bool = False
     verbose: bool = False
 
+    # LeRobot conversion after session
+    convert_to_lerobot: bool = False
+    lerobot_input_dir: Optional[str] = None  # si None, usa data_dir/agent automáticamente
+    lerobot_output_dir: str = "~/datasets/splatsim_v3"
+    lerobot_fps: int = 20
+
+    # Camera flags
+    no_wrist_camera: bool = False
+
 
 def main(args):
     if args.mock:
@@ -323,7 +332,8 @@ def main(args):
 
     save_path = None
     start_time = time.time()
-    while True:
+    try:
+     while True:
         loop_start = time.time()
 
         num = time.time() - start_time
@@ -364,7 +374,8 @@ def main(args):
             action = action[:-1]
         obs = env.step(action)
 
-        for img_obs_name in ["wrist_rgb", "base_rgb"]:
+        active_cameras = ["base_rgb"] if args.no_wrist_camera else ["wrist_rgb", "base_rgb"]
+        for img_obs_name in active_cameras:
             if img_obs_name not in obs or obs[img_obs_name] is None:
                 continue
             frame = obs[img_obs_name]
@@ -379,6 +390,23 @@ def main(args):
         sleep_time = max(0, (1 / 50) - (loop_duration))
         if sleep_time > 0:
             time.sleep(sleep_time)
+    except KeyboardInterrupt:
+        print_color("\nDeteniendo...", color="red", attrs=("bold",))
+    finally:
+        if args.convert_to_lerobot:
+            from splatsim.utils.lerobot_transform import run_conversion, ConversionConfig
+            print_color("\n[LeRobot] Iniciando conversión de .pkl a LeRobot v3...", color="yellow", attrs=("bold",))
+            input_dir = (
+                Path(args.lerobot_input_dir).expanduser()
+                if args.lerobot_input_dir
+                else Path(args.data_dir).expanduser() / args.agent
+            )
+            config = ConversionConfig(
+                input_dir=input_dir,
+                output_dir=Path(args.lerobot_output_dir).expanduser(),
+                fps=args.lerobot_fps,
+            )
+            run_conversion(config)
 
 
 if __name__ == "__main__":
