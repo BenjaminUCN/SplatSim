@@ -655,8 +655,8 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         return camera
     
     def setup_base_camera(self):
-        init_x, init_y, init_z   = -0.348,  -0.063, 0.126
-        init_r, init_pi, init_yaw =  -1.827, 0.166, 0.332
+        init_x, init_y, init_z   = 0.205,  0.0, 0.158
+        init_r, init_pi, init_yaw =  -1.562, 0.0, -1.558
 
         self.base_camera_position =  (init_x, init_y, init_z)
         self.base_camera_rotation =  (0, 0, 0, 1)

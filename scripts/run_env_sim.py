@@ -171,6 +171,19 @@ def main(args):
             agent = DiffusionAgent(port="/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT3M9NVB-if00-port0")
             startup_steps = 25
             query_new_joints_per_startup_step = True
+        elif args.agent == "lerobot_diffusion":
+            from splatsim.agents.lerobot_diffusion_agent import LeRobotDiffusionAgent
+            agent = LeRobotDiffusionAgent(
+                checkpoint="LuEduSoHu/robot_learning_tutorial_diffusion",
+                device="cuda",
+            )
+            startup_steps = 2
+            query_new_joints_per_startup_step = True
+        elif args.agent == "ik":
+            from splatsim.agents.ik_agent import InverseKinematicAgent
+            agent = InverseKinematicAgent(device="cuda")
+            startup_steps = 2
+            query_new_joints_per_startup_step = True
         elif args.agent == "servoing":
             from splatsim.agents.servoing_agent import ServoingAgent
             agent = ServoingAgent(port="/dev/serial/by-id/usb-FTDI_USB__-__Serial_Converter_FT3M9NVB-if00-port0")
