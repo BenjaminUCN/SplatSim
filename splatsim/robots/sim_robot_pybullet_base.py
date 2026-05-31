@@ -31,7 +31,7 @@ from torchvision.transforms.functional import to_pil_image
 assert mujoco.viewer is mujoco.viewer
 from gaussian_splatting.scene.cameras import Camera
 from gaussian_renderer import render
-# import urdf_models.models_data as md
+import urdf_models.models_data as md
 import pybullet as p
 from pybullet_planning.interfaces.robots.collision import pairwise_collision
 import pybullet_data

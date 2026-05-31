@@ -63,7 +63,7 @@ PORT_CONFIG_MAP: Dict[str, DynamixelRobotConfig] = {
     "/dev/ttyACM0": DynamixelRobotConfig(
         joint_ids=(1, 2, 3, 4, 5),
         joint_offsets=(
-            5 * np.pi / 2,
+            np.pi / 2,
             2 * np.pi / 2,
             3 * np.pi / 2,
             2 * np.pi / 2, #1 * np.pi / 2
