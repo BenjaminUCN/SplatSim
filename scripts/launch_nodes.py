@@ -17,6 +17,7 @@ class Args:
     robot_ip: str = "192.168.1.10"
     gaussian_path : str = "/home/jennyw2/data/output/robot_iphone/point_cloud/iteration_30000/point_cloud.ply"
     robot_name: str = "robot_iphone"
+    move_apple: bool = False
 
 
 def launch_robot_server(args: Args):
@@ -194,11 +195,11 @@ def launch_robot_server(args: Args):
         server = XArm5PybulletRobotServerCamera(
             port=port,
             host=args.hostname,
-            #camera_names=["base_rgb","wrist_rgb","apple_rgb"],
             camera_names=["base_rgb","wrist_rgb"],
             robot_name=args.robot_name,
             cam_i=347,
             use_gripper=use_gripper,
+            move_apple=args.move_apple,
         )
 
     else:
