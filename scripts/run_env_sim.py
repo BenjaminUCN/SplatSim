@@ -213,6 +213,14 @@ def main(args):
             agent = SliderInterfaceAgent()
             startup_steps = 2
             query_new_joints_per_startup_step = False
+        elif args.agent == "replay_action":
+            from splatsim.agents.replay_action_agent import ReplayActionAgent
+            with open("configs/folder_configs.yaml", "r") as file:
+                folder_config = yaml.safe_load(file)
+            traj_folder = folder_config["traj_folder"]
+            agent = ReplayActionAgent(traj_folder=traj_folder, env=env, save_images=False)
+            startup_steps = 2
+            query_new_joints_per_startup_step = False
         elif args.agent == "replay_trajectory":
             from splatsim.agents.replay_trajectory_agent import ReplayTrajectoryAgent
             with open("configs/folder_configs.yaml", "r") as file:
