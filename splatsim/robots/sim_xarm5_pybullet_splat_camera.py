@@ -13,6 +13,7 @@ import pybullet as p
 import numpy as np  
 import torch
 import cv2
+import argparse
 from splatsim.robots.sim_robot_pybullet_base import (
     PybulletRobotServerBase,
 )
@@ -23,7 +24,9 @@ from gaussian_renderer import render
 from torchvision.transforms.functional import to_pil_image
 from gaussian_splatting.scene.cameras import Camera
 
+
 class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
+    
     """
     Servidor interactivo para el xArm5 Lite.
     Muestra el Gaussian Splat del brazo en tiempo real
@@ -45,7 +48,7 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
     RECORD_EVERY = 12
 
 
-    def __init__(self, traj_save_path: str = None, **kwargs):
+    def __init__(self, traj_save_path: str = None, move_apple: bool = False, **kwargs):
 
         # El xArm5 tiene 5 DOF de brazo + 1 gripper = 6
         self._num_dofs = 6
@@ -65,11 +68,28 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self._lower_floor(z=-0.2)
         self.setup_base_camera()
         self.setup_wrist_camera()
-        self.setup_apple_camera()   
+        self.setup_apple_camera()
         self._start_keyboard_listener()
-        self.apple_x = self.pybullet_client.addUserDebugParameter("apple_x", -1.0, 1.0, 0.3)
-        self.apple_y = self.pybullet_client.addUserDebugParameter("apple_y", -1.0, 1.0, 0.2)
-        self.apple_z = self.pybullet_client.addUserDebugParameter("apple_z", -1.0, 1.0, 0.1)
+        self._move_apple = move_apple
+
+        self.reset_joints_btn = self.pybullet_client.addUserDebugParameter("Reset Robot Joints", 1, 0, 0)
+        self.prev_reset_joints_btn_val = 0
+
+        if self._move_apple:
+            self.prev_slider_x = 0.3
+            self.prev_slider_y = 0.2
+            self.prev_slider_z = 0.1
+            # self.apple_x = self.pybullet_client.addUserDebugParameter("apple_x", -1.0, 1.0, self.prev_slider_x)
+            # self.apple_y = self.pybullet_client.addUserDebugParameter("apple_y", -1.0, 1.0, self.prev_slider_y)
+            # self.apple_z = self.pybullet_client.addUserDebugParameter("apple_z", -1.0, 1.0, self.prev_slider_z)
+            
+            self.apple_x = self.pybullet_client.addUserDebugParameter("apple_x", 0.7, 1.0, self.prev_slider_x)
+            self.apple_y = self.pybullet_client.addUserDebugParameter("apple_y", -0.4, 0.4, self.prev_slider_y)
+            self.apple_z = self.pybullet_client.addUserDebugParameter("apple_z", -0.04, 0.4, self.prev_slider_z)
+
+            self.set_random_apple_position_btn = self.pybullet_client.addUserDebugParameter("Set Random Apple Position", 1, 0, 0)
+            self.prev_set_random_apple_position_btn_val = 0
+          
         if self.wrist_camera_link_index is not None:
             state = self.pybullet_client.getLinkState(
                 self.dummy_robot, 
@@ -271,20 +291,47 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
                 )
             except Exception:
                 pass
-
     def update_apple_pose_from_ui(self):
-        x = self.pybullet_client.readUserDebugParameter(self.apple_x)
-        y = self.pybullet_client.readUserDebugParameter(self.apple_y)
-        z = self.pybullet_client.readUserDebugParameter(self.apple_z)
+        if not self._move_apple:
+            return
+        
+        slider_x = self.pybullet_client.readUserDebugParameter(self.apple_x)
+        slider_y = self.pybullet_client.readUserDebugParameter(self.apple_y)
+        slider_z = self.pybullet_client.readUserDebugParameter(self.apple_z)
 
-        apple_idx = self.splat_object_name_list.index("plastic_apple")
-
-        self.set_object_pose(
-            "plastic_apple",
-            [x, y, z],
-            [0, 0, 0, 1],
-            use_gravity=False
+        slider_moved = (
+            abs(slider_x - self.prev_slider_x) > 1e-6 or
+            abs(slider_y - self.prev_slider_y) > 1e-6 or
+            abs(slider_z - self.prev_slider_z) > 1e-6
         )
+
+        if slider_moved:
+            x, y, z = slider_x, slider_y, slider_z
+            self.prev_slider_x = slider_x
+            self.prev_slider_y = slider_y
+            self.prev_slider_z = slider_z
+            
+            self.set_object_pose(
+                "plastic_apple",
+                [x, y, z],
+                [0, 0, 0, 1],
+                use_gravity=False
+            )
+
+        current_val = self.pybullet_client.readUserDebugParameter(self.set_random_apple_position_btn)
+        if current_val != self.prev_set_random_apple_position_btn_val:
+            self.prev_set_random_apple_position_btn_val = current_val
+            print("[xArm5] Setting random apple position.")
+            x = np.random.uniform(0.768, 0.85)
+            y = np.random.uniform(-0.34, 0.36)
+            z = np.random.uniform(-0.02, 0.337)
+
+            self.set_object_pose(
+                "plastic_apple",
+                [x, y, z],
+                [0, 0, 0, 1],
+                use_gravity=False
+            )
 
     def _disable_apple_gravity(self):
 
@@ -486,6 +533,8 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self.update_apple_pose_from_ui()
 
         self.update_base_camera()
+        
+        self.check_reset_joints()
 
         # Guardar frame si estamos grabando y toca este tick
         if self._is_recording:
@@ -502,6 +551,30 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             cv2.imshow("Apple Camera", cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
             cv2.waitKey(1)
 
+    def check_reset_joints(self):
+        current_val = self.pybullet_client.readUserDebugParameter(self.reset_joints_btn)
+        if current_val != self.prev_reset_joints_btn_val:
+            print("[xArm5] Resetting robot joints to initial positions.")
+            # Reset joint states
+            # for i in range(1, len(self.initial_joint_state)):
+            #     self.pybullet_client.resetJointState(
+            #         self.dummy_robot,
+            #         i,
+            #         self.initial_joint_state[i - 1] * self.joint_signs[i - 1],
+            #     )
+            # Reset needs to be done like a command_joint_state 
+            for i in range(1, self.num_dofs()):
+                self.pybullet_client.setJointMotorControl2(
+                    self.dummy_robot,
+                    i,
+                    p.POSITION_CONTROL,
+                    targetPosition=self.initial_joint_state[i - 1] * self.joint_signs[i - 1],
+                    force=1000,
+                    # force=250,
+                )
+            self.prev_reset_joints_btn_val = current_val
+            print(f"[xArm5] reset_joints_btn value changed to {current_val}")
+    
     def _patch_gripper_for_splat(self):
         """
         initial_link_states fue capturado con gripper cerrado (0),
