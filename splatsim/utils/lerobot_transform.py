@@ -44,6 +44,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from datetime import datetime
+
 import numpy as np
 import torch
 from PIL import Image
@@ -65,7 +67,7 @@ class ConversionConfig:
 
     fps: int = 10
 
-    robot_type: str = "lerobot_splatsim"
+    robot_type: str = "xarm5_lite"
 
     wrist_camera: bool = True
     wrist_offset: int | None = None
@@ -234,7 +236,7 @@ def infer_image_shape(
     return (3, h, w)
 
 
-def infer_dofs(episode_dir: Path) -> tuple[int, int]:
+def infer_state_action_dims(episode_dir: Path) -> tuple[int, int]:
 
     pkl_path = sorted(
         episode_dir.glob("*.pkl"),
@@ -243,15 +245,12 @@ def infer_dofs(episode_dir: Path) -> tuple[int, int]:
 
     data = load_pickle(pkl_path)
 
-    joint_positions = safe_to_numpy(
-        data["joint_positions"]
-    ).flatten()
+    # joint_positions = safe_to_numpy(data["joint_positions"]).flatten()
+    state = safe_to_numpy(data["state"]).flatten()
+    action = safe_to_numpy(data["action"]).flatten()
+    
 
-    action = safe_to_numpy(
-        data["action"]
-    ).flatten()
-
-    return len(joint_positions), len(action)
+    return len(state), len(action)
 
 
 # ============================================================
@@ -317,9 +316,14 @@ def create_dataset(
         frame_type="video" if config.use_videos else "image",
     )
 
+    date = datetime.now().strftime('%y%m%d_%H%M')
+    hf_user = "LuEduSoHu"
+    repo_id = f"{hf_user}/splatsim_{config.robot_type}_{config.fps}fps_{date}"
+    root_dir = config.output_dir / repo_id.split("/")[1]
+
     dataset = LeRobotDataset.create(
-        repo_id="LuEduSoHu/25051601",
-        root=config.output_dir,
+        repo_id=repo_id,
+        root=root_dir,
         robot_type=config.robot_type,
         fps=config.fps,
         features=features,
@@ -373,6 +377,7 @@ def build_frame(
         pkl_data:
             Dict containing:
                 - "joint_positions"
+                - "state"
                 - "action"
 
         images:
@@ -386,8 +391,12 @@ def build_frame(
             Optional task description.
     """
 
+    # state = safe_to_numpy(
+    #     pkl_data["joint_positions"]
+    # ).astype(np.float32).flatten()
+
     state = safe_to_numpy(
-        pkl_data["joint_positions"]
+        pkl_data["state"]
     ).astype(np.float32).flatten()
 
     action = safe_to_numpy(
@@ -474,12 +483,19 @@ def process_episode(
 
         images = {}
         valid = True
+        
+        # pkl 1 base 1 wrist 2
+        # pkl 2 base 3 wrist 4
+        
+        # pkl n base 2n-1 wrist 2n (if wrist_offset=1)
 
         for key in image_keys:
             image_idx = idx
 
             if key == "wrist_rgb":
-                image_idx += wrist_offset
+                image_idx = 2*idx
+            if key == "base_rgb":
+                image_idx = 2*idx - 1
 
             img_path = find_image(image_dir, key, image_idx)
 
@@ -527,6 +543,7 @@ def run_conversion(config: ConversionConfig):
     print("=" * 70)
 
     episode_dirs = discover_episodes(config.input_dir)
+    print(f"\nFound {len(episode_dirs)} episodes\n")
 
     first_episode = episode_dirs[0]
 
@@ -537,9 +554,7 @@ def run_conversion(config: ConversionConfig):
         for k in image_keys
     }
 
-    state_dim, action_dim = infer_dofs(
-        first_episode
-    )
+    state_dim, action_dim = infer_state_action_dims(first_episode)
 
     print("\nDetected configuration:")
     print(f"Image keys : {image_keys}")
@@ -558,11 +573,11 @@ def run_conversion(config: ConversionConfig):
         action_dim=action_dim,
     )
 
-    print(f"\nFound {len(episode_dirs)} episodes\n")
+    
 
     for ep_dir in tqdm(episode_dirs):
 
-        print(f"\nProcessing {ep_dir.name}")
+        # print(f"\nProcessing {ep_dir.name}")
 
         process_episode(
             dataset=dataset,
@@ -623,11 +638,6 @@ def main():
         wrist_camera=not args.no_wrist_camera,
         use_videos=not args.use_images,
     )
-    
-    print(f"args.use_images = {args.use_images}")
-    print(f"config.use_videos = {config.use_videos}")
-    print("TERMINATING!!!!!!!")
-    exit()
 
     run_conversion(config)
 
