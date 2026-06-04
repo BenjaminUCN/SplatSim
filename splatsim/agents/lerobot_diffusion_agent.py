@@ -39,7 +39,8 @@ class LeRobotDiffusionAgent:
 
     def __init__(
         self,
-        checkpoint: str = "LuEduSoHu/robot_learning_tutorial_diffusion",
+        # checkpoint: str = "LuEduSoHu/robot_learning_tutorial_diffusion_0528_1804",
+        checkpoint: str = "LuEduSoHu/robot_learning_tutorial/diffusion_0603_1702",
         device: str = "cuda",
         n_action_steps: int | None = None,
     ):
@@ -48,6 +49,42 @@ class LeRobotDiffusionAgent:
         self._obs_buffer: deque[dict[str, torch.Tensor]] = deque(maxlen=_N_OBS_STEPS)
         self._action_queue: list[np.ndarray] = []
         
+        # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion"
+        checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0603_1702"
+        
+        # dataset_id = "LuEduSoHu/25051601"
+        # dataset_root = "/home/magister/lerobot/splatsim_test_data/0529_1607"
+        dataset_id = "LuEduSoHu/splatsim_lerobot_splatsim_10fps_260601_1756"
+        dataset_root = "/home/magister/lerobot/splatsim_test_data/0601_1755"
+        
+        self._load_ik_dummy_robot()
+        self._load_diffusion_policy_model(checkpoint, dataset_id, dataset_root)
+        
+        self.make_new_prediction = True
+    
+    def _load_diffusion_policy_model(self, checkpoint: str, dataset_id: str, dataset_root: str): 
+        from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
+       
+        print(f"[LeRobotDiffusionAgent] Loading: {checkpoint}")
+        self.policy = DiffusionPolicy.from_pretrained(checkpoint)
+        self.policy.to(self.device)
+        self.policy.eval()
+        
+        print("[LeRobotDiffusionAgent] Policy Config:.")
+        print(self.policy.config)
+        print("[LeRobotDiffusionAgent] Ready.")
+                
+        print("[LeRobotDiffusionAgent] Loading dataset metadata.")
+        self.dataset_metadata = LeRobotDatasetMetadata(dataset_id, root=dataset_root)
+
+        print("[LeRobotDiffusionAgent] Making pre-post processors.")
+        self.preprocess, self.postprocess = make_pre_post_processors(
+            self.policy.config,
+            checkpoint,
+            dataset_stats=self.dataset_metadata.stats,
+        )  
+
+    def _load_ik_dummy_robot(self):
         p.connect(p.DIRECT)
         
         urdf_path = "/home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf"
@@ -59,42 +96,19 @@ class LeRobotDiffusionAgent:
         self.dummy_robot = p.loadURDF(
             urdf_path, useFixedBase=True, basePosition=base_position, flags=flags
         )
-
-
-        print(f"[LeRobotDiffusionAgent] Loading: {checkpoint}")
-        self.policy = self._load(checkpoint)
-        print("[LeRobotDiffusionAgent] Policy Config:.")
-        print(self.policy.config)
-        print("[LeRobotDiffusionAgent] Ready.")
         
-        user = "LuEduSoHu"
-        dataset_id = f"{user}/0513_1715"
-        dataset_root = "/home/magister/lerobot/splatsim_test_data/0513_2028"
-                
-        print("[LeRobotDiffusionAgent] Loading dataset metadata.")
-        self.dataset_metadata = LeRobotDatasetMetadata(dataset_id, root=dataset_root)
+        (
+        self.joint_indices,
+        self.lower_limits,
+        self.upper_limits,
+        self.joint_ranges,
+        self.joint_names,
+        ) = self.get_revolute_joint_limits(robot_id=self.dummy_robot)
 
-        print("[LeRobotDiffusionAgent] Making pre-post processors.")
-        self.preprocess, self.postprocess = make_pre_post_processors(
-            self.policy.config,
-            checkpoint,
-            dataset_stats=self.dataset_metadata.stats,
-        )
-        
-        self.make_new_prediction = True
 
     def _load(self, checkpoint: str):
         """Load DiffusionPolicy from HF Hub or local path."""
-        try:
-            from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
-        except ImportError:
-            from lerobot.common.policies.diffusion.modeling_diffusion import DiffusionPolicy  # type: ignore
-
-        # policy = DiffusionPolicy.from_pretrained(checkpoint)
-        policy = DiffusionPolicy.from_pretrained("/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion")
-        policy.to(self.device)
-        policy.eval()
-        return policy
+        
     
     def safe_to_numpy(self, obj: Any) -> np.ndarray:
 
@@ -113,22 +127,26 @@ class LeRobotDiffusionAgent:
         raise TypeError(f"Unsupported type: {type(obj)}")
     
     def _build_obs(self, obs):
-        joint_positions = obs["joint_positions"]
-        state = self.safe_to_numpy(joint_positions).astype(np.float32).flatten()
+        # joint_positions = obs["joint_positions"]
+        # state = self.safe_to_numpy(joint_positions).astype(np.float32).flatten()
+        state = obs["state"]
+        state = self.safe_to_numpy(state).astype(np.float32).flatten()
         
-        image = obs["base_rgb"]
-        image = np.transpose(image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
-        image = (image * 255).astype(np.uint8)
+        
+        base_image = obs["base_rgb"]
+        base_image = np.transpose(base_image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
+        base_image = (base_image * 255).astype(np.uint8)
+        
+        wrist_image = obs["wrist_rgb"]
+        wrist_image = np.transpose(wrist_image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
+        wrist_image = (wrist_image * 255).astype(np.uint8)
         
         frame = {
-            "base_rgb": image,
-            "state_0": state[0],
-            "state_1": state[1],
-            "state_2": state[2],
-            "state_3": state[3],
-            "state_4": state[4],
-            "state_5": state[5],
+            "base_rgb": base_image,
+            "wrist_rgb": wrist_image,
         }
+        for name in self.dataset_metadata.features['observation.state']['names']:
+            frame[name] = state[self.dataset_metadata.features['observation.state']['names'].index(name)]
 
         frame = build_inference_frame(
             observation=frame,
@@ -137,7 +155,7 @@ class LeRobotDiffusionAgent:
         )
 
         frame = self.preprocess(frame)
-
+        
         return frame
 
 
@@ -210,10 +228,12 @@ class LeRobotDiffusionAgent:
         p.addUserDebugLine(position, y_end, [0, 1, 0], 2, lifeTime=life_time)
         p.addUserDebugLine(position, z_end, [0, 0, 1], 2, lifeTime=life_time)
 
+
     def act(self, obs: Dict[str, np.ndarray]) -> np.ndarray:
         """
         obs["base_rgb"]        -> (H, W, 3)
         obs["joint_positions"] -> (6,)
+        obs["state"] -> (7,)
         """
         
         obs_dict = obs.copy()
@@ -235,17 +255,10 @@ class LeRobotDiffusionAgent:
             print(f"New action prediction: {self.action_prediction}")
             
             self.ee_pose = self.action_prediction[:3]
-            self.ee_rot = self.action_prediction[3:7]
-            self.ee_pose[0] *= -1
-            self.ee_pose[1] *= -1
+            self.ee_rot = self.action_prediction[3:6]
+            self.ee_gripper = self.action_prediction[6]
                 
             self.make_new_prediction = False
-        
-        # ee_pose = self.action_prediction[:3]
-        # ee_rot = self.action_prediction[3:7]
-        
-        # ee_pose[0] *= -1
-        # ee_pose[1] *= -1
         
         ee_pose = self.ee_pose
         ee_rot = self.ee_rot
@@ -254,51 +267,34 @@ class LeRobotDiffusionAgent:
         print(f"ee_rot: ({ee_rot[0]:.3f}, {ee_rot[1]:.3f}, {ee_rot[2]:.3f})")
         
         joints_n = 5
+        ee_link_index = 6
         
-        (
-        joint_indices,
-        lower_limits,
-        upper_limits,
-        joint_ranges,
-        joint_names,
-        ) = self.get_revolute_joint_limits(robot_id=self.dummy_robot)
-        
-        ee_link = 6
-        euler = [ee_rot[0], ee_rot[1], ee_rot[2]]
-        
-        euler = [0, 0, 0]
-        # ee_pose = [0.5, 0.1, 0.1]
-        ee_quat = p.getQuaternionFromEuler(euler)
-        
-        self.draw_pose(ee_pose, ee_quat, life_time=1)
+        self.draw_pose(ee_pose, ee_rot, life_time=1)
         
         dummy_joint_pos = p.calculateInverseKinematics(
-            self.dummy_robot, 
-            # 6, 
-            # ee_pose,
-            # ee_quat,
-            endEffectorLinkIndex=ee_link,
+            self.dummy_robot,
+            endEffectorLinkIndex=ee_link_index,
             targetPosition=ee_pose,
-            # targetOrientation=ee_quat,
+            targetOrientation=ee_rot,
             residualThreshold=0.00001,
             maxNumIterations=10000,
              
             # lowerLimits=lower_limits,
             # upperLimits=upper_limits,
             # jointRanges=joint_ranges,
-            restPoses = obs_dict["joint_positions"][:len(joint_indices)]
+            restPoses = obs_dict["joint_positions"][:len(self.joint_indices)]
         )
         
         # calculate difference between current and target joint angles
-        joint_diff = np.array(dummy_joint_pos)[:6] - np.array(obs_dict['joint_positions'])[:6]
-        if np.linalg.norm(joint_diff) < 1.3:
+        joint_diff = np.array(dummy_joint_pos)[:joints_n] - np.array(obs_dict['joint_positions'])[:joints_n]
+        if np.linalg.norm(joint_diff) < 2.0:
             self.make_new_prediction = True
         else:
             print(f"Joint difference norm: {np.linalg.norm(joint_diff):.3f}")
             print(f"Joint difference: {joint_diff}")
 
         joints = np.array(dummy_joint_pos)[:joints_n]
-        joints = np.append(joints, 1)
+        joints = np.append(joints, self.ee_gripper)
         
         return joints
     
