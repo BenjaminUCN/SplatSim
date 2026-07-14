@@ -195,6 +195,7 @@ def launch_robot_server(args: Args):
         server = XArm5PybulletRobotServerCamera(
             port=port,
             host=args.hostname,
+            # camera_names=["base_rgb","wrist_rgb","apple_rgb"],
             camera_names=["base_rgb","wrist_rgb"],
             robot_name=args.robot_name,
             cam_i=347,
@@ -205,6 +206,9 @@ def launch_robot_server(args: Args):
     else:
         if args.robot == "xarm":
             from splatsim.robots.xarm_robot import XArmRobot
+
+        elif args.robot == "xarm5_lite":
+            from splatsim.robots.xarm5_lite_robot_plant import XArmRobot
 
             robot = XArmRobot(ip=args.robot_ip)
         elif args.robot == "ur":

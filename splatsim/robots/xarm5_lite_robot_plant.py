@@ -1,0 +1,410 @@
+import dataclasses
+import threading
+import time
+from typing import Dict, Optional
+
+import numpy as np
+from pyquaternion import Quaternion
+
+from splatsim.robots.robot import Robot
+
+
+def _aa_from_quat(quat: np.ndarray) -> np.ndarray:
+    assert quat.shape == (4,), "Input quaternion must be a 4D vector."
+    norm = np.linalg.norm(quat)
+    assert norm != 0, "Input quaternion must not be a zero vector."
+    quat = quat / norm
+
+    Q = Quaternion(w=quat[3], x=quat[0], y=quat[1], z=quat[2])
+    angle = Q.angle
+    axis = Q.axis
+    aa = axis * angle
+    return aa
+
+
+def _quat_from_aa(aa: np.ndarray) -> np.ndarray:
+    assert aa.shape == (3,), "Input axis-angle must be a 3D vector."
+    norm = np.linalg.norm(aa)
+    assert norm != 0, "Input axis-angle must not be a zero vector."
+    axis = aa / norm
+
+    Q = Quaternion(axis=axis, angle=norm)
+    quat = np.array([Q.x, Q.y, Q.z, Q.w])
+    return quat
+
+
+@dataclasses.dataclass(frozen=True)
+class RobotState:
+    x: float
+    y: float
+    z: float
+    gripper: float
+    j1: float
+    j2: float
+    j3: float
+    j4: float
+    j5: float
+    aa: np.ndarray
+
+    @staticmethod
+    def from_robot(
+        cartesian: np.ndarray,
+        joints: np.ndarray,
+        gripper: float,
+        aa: np.ndarray,
+    ) -> "RobotState":
+        return RobotState(
+            cartesian[0],
+            cartesian[1],
+            cartesian[2],
+            gripper,
+            joints[0],
+            joints[1],
+            joints[2],
+            joints[3],
+            joints[4],
+            aa,
+        )
+
+    def cartesian_pos(self) -> np.ndarray:
+        return np.array([self.x, self.y, self.z])
+
+    def quat(self) -> np.ndarray:
+        return _quat_from_aa(self.aa)
+
+    def joints(self) -> np.ndarray:
+        return np.array([self.j1, self.j2, self.j3, self.j4, self.j5])
+
+    def gripper_pos(self) -> float:
+        return self.gripper
+
+
+class Rate:
+    def __init__(self, *, duration):
+        self.duration = duration
+        self.last = time.time()
+
+    def sleep(self, duration=None) -> None:
+        duration = self.duration if duration is None else duration
+        assert duration >= 0
+        now = time.time()
+        passed = now - self.last
+        if passed < 0 :
+            self.last = now
+            return
+        remaining = duration - passed
+        assert passed >= 0
+        if remaining > 0.0001:
+            time.sleep(remaining)
+        self.last = time.time()
+
+
+class XArmRobot(Robot):
+    GRIPPER_OPEN = 800
+    GRIPPER_CLOSE = 0
+
+    DEFAULT_MAX_DELTA = 0.05
+
+    # ------------------------------------------------------------------ #
+    # Interface                                                            #
+    # ------------------------------------------------------------------ #
+
+    def num_dofs(self) -> int:
+        # 5 joints + 1 gripper
+        return 6
+
+    def set_object_pose(
+        self,
+        object_name: str,
+        position,
+        orientation,
+        use_gravity: bool = True,
+    ) -> None:
+        """No-op on real hardware — physical objects can't be teleported."""
+        pass
+
+    def get_joint_state(self) -> np.ndarray:
+        state = self.get_state()
+        gripper = state.gripper_pos()
+        all_dofs = np.concatenate([state.joints(), np.array([gripper])])
+        return all_dofs
+
+    def command_joint_state(self, joint_state: np.ndarray) -> None:
+        if len(joint_state) == 5:
+            self.set_command(joint_state, None)
+        elif len(joint_state) == 6:
+            self.set_command(joint_state[:5], joint_state[5])
+        else:
+            raise ValueError(
+                f"Invalid joint state: {joint_state}, len={len(joint_state)}"
+            )
+
+    def stop(self):
+        self.running = False
+        if self.robot is not None:
+            self.robot.disconnect()
+        if self.command_thread is not None:
+            self.command_thread.join()
+
+    # ------------------------------------------------------------------ #
+    # Init                                                                 #
+    # ------------------------------------------------------------------ #
+
+    def __init__(
+        self,
+        ip: str = "192.168.123.52",  # IP del xArm5 en la red IoT_v3
+        real: bool = True,
+        control_frequency: float = 30.0,
+        max_delta: float = DEFAULT_MAX_DELTA,
+    ):
+        print(f"[XArmRobot] Connecting to xArm5 at {ip}")
+        self.real = real
+        self.max_delta = max_delta
+
+        # Gripper cache: se actualiza cada GRIPPER_CACHE_STEPS pasos
+        # para no saturar el bus de comunicación (igual que en Gello)
+        self._gripper_counter = 0
+        self._cached_gripper_pos = 0.0
+        self._last_sent_gripper = -1.0   # evita envíos redundantes al gripper
+
+        if real:
+            from xarm.wrapper import XArmAPI
+            self.robot = XArmAPI(ip, is_radian=True)
+        else:
+            self.robot = None
+
+        self._control_frequency = control_frequency
+        self._clear_error_states()
+        self._set_gripper_position(self.GRIPPER_OPEN)
+
+        self.last_state_lock = threading.Lock()
+        self.target_command_lock = threading.Lock()
+        self.last_state = self._update_last_state()
+        self.target_command = {
+            "joints": self.last_state.joints(),
+            "gripper": 0,
+        }
+
+        self.running = True
+        self.command_thread = None
+        if real:
+            self.command_thread = threading.Thread(
+                target=self._robot_thread, daemon=True
+            )
+            self.command_thread.start()
+
+    # ------------------------------------------------------------------ #
+    # State / command                                                      #
+    # ------------------------------------------------------------------ #
+
+    def get_state(self) -> RobotState:
+        with self.last_state_lock:
+            return self.last_state
+
+    def set_command(self, joints: np.ndarray, gripper: Optional[float] = None) -> None:
+        with self.target_command_lock:
+            self.target_command = {
+                "joints": joints,
+                "gripper": gripper,
+            }
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers                                                     #
+    # ------------------------------------------------------------------ #
+
+    def _clear_error_states(self):
+        if self.robot is None:
+            return
+        self.robot.clean_error()
+        self.robot.clean_warn()
+        self.robot.motion_enable(True)
+        time.sleep(1)
+        self.robot.set_mode(1)
+        time.sleep(1)
+        self.robot.set_collision_sensitivity(0)
+        time.sleep(1)
+        self.robot.set_state(state=0)
+        time.sleep(1)
+        self.robot.set_gripper_enable(True)
+        time.sleep(1)
+        self.robot.set_gripper_mode(0)
+        time.sleep(1)
+        self.robot.set_gripper_speed(3000)
+        time.sleep(1)
+
+    def _get_gripper_pos(self) -> float:
+        if self.robot is None:
+            return 0.0
+        code, gripper_pos = self.robot.get_gripper_position()
+        while code != 0 or gripper_pos is None:
+            print(f"[XArmRobot] Error code {code} in get_gripper_position(). {gripper_pos}")
+            time.sleep(0.001)
+            code, gripper_pos = self.robot.get_gripper_position()
+            if code == 22:
+                self._clear_error_states()
+
+        normalized = (gripper_pos - self.GRIPPER_OPEN) / (
+            self.GRIPPER_CLOSE - self.GRIPPER_OPEN
+        )
+        return float(normalized)
+
+    def _set_gripper_position(self, pos: int) -> None:
+        if self.robot is None:
+            return
+        self.robot.set_gripper_position(pos, wait=False)
+
+    # ------------------------------------------------------------------ #
+    # Control thread                                                       #
+    # ------------------------------------------------------------------ #
+
+    def _robot_thread(self):
+        rate = Rate(duration=1 / self._control_frequency)
+        step_times = []
+        count = 0
+
+        while self.running:
+            s_t = time.time()
+
+            self.last_state = self._update_last_state()
+
+            with self.target_command_lock:
+                joint_delta = np.array(
+                    self.target_command["joints"] - self.last_state.joints()
+                )
+                gripper_command = self.target_command["gripper"]
+
+            norm = np.linalg.norm(joint_delta)
+            delta = joint_delta / norm * self.max_delta if norm > self.max_delta else joint_delta
+
+            self._set_position(self.last_state.joints() + delta)
+
+            if gripper_command is not None:
+                # Solo envía si cambió más del 2 % (evita spam al gripper)
+                if abs(gripper_command - self._last_sent_gripper) > 0.02:
+                    target_pos = self.GRIPPER_OPEN + gripper_command * (
+                        self.GRIPPER_CLOSE - self.GRIPPER_OPEN
+                    )
+                    self._set_gripper_position(int(target_pos))
+                    self._last_sent_gripper = gripper_command
+
+            self.last_state = self._update_last_state()
+
+            rate.sleep()
+            step_times.append(time.time() - s_t)
+            count += 1
+            if count % 1000 == 0:
+                frequency = 1 / np.mean(step_times)
+                print(
+                    f"[XArmRobot] Low Level Frequency - "
+                    f"mean: {frequency:10.3f}, "
+                    f"std: {np.std(step_times):10.3f}, "
+                    f"min: {np.min(step_times):10.3f}, "
+                    f"max: {np.max(step_times):10.3f}"
+                )
+                step_times = []
+
+    def _update_last_state(self) -> RobotState:
+        with self.last_state_lock:
+            if self.robot is None:
+                return RobotState(0, 0, 0, 0, 0, 0, 0, 0, 0, np.zeros(3))
+
+            # Actualiza el gripper cada 10 pasos (caché de Gello)
+            self._gripper_counter += 1
+            if self._gripper_counter >= 10:
+                self._cached_gripper_pos = self._get_gripper_pos()
+                self._gripper_counter = 0
+
+            gripper_pos = self._cached_gripper_pos
+
+            code, servo_angle = self.robot.get_servo_angle(is_radian=True)
+            while code != 0:
+                print(f"[XArmRobot] Error code {code} in get_servo_angle().")
+                self._clear_error_states()
+                code, servo_angle = self.robot.get_servo_angle(is_radian=True)
+
+            code, cart_pos = self.robot.get_position_aa(is_radian=True)
+            while code != 0:
+                print(f"[XArmRobot] Error code {code} in get_position_aa().")
+                self._clear_error_states()
+                code, cart_pos = self.robot.get_position_aa(is_radian=True)
+
+            cart_pos = np.array(cart_pos)
+            aa = cart_pos[3:]
+            cart_pos[:3] /= 1000  # mm -> m
+
+            return RobotState.from_robot(
+                cart_pos,
+                servo_angle,
+                gripper_pos,
+                aa,
+            )
+
+    def _set_position(self, joints: np.ndarray) -> None:
+        if self.robot is None:
+            return
+        ret = self.robot.set_servo_angle_j(joints, wait=False, is_radian=True)
+        if ret in [1, 9]:
+            self._clear_error_states()
+
+    # ------------------------------------------------------------------ #
+    # Observations (interfaz SplatSim)                                     #
+    # ------------------------------------------------------------------ #
+
+    def get_observations(self) -> Dict[str, np.ndarray]:
+        state = self.get_state()
+        pos_quat = np.concatenate([state.cartesian_pos(), state.quat()])
+        joints = self.get_joint_state()
+
+        # Estado cartesiano: [x, y, z, roll, pitch, yaw, gripper]
+        # Igual al formato que usa la clase base del sim (sim_robot_pybullet_base.py)
+        # El xArm devuelve axis-angle en cart_pos[3:], lo convertimos a euler
+        aa = state.aa  # (3,) axis-angle
+        aa_norm = np.linalg.norm(aa)
+        if aa_norm > 1e-6:
+            from pyquaternion import Quaternion
+            axis = aa / aa_norm
+            Q = Quaternion(axis=axis, angle=aa_norm)
+            quat_xyzw = np.array([Q.x, Q.y, Q.z, Q.w])
+        else:
+            quat_xyzw = np.array([0.0, 0.0, 0.0, 1.0])
+
+        # Convertir quaternion a euler usando pyquaternion
+        import math
+        x, y, z, w = quat_xyzw
+        roll  = math.atan2(2*(w*x + y*z), 1 - 2*(x*x + y*y))
+        pitch = math.asin(max(-1.0, min(1.0, 2*(w*y - z*x))))
+        yaw   = math.atan2(2*(w*z + x*y), 1 - 2*(y*y + z*z))
+        euler = np.array([roll, pitch, yaw])
+
+        cart_state = np.concatenate([
+            state.cartesian_pos(),   # (3,) xyz en metros
+            euler,                   # (3,) roll, pitch, yaw
+            [state.gripper_pos()],   # (1,) gripper normalizado [0,1]
+        ])  # → (7,)
+
+        return {
+            "joint_positions": joints,        # (6,) : 5 joints + gripper
+            "joint_velocities": joints,
+            "ee_pos_quat": pos_quat,           # (7,) : xyz + xyzw
+            "gripper_position": np.array(state.gripper_pos()),
+            "state": cart_state,              # (7,) : x, y, z, roll, pitch, yaw, gripper
+        }
+
+
+# ------------------------------------------------------------------ #
+# Quick test                                                           #
+# ------------------------------------------------------------------ #
+
+def main():
+    ip = "192.168.123.52"
+    robot = XArmRobot(ip)
+    time.sleep(1)
+    print(robot.get_state())
+    time.sleep(1)
+    print(robot.get_state())
+    print("end")
+    robot.stop()
+
+
+if __name__ == "__main__":
+    main()

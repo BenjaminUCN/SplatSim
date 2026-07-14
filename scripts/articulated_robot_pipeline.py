@@ -253,15 +253,15 @@ def main(args):
     coordinate_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.1)
 
     # Open side by side view for original and new point clouds
-    gui.Application.instance.initialize()
+    #gui.Application.instance.initialize()
     # Combine geometries
     pcd_with_frame = [pcd, coordinate_frame]
     new_pcd_with_frame = [new_pcd, coordinate_frame]
     # Register windows
-    create_window(gui.Application.instance, "Original Point Cloud", pcd_with_frame, 50, 50)
-    create_window(gui.Application.instance, "New Point Cloud", new_pcd_with_frame, 900, 50)
+    #create_window(gui.Application.instance, "Original Point Cloud", pcd_with_frame, 50, 50)
+    #create_window(gui.Application.instance, "New Point Cloud", new_pcd_with_frame, 900, 50)
     # Run app (blocks until all windows closed)
-    gui.Application.instance.run()
+    #gui.Application.instance.run()
 
     #save labels
     labels_fn = f"data/labels_path/{args.robot_name}_labels.npy"
