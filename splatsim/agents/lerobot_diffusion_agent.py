@@ -14,6 +14,9 @@ from lerobot.datasets import LeRobotDatasetMetadata
 from lerobot.policies import make_pre_post_processors
 from lerobot.policies.utils import build_inference_frame
 
+from image_classifier import SimpleCNN
+from torchvision import transforms
+
 # Constants from config.json
 _IMAGE_KEY   = "observation.images.base_rgb"
 _SIM_OBS_KEY = "base_rgb"
@@ -40,7 +43,7 @@ class LeRobotDiffusionAgent:
     def __init__(
         self,
         # checkpoint: str = "LuEduSoHu/robot_learning_tutorial_diffusion_0528_1804",
-        checkpoint: str = "LuEduSoHu/robot_learning_tutorial/diffusion_0603_1702",
+        checkpoint: str = "LuEduSoHu/robot_learning_tutorial_diffusion_0619_1723",
         device: str = "cuda",
         n_action_steps: int | None = None,
     ):
@@ -50,12 +53,22 @@ class LeRobotDiffusionAgent:
         self._action_queue: list[np.ndarray] = []
         
         # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion"
-        checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0603_1702"
+        # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0610_0210"
+        # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0605_1802" # 2 camaras
+        checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0619_1723"
+        
+        
         
         # dataset_id = "LuEduSoHu/25051601"
         # dataset_root = "/home/magister/lerobot/splatsim_test_data/0529_1607"
-        dataset_id = "LuEduSoHu/splatsim_lerobot_splatsim_10fps_260601_1756"
-        dataset_root = "/home/magister/lerobot/splatsim_test_data/0601_1755"
+        # dataset_id = "LuEduSoHu/splatsim_xarm5_lite_10fps_260610_0210"
+        # dataset_root = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260610_0210"
+        # dataset_id = "LuEduSoHu/splatsim_lerobot_splatsim_10fps_260605_1724"
+        # dataset_root = "/home/magister/lerobot/splatsim_test_data/0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724"
+        dataset_id = "LuEduSoHu/splatsim_xarm5_lite_10fps_260619_1723"
+        dataset_root = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260619_1723"
+        
+        
         
         self._load_ik_dummy_robot()
         self._load_diffusion_policy_model(checkpoint, dataset_id, dataset_root)
@@ -105,6 +118,19 @@ class LeRobotDiffusionAgent:
         self.joint_names,
         ) = self.get_revolute_joint_limits(robot_id=self.dummy_robot)
 
+    def _load_image_classifier(self):
+        
+        self.classifier_model = SimpleCNN().cuda()
+        
+        transform = transforms.Compose([
+            transforms.Resize((128, 128)),
+            transforms.ToTensor(),
+        ])
+        
+        checkpoint_path='/home/magister/fork-splatsim/image_classifier/best_model.pth'
+        
+        self.classifier_model.load_state_dict(torch.load(checkpoint_path))
+        self.classifier_model.eval()
 
     def _load(self, checkpoint: str):
         """Load DiffusionPolicy from HF Hub or local path."""
@@ -132,14 +158,22 @@ class LeRobotDiffusionAgent:
         state = obs["state"]
         state = self.safe_to_numpy(state).astype(np.float32).flatten()
         
+        # for img_key in [img_key for img_key in obs.keys() if img_key.endswith("_rgb")]:
+        #     camera_image = obs[img_key]
+        #     camera_image = np.transpose(camera_image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
+        #     camera_image = (camera_image * 255).astype(np.uint8)
         
         base_image = obs["base_rgb"]
-        base_image = np.transpose(base_image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
-        base_image = (base_image * 255).astype(np.uint8)
+        if hasattr(base_image, 'detach'):
+            base_image = np.transpose(base_image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
+            base_image = (base_image * 255).astype(np.uint8)
+            base_image = cv2.cvtColor(base_image, cv2.COLOR_BGR2RGB)
         
         wrist_image = obs["wrist_rgb"]
-        wrist_image = np.transpose(wrist_image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
-        wrist_image = (wrist_image * 255).astype(np.uint8)
+        if hasattr(wrist_image, 'detach'):
+            wrist_image = np.transpose(wrist_image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
+            wrist_image = (wrist_image * 255).astype(np.uint8)
+            base_image = cv2.cvtColor(base_image, cv2.COLOR_BGR2RGB)
         
         frame = {
             "base_rgb": base_image,
@@ -263,13 +297,14 @@ class LeRobotDiffusionAgent:
         ee_pose = self.ee_pose
         ee_rot = self.ee_rot
         
+        ee_quat = p.getQuaternionFromEuler(ee_rot)
         print(f"ee_pose: ({ee_pose[0]:.3f}, {ee_pose[1]:.3f}, {ee_pose[2]:.3f})")
         print(f"ee_rot: ({ee_rot[0]:.3f}, {ee_rot[1]:.3f}, {ee_rot[2]:.3f})")
         
         joints_n = 5
         ee_link_index = 6
         
-        self.draw_pose(ee_pose, ee_rot, life_time=1)
+        self.draw_pose(ee_pose, ee_quat, life_time=1)
         
         dummy_joint_pos = p.calculateInverseKinematics(
             self.dummy_robot,

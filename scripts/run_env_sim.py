@@ -38,7 +38,8 @@ class Args:
     base_camera_port: int = 5001
     hostname: str = "127.0.0.1"
     robot_type: str = None  # only needed for quest agent or spacemouse agent
-    hz: int = 100
+    #hz: int = 100
+    hz: int = 30
     start_joints: Optional[Tuple[float, ...]] = None
 
     gello_port: Optional[str] = None
@@ -52,7 +53,8 @@ class Args:
     convert_to_lerobot: bool = False
     lerobot_input_dir: Optional[str] = None  # si None, usa data_dir/agent automáticamente
     lerobot_output_dir: str = "~/datasets/splatsim_v3"
-    lerobot_fps: int = 20
+    #lerobot_fps: int = 20
+    lerobot_fps: int = 30
 
     # Camera flags
     no_wrist_camera: bool = False
@@ -65,8 +67,8 @@ def main(args):
     else:
         camera_clients = {
             # you can optionally add camera nodes here for imitation learning purposes
-            # "wrist": ZMQClientCamera(port=args.wrist_camera_port, host=args.hostname),
-            # "base": ZMQClientCamera(port=args.base_camera_port, host=args.hostname),
+            #"wrist": ZMQClientCamera(port=args.wrist_camera_port, host=args.hostname),
+            #"base": ZMQClientCamera(port=args.base_camera_port, host=args.hostname),
         }
         robot_client = ZMQClientRobot(port=args.robot_port, host=args.hostname)
     env = RobotEnv(robot_client, control_rate_hz=args.hz, camera_dict=camera_clients)
@@ -387,15 +389,20 @@ def main(args):
             if img_obs_name not in obs or obs[img_obs_name] is None:
                 continue
             frame = obs[img_obs_name]
-            frame = np.transpose(frame.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
-            frame = (frame * 255).astype(np.uint8)
+            
+            if hasattr(frame, 'detach'):
+                frame = np.transpose(frame.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
+                frame = (frame * 255).astype(np.uint8)
+
             cv2.imshow(img_obs_name, cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
             cv2.waitKey(1)
 
         loop_end = time.time()
         loop_duration = loop_end - loop_start
         # Keep the time locked at a fixed rate
-        sleep_time = max(0, (1 / 50) - (loop_duration))
+        #sleep_time = max(0, (1 / 50) - (loop_duration))
+        #sleep_time = max(0, (args.hz/30) - (loop_duration))
+        sleep_time = max(0, (1 /args.hz) - (loop_duration))
         if sleep_time > 0:
             time.sleep(sleep_time)
     except KeyboardInterrupt:

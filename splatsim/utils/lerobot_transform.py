@@ -317,10 +317,12 @@ def create_dataset(
     )
 
     date = datetime.now().strftime('%y%m%d_%H%M')
+    date = "260704_1203"
     hf_user = "LuEduSoHu"
     repo_id = f"{hf_user}/splatsim_{config.robot_type}_{config.fps}fps_{date}"
     root_dir = config.output_dir / repo_id.split("/")[1]
-
+    print(f"Creating LeRobot dataset with config: \nrepo_id: '{repo_id}'\nroot_dir: '{root_dir}'\nrobot_type: {config.robot_type}\nfps: {config.fps}\nfeatures: {features}\nuse_videos: {config.use_videos}")
+    
     dataset = LeRobotDataset.create(
         repo_id=repo_id,
         root=root_dir,
@@ -488,16 +490,35 @@ def process_episode(
         # pkl 2 base 3 wrist 4
         
         # pkl n base 2n-1 wrist 2n (if wrist_offset=1)
+        
+        # pkl 1 base 0 wrist 1
+        # pkl 2 base 2 wrist 3
+        # pkl 3 base 4 wrist 5
+        # pkl n base 2(n-1) wrist 2(n-1)+1
 
         for key in image_keys:
-            image_idx = idx
-
-            if key == "wrist_rgb":
-                image_idx = 2*idx
+            image_idx = idx - 1 #Para datasets con una sola camara, o datasets creados con replay
+            # image_idx = idx 
+            
             if key == "base_rgb":
-                image_idx = 2*idx - 1
+                base_idx = 2*(idx-1)
+                img_path = find_image(image_dir, key, base_idx)
+                if img_path is None:
+                    img_path = find_image(image_dir, key, base_idx + 1)
 
-            img_path = find_image(image_dir, key, image_idx)
+            elif key == "wrist_rgb":
+                wrist_idx = 2*(idx-1) + 1
+                img_path = find_image(image_dir, key, wrist_idx)
+                if img_path is None:
+                    img_path = find_image(image_dir, key, wrist_idx + 1)
+
+            #if key == "wrist_rgb":
+            #    image_idx = 2*(idx-1) + 1
+            #if key == "base_rgb":
+            #    # image_idx = 2*idx - 1
+            #    image_idx = 2*(idx-1)
+
+            #img_path = find_image(image_dir, key, image_idx)
 
             if img_path is None:
                 valid = False
@@ -556,6 +577,8 @@ def run_conversion(config: ConversionConfig):
 
     state_dim, action_dim = infer_state_action_dims(first_episode)
 
+    # image_keys = ["base_rgb"]
+    
     print("\nDetected configuration:")
     print(f"Image keys : {image_keys}")
 
@@ -615,7 +638,7 @@ def build_parser():
     p.add_argument("--input_dir", type=Path, required=True)
     p.add_argument("--output_dir", type=Path, required=True)
     p.add_argument("--fps", type=int, default=10)
-    p.add_argument("--robot_type", type=str, default="lerobot_splatsim")
+    p.add_argument("--robot_type", type=str, default="xarm5_lite")
     p.add_argument("--wrist_offset", type=int, default=None, choices=[0, 1])
     p.add_argument("--no_wrist_camera", action="store_true")
     p.add_argument("--use_images", action="store_true")

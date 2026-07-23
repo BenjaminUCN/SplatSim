@@ -10,15 +10,17 @@ from gello.zmq_core.camera_node import ZMQClientCamera
 @dataclass
 class Args:
     ports: Tuple[int, ...] = (5000,)
-    hostname: str = "127.0.0.1"
+    # hostname: str = "127.0.0.1"
     # hostname: str = "128.32.175.167"
+    hostname: str = "192.168.123.30"
 
 
 def main(args):
-    cameras = []
     import cv2
-
-    images_display_names = []
+    
+    cameras: list[ZMQClientCamera] = []
+    images_display_names: list[str] = []
+    
     for port in args.ports:
         cameras.append(ZMQClientCamera(port=port, host=args.hostname))
         images_display_names.append(f"image_{port}")

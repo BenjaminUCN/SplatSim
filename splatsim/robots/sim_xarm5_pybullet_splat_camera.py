@@ -44,8 +44,9 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         ]
     }
     # Cada cuántos ticks de serve_loop se guarda un frame.
-    # A 240 Hz y RECORD_EVERY=12 → ~20 fps de grabación.
-    RECORD_EVERY = 12
+    # A 240 Hz y RECORD_EVERY=8 → ~30 fps de grabación.
+    #RECORD_EVERY = 8
+    RECORD_EVERY = 1
 
 
     def __init__(self, traj_save_path: str = None, move_apple: bool = False, **kwargs):
@@ -65,7 +66,7 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self._remove_wall()
         #self._disable_robot_apple_collision()
         self._disable_apple_gravity()
-        self._lower_floor(z=-0.2)
+        self._lower_floor(z=-0.7)
         self.setup_base_camera()
         self.setup_wrist_camera()
         self.setup_apple_camera()
@@ -79,13 +80,17 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             self.prev_slider_x = 0.3
             self.prev_slider_y = 0.2
             self.prev_slider_z = 0.1
-            # self.apple_x = self.pybullet_client.addUserDebugParameter("apple_x", -1.0, 1.0, self.prev_slider_x)
-            # self.apple_y = self.pybullet_client.addUserDebugParameter("apple_y", -1.0, 1.0, self.prev_slider_y)
-            # self.apple_z = self.pybullet_client.addUserDebugParameter("apple_z", -1.0, 1.0, self.prev_slider_z)
+            self.apple_x = self.pybullet_client.addUserDebugParameter("apple_x", -0.9, -0.3, self.prev_slider_x)
+            self.apple_y = self.pybullet_client.addUserDebugParameter("apple_y", -0.8,  0.8, self.prev_slider_y)
+            self.apple_z = self.pybullet_client.addUserDebugParameter("apple_z", -0.5, 0.6, self.prev_slider_z)            
+
+            #self.apple_x = self.pybullet_client.addUserDebugParameter("apple_x", -2.0, 2.0, self.prev_slider_x)
+            #self.apple_y = self.pybullet_client.addUserDebugParameter("apple_y", -2.0, 2.0, self.prev_slider_y)
+            #self.apple_z = self.pybullet_client.addUserDebugParameter("apple_z", -2.0, 2.0, self.prev_slider_z)
             
-            self.apple_x = self.pybullet_client.addUserDebugParameter("apple_x", 0.7, 1.0, self.prev_slider_x)
-            self.apple_y = self.pybullet_client.addUserDebugParameter("apple_y", -0.4, 0.4, self.prev_slider_y)
-            self.apple_z = self.pybullet_client.addUserDebugParameter("apple_z", -0.04, 0.4, self.prev_slider_z)
+            # self.apple_x = self.pybullet_client.addUserDebugParameter("apple_x", 0.7, 1.0, self.prev_slider_x)
+            # self.apple_y = self.pybullet_client.addUserDebugParameter("apple_y", -0.4, 0.4, self.prev_slider_y)
+            # self.apple_z = self.pybullet_client.addUserDebugParameter("apple_z", -0.04, 0.4, self.prev_slider_z)
 
             self.set_random_apple_position_btn = self.pybullet_client.addUserDebugParameter("Set Random Apple Position", 1, 0, 0)
             self.prev_set_random_apple_position_btn_val = 0
@@ -138,7 +143,8 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self._is_recording = True
         print(
             f"[Recording] ▶ Grabando en {traj_folder}  "
-            f"(cada {self.RECORD_EVERY} ticks ≈ {240 // self.RECORD_EVERY} fps)"
+            #f"(cada {self.RECORD_EVERY} ticks ≈ {240 // self.RECORD_EVERY} fps)"
+            f"(cada {self.RECORD_EVERY} ticks ≈ {30 // self.RECORD_EVERY} fps)"
         )
 
     def _stop_recording(self) -> None:
@@ -211,8 +217,8 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         colmap_id = 2  # distinto al de wrist/base
 
         # --- Offset de la cámara respecto al centro de la manzana ---
-        offset_xyz = np.array([0.0, 0.0, 0.0])   # 15 cm arriba del centro
-        offset_rpy = [0.0, 0.0, 0.0]            # mirando hacia abajo
+        offset_xyz = np.array([0.0, 0.0, 0.0])  
+        offset_rpy = [-1.562, 0.0, -1.562]           
 
         # Pose de la manzana en world frame PyBullet
         pos_apple, quat_apple = self.pybullet_client.getBasePositionAndOrientation(
@@ -258,10 +264,10 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
 
         T_wc = torch.linalg.inv(Trans_wo_scale)[:3, 3]
 
-        FoVx = 1.375955594372348
-        FoVy = 1.1025297299614814
-        image_width  = 1280
-        image_height = 720
+        FoVx = 1.2112585 #69.4°
+        FoVy = 0.7417649 #42.5°
+        image_width = 640 #1920
+        image_height = 480 #1080
         image = torch.zeros((3, image_height, image_width)).float()
 
         resolution = (image_width, image_height)
@@ -322,9 +328,12 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         if current_val != self.prev_set_random_apple_position_btn_val:
             self.prev_set_random_apple_position_btn_val = current_val
             print("[xArm5] Setting random apple position.")
-            x = np.random.uniform(0.768, 0.85)
-            y = np.random.uniform(-0.34, 0.36)
-            z = np.random.uniform(-0.02, 0.337)
+            x = np.random.uniform(-0.9, -0.3)
+            y = np.random.uniform(-0.8, 0.8)
+            z = np.random.uniform(-0.5, 0.6)
+            #x = np.random.uniform(0.768, 0.85)
+            #y = np.random.uniform(-0.34, 0.36)
+            #z = np.random.uniform(-0.02, 0.337)
 
             self.set_object_pose(
                 "plastic_apple",
@@ -521,6 +530,18 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         obs = super().get_observations()
         obs["joint_positions"] = self.get_joint_state()
 
+        # --- Pose del end-effector ---
+        #ee_pos, ee_quat = self.get_current_ee_pose()
+        #obs["ee_position"] = np.array(ee_pos)
+        #obs["ee_orientation"] = np.array(ee_quat)  # [x, y, z, w]
+
+        # --- Pose de la apple ---
+        #apple_pos, apple_quat = self.pybullet_client.getBasePositionAndOrientation(
+        #    self.apple_body_id
+        #)
+        #obs["plastic_apple_position"] = np.array(apple_pos)
+        #obs["plastic_apple_orientation"] = np.array(apple_quat)  # [x, y, z, w]
+
         self._last_apple_rgb = obs.get("apple_rgb")
 
         return obs
@@ -538,12 +559,17 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
 
         # Guardar frame si estamos grabando y toca este tick
         if self._is_recording:
+            MAX_DURATION = 2 # seconds
+            if self._record_tick >= (240 * MAX_DURATION):
+                self._stop_recording()
+                return
             if self._record_tick % self.RECORD_EVERY == 0:
                 self._save_current_frame()
             self._record_tick += 1
 
         self.pybullet_client.stepSimulation()
-        time.sleep(1 / 240)
+        time.sleep(1 / 30)
+        #time.sleep(1 / 240)
         
         # Mostrar última apple_rgb ya renderizada por get_observations
         if hasattr(self, '_last_apple_rgb') and self._last_apple_rgb is not None:
@@ -728,8 +754,12 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         return camera
     
     def setup_base_camera(self):
-        init_x, init_y, init_z   = 0.205,  0.0, 0.158
-        init_r, init_pi, init_yaw =  -1.562, 0.0, -1.558
+        #Valores de camara base para xarm5_lite_plant_v1
+        #init_x, init_y, init_z   = 0.205,  0.0, 0.158
+        #init_r, init_pi, init_yaw =  -1.562, 0.0, -1.558
+        #Valores de camara base para xarm5_lite_plant_v2
+        init_x, init_y, init_z   = -0.079,  0.0, 0.142 
+        init_r, init_pi, init_yaw =  -1.562, 0.0, -4.708
 
         self.base_camera_position =  (init_x, init_y, init_z)
         self.base_camera_rotation =  (0, 0, 0, 1)
@@ -789,6 +819,8 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         # Build transform: eef -> camera
         self.base_camera_position = (x, y, z)
         self.base_camera_rotation = self.pybullet_client.getQuaternionFromEuler([roll, pitch, yaw])
+        
+        self.draw_pose([x,y,z], self.base_camera_rotation, life_time=0)
         #self.base_camera_rotation = euler_to_matrix(roll, pitch, yaw)
 
         #print("------------------------")
@@ -804,6 +836,36 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
                 #f'rpy="{roll:.4f} {pitch:.4f} {yaw:.4f}"/>')
             #print("--------------------------------\n")
 
+    def draw_pose(self, position, quaternion, length=0.1, life_time=0):
+        if (hasattr(self, "prev_pose_pos") and hasattr(self, "prev_pose_quat")):
+            if self.prev_pose_pos == position and self.prev_pose_quat == quaternion: 
+                return
+        
+        rot_matrix = p.getMatrixFromQuaternion(quaternion)
+
+        x_axis = [rot_matrix[0], rot_matrix[3], rot_matrix[6]]
+        y_axis = [rot_matrix[1], rot_matrix[4], rot_matrix[7]]
+        z_axis = [rot_matrix[2], rot_matrix[5], rot_matrix[8]]
+
+        x_end = [position[i] + length * x_axis[i] for i in range(3)]
+        y_end = [position[i] + length * y_axis[i] for i in range(3)]
+        z_end = [position[i] + length * z_axis[i] for i in range(3)]
+        
+        if (
+            not hasattr(self, "xline_id") or
+            not hasattr(self, "yline_id") or
+            not hasattr(self, "zline_id")
+        ): 
+            self.xline_id = p.addUserDebugLine(position, x_end, [1, 0, 0], 2, lifeTime=life_time)
+            self.yline_id = p.addUserDebugLine(position, y_end, [0, 1, 0], 2, lifeTime=life_time)
+            self.zline_id = p.addUserDebugLine(position, z_end, [0, 0, 1], 2, lifeTime=life_time)
+
+        self.xline_id = p.addUserDebugLine(position, x_end, [1, 0, 0], 2, lifeTime=life_time, replaceItemUniqueId=self.xline_id)
+        self.yline_id = p.addUserDebugLine(position, y_end, [0, 1, 0], 2, lifeTime=life_time, replaceItemUniqueId=self.yline_id)
+        self.zline_id = p.addUserDebugLine(position, z_end, [0, 0, 1], 2, lifeTime=life_time, replaceItemUniqueId=self.zline_id)
+
+        self.prev_pose_pos = position
+        self.prev_pose_quat = quaternion
     def get_base_camera(self):
         uid = 0
         colmap_id = 1

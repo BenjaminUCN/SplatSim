@@ -31,7 +31,7 @@ class ReplayTrajectoryAgent(Agent):
         self.traj_index += 1
         print(f"Loading trajectory {self.traj_index + 1}/{len(self.traj_subfolders)}: {self.traj_subfolders[self.traj_index]}")
         if self.save_images:
-            self.image_folder = os.path.join(self.traj_folder, self.traj_subfolders[self.traj_index], 'images_1')
+            self.image_folder = os.path.join(self.traj_folder, self.traj_subfolders[self.traj_index], 'image_1')
             os.makedirs(self.image_folder, exist_ok=True)
 
             # Delete existing images in the folder if any
