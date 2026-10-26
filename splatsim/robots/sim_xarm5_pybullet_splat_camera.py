@@ -558,9 +558,10 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self.check_reset_joints()
 
         # Guardar frame si estamos grabando y toca este tick
+        LOOP_HZ = 240
         if self._is_recording:
             MAX_DURATION = 2 # seconds
-            if self._record_tick >= (240 * MAX_DURATION):
+            if self._record_tick >= (LOOP_HZ * MAX_DURATION):
                 self._stop_recording()
                 return
             if self._record_tick % self.RECORD_EVERY == 0:
@@ -568,7 +569,7 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             self._record_tick += 1
 
         self.pybullet_client.stepSimulation()
-        time.sleep(1 / 30)
+        time.sleep(1 / LOOP_HZ)
         #time.sleep(1 / 240)
         
         # Mostrar última apple_rgb ya renderizada por get_observations
@@ -707,12 +708,12 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         Trans_cam_splat = torch.matmul(Trans_cam_splat, R_fix)
 
         # Parámetros intrínsecos — ajusta según tu cámara real
-        #FoVx = 1.375955594372348
-        #FoVy = 1.1025297299614814
+        FoVx = 1.375955594372348
+        FoVy = 1.1025297299614814
         #image_width = 640
         #image_height = 480
-        FoVx = 1.2112585 #69.4°
-        FoVy = 0.7417649 #42.5°
+        # FoVx = 1.2112585 #69.4°
+        # FoVy = 0.7417649 #42.5°
         image_width = 640 #1920
         image_height = 480 #1080
         image_name = "wrist_rgb"

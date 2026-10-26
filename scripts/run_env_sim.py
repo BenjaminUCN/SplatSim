@@ -401,7 +401,6 @@ def main(args):
         loop_duration = loop_end - loop_start
         # Keep the time locked at a fixed rate
         #sleep_time = max(0, (1 / 50) - (loop_duration))
-        #sleep_time = max(0, (args.hz/30) - (loop_duration))
         sleep_time = max(0, (1 /args.hz) - (loop_duration))
         if sleep_time > 0:
             time.sleep(sleep_time)
