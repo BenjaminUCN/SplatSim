@@ -7,6 +7,8 @@ SplatSim: Zero-Shot Sim2Real Transfer of RGB Manipulation Policies Using Gaussia
 
 This repository contains the code for the paper "SplatSim". 
 
+> **About this fork:** this fork of [qureshinomaan/SplatSim](https://github.com/qureshinomaan/SplatSim) adapts SplatSim to a **uFactory xArm5 Lite** for robotic tomato harvesting. It adds xArm5 scenes (`xarm5_lite_plant_v*`), a simulation server with base/wrist splat cameras and trajectory recording, a LeRobot diffusion-policy agent and an automated policy evaluation script. See [xArm5 Lite tomato harvesting](#xarm5-lite-tomato-harvesting). The original UR5 instructions below still apply.
+
 ## Installation
 
 ### Clone this repository
@@ -147,6 +149,79 @@ A window should pop up that is a rendering of the robot in the pybullet simulati
 The rendered images for trajectory 0 are saved in `{traj_folder}/0/images_1`, for example `/home/yourusername/data/bc_data/gello/0/images_1`.
 
 Congrats! Your static splat is now being simulated! 🚀
+
+## xArm5 Lite tomato harvesting
+
+### Paths to configure
+
+Several paths are still hardcoded to the original author's machine (`/home/magister/...`). Update them to your own:
+
+| File | What to change |
+|---|---|
+| `configs/object_configs/objects.yaml` | For the `xarm5_lite_plant_v*` entries: `urdf_path` (xArm5 URDF), `source_path` (colmap folder) and `model_path` (gaussian splat output) |
+| `configs/folder_configs.yaml` | `traj_folder`: where recorded trajectories are saved |
+| `splatsim/agents/lerobot_diffusion_agent.py` | `checkpoint` (trained policy), `dataset_id` / `dataset_root` (LeRobot dataset used for normalization stats) and `urdf_path` (xArm5 URDF used for IK) |
+
+Each scene also needs `data/labels_path/<robot_name>_labels.npy` and `data/pcds_path/<robot_name>_pcd.ply`, which are included for `xarm5_lite_plant_v0`–`v3`.
+
+### Run the simulation server
+
+```bash
+python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --move_apple --hz 10
+```
+
+- `--robot_name`: the scene from `objects.yaml` (`xarm5_lite_plant_v3` is the latest).
+- `--move_apple`: adds sliders and a "Set Random Apple Position" button to move the tomato in the PyBullet GUI.
+- `--hz`: the rate at which the client sends commands. **It must match `--hz` of the client** (`run_env_sim.py`, default 30). Each command advances the simulation by exactly `1/hz` seconds, so recorded frames are evenly spaced in simulated time.
+
+The server renders `base_rgb` and `wrist_rgb` from the gaussian splat. The PyBullet GUI also has sliders to tune the base camera pose and a "Reset Robot Joints" button. Camera FoV, recording length and other constants live in `splatsim/robots/xarm/config.py`.
+
+### Record demonstrations
+
+With the server running and a client sending commands (e.g. `run_env_sim.py --agent gello` or a policy), type in the **server** terminal:
+
+- `r` + Enter: start recording
+- `s` + Enter: stop recording (it also stops automatically after `MAX_RECORD_SECONDS` of simulated time, 2 s by default)
+
+One frame is saved per command received, in `traj_folder`:
+
+```
+<traj_folder>/000/00001.pkl, 00002.pkl, ...        # observations: joints, ee state, object poses, sim_time
+<traj_folder>/000/image_1/base_rgb_00001.png, ...  # one image per camera and frame
+```
+
+Check that recordings have a constant time step:
+```bash
+python scripts/check_recording_timing.py [traj_folder]
+```
+
+### Run the diffusion policy
+
+Start the server as above, then run the policy with the same `--hz` it was trained at (10 for the current datasets):
+```bash
+python scripts/run_env_sim.py --agent lerobot_diffusion --hz 10
+```
+
+### Automated policy trials
+
+`scripts/run_policy_trials.py` evaluates the policy over a grid of tomato positions without manual timing. It loads the policy once, then for each position and trial it resets the arm, places the tomato, resets the policy, records the rollout and stops after a fixed simulated duration.
+
+1. Edit `APPLE_GRID` at the top of `scripts/run_policy_trials.py` with the tomato positions `(x, y, z)` to test.
+2. Start the server (no `--move_apple` needed):
+   ```bash
+   python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --hz 10
+   ```
+3. Run the trials:
+   ```bash
+   python scripts/run_policy_trials.py --trials-per-position 3 --trial-seconds 15
+   python scripts/run_policy_trials.py --positions 0 4 8 --trials-per-position 1   # only some positions
+   ```
+
+Results are saved in `~/data/policy_trials/<date>/` (change with `--output-dir`):
+- `000/`, `001/`, ...: one recording per trial, in the same format as demonstrations, plus a `meta.json` with the tomato position and trial index.
+- `trials.csv`: one row per trial with the number of frames and the final and minimum distance between the end effector and the tomato.
+
+Press Ctrl+C to stop early; the current recording is closed and the arm is reset.
 
 # Optional
 
@@ -325,7 +400,7 @@ python scripts/run_env_sim.py --agent replay_trajectory_and_save
 
 ## Visualizing a trained policy in the Splat Sim
 
-TODO for diffusion policy
+For the xArm5 LeRobot diffusion policy, see [Run the diffusion policy](#run-the-diffusion-policy) and [Automated policy trials](#automated-policy-trials).
 
 ## A list of TODOs
 
