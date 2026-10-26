@@ -238,10 +238,7 @@ def infer_image_shape(
 
 def infer_state_action_dims(episode_dir: Path) -> tuple[int, int]:
 
-    pkl_path = sorted(
-        episode_dir.glob("*.pkl"),
-        key=lambda p: int(p.stem)
-    )[0]
+    pkl_path = min(episode_dir.glob("*.pkl"), key=lambda p: int(p.stem))
 
     data = load_pickle(pkl_path)
 
@@ -317,7 +314,7 @@ def create_dataset(
     )
 
     date = datetime.now().strftime('%y%m%d_%H%M')
-    date = "260704_1203"
+    # date = "260726_1024"
     hf_user = "LuEduSoHu"
     repo_id = f"{hf_user}/splatsim_{config.robot_type}_{config.fps}fps_{date}"
     root_dir = config.output_dir / repo_id.split("/")[1]

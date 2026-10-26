@@ -41,7 +41,7 @@ class LeRobotDiffusionAgent:
     def __init__(
         self,
         # checkpoint: str = "LuEduSoHu/robot_learning_tutorial_diffusion_0528_1804",
-        checkpoint: str = "LuEduSoHu/robot_learning_tutorial_diffusion_0619_1723",
+        checkpoint: str = "LuEduSoHu/robot_learning_tutorial_diffusion_0726_1024",
         device: str = "cuda",
         n_action_steps: int | None = None,
     ):
@@ -53,7 +53,8 @@ class LeRobotDiffusionAgent:
         # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion"
         # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0610_0210"
         # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0605_1802" # 2 camaras
-        checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0619_1723"
+        # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0726_1024"
+        checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_1021_1640"
         
         
         
@@ -63,8 +64,10 @@ class LeRobotDiffusionAgent:
         # dataset_root = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260610_0210"
         # dataset_id = "LuEduSoHu/splatsim_lerobot_splatsim_10fps_260605_1724"
         # dataset_root = "/home/magister/lerobot/splatsim_test_data/0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724"
-        dataset_id = "LuEduSoHu/splatsim_xarm5_lite_10fps_260619_1723"
-        dataset_root = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260619_1723"
+        # dataset_id = "LuEduSoHu/splatsim_xarm5_lite_10fps_260726_1024"
+        # dataset_root = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260726_1024"
+        dataset_id = "LuEduSoHu/splatsim_xarm5_lite_10fps_261020_2010"
+        dataset_root = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010"
         
         
         
