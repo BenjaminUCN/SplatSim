@@ -100,6 +100,31 @@ xarm5_lite_plant_v2:
     - [0.0, 0.0]
     - [0.0, 0.0]
   use_gripper: true
+xarm5_lite_plant_v3:
+  urdf_path:
+  - /home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: /home/magister/data/Colmaps/260729_2003
+  model_path: /home/magister/data/Colmaps/260729_2003/output
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.503, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
 robot_iphone:
   transformation:
     matrix:
