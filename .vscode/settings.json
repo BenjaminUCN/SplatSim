@@ -1,0 +1,9 @@
+{
+    "python-envs.defaultEnvManager": "ms-python.python:conda",
+    "python-envs.defaultPackageManager": "ms-python.python:conda",    
+    "python.analysis.extraPaths": [
+        "./submodules/gello_software",
+        "./submodules/gaussian-splatting-wrapper/gaussian_splatting",
+        "./submodules/gaussian-splatting-wrapper"
+    ]
+}
