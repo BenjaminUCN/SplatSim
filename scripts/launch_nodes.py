@@ -203,6 +203,20 @@ def launch_robot_server(args: Args):
             move_apple=args.move_apple,
         )
 
+    elif args.robot == "sim_xarm5_splat_camera_2":
+            from splatsim.robots.xarm.server import XArm5PybulletRobotServerCamera
+    
+            server = XArm5PybulletRobotServerCamera(
+                port=port,
+                host=args.hostname,
+                # camera_names=["base_rgb","wrist_rgb","apple_rgb"],
+                camera_names=["base_rgb","wrist_rgb"],
+                robot_name=args.robot_name,
+                cam_i=347,
+                use_gripper=use_gripper,
+                move_apple=args.move_apple,
+            )
+
     else:
         if args.robot == "xarm":
             from splatsim.robots.xarm_robot import XArmRobot
