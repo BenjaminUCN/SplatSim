@@ -34,3 +34,5 @@ MUJOCO_LOG.TXT
 splatsim/utils/~lerobot/
 splatsim/utils/outputs/
 splatsim/evaluation/metrics
+splatsim/evaluation/metrics_output/
+splatsim/image_classifier/*.pth
