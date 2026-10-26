@@ -5,7 +5,7 @@ import numpy as np
 
 
 class EETrail:
-    def __init__(self, server, color=(1, 0, 0), width=3, min_dist=0.002, max_segments=3000):
+    def __init__(self, server, color=(1, 0, 0), width=3, min_dist=0.002, max_segments=10000):
         self.s = server
         self.color = list(color)
         self.width = width
