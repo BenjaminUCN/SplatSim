@@ -12,10 +12,25 @@ This repository contains the code for the paper "SplatSim".
 ### Clone this repository
 ```bash
 cd ~/code
-git clone --recursive https://github.com/qureshinomaan/SplatSim.git
+git clone --recursive https://github.com/BenjaminUCN/SplatSim.git
 ```
 
 If you accidentally forgot the `--recursive`, run this command to download the files for the `submodules` folder: `git submodule update --init --recursive`
+
+### Submodule forks
+
+This repo depends on modified versions of two submodules, hosted as forks on the `splatsim-xarm5` branch. They are already set in `.gitmodules`, so a recursive clone fetches them automatically:
+
+| Submodule | Fork | Upstream | Changes |
+|---|---|---|---|
+| `submodules/gello_software` | [BenjaminUCN/gello_software](https://github.com/BenjaminUCN/gello_software/tree/splatsim-xarm5) | [wuphilipp/gello_software](https://github.com/wuphilipp/gello_software) | Adds the robot `state` to the observations and skips the RealSense hardware reset on startup |
+| `submodules/pybullet-URDF-models` | [BenjaminUCN/pybullet-URDF-models](https://github.com/BenjaminUCN/pybullet-URDF-models/tree/splatsim-xarm5) | [GPT-RL/pybullet-URDF-models](https://github.com/GPT-RL/pybullet-URDF-models) | Replaces the `plastic_apple` model with a tomato mesh and textures (the name `plastic_apple` is kept) |
+
+If you cloned before the submodules pointed to these forks, update them with:
+```bash
+git submodule sync
+git submodule update --init --recursive
+```
 
 ### Create conda env
 
