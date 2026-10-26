@@ -31,3 +31,6 @@ MUJOCO_LOG.TXT
 
 # build
 **/build/*
+splatsim/utils/~lerobot/
+splatsim/utils/outputs/
+splatsim/evaluation/metrics
