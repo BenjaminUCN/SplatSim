@@ -1,4 +1,5 @@
 """Grabación de trayectorias (.pkl + .png) con control por teclado."""
+import json
 import os
 import pickle
 import shutil
@@ -25,7 +26,8 @@ class TrajectoryRecorder:
 
     def __init__(self, server, max_steps: int, every: int = 1):
         self.s = server
-        self.max_steps = max_steps   # duración máxima en pasos de simulación
+        self.max_steps = max_steps   # duración máxima por defecto, en pasos de simulación
+        self._max_steps = max_steps  # duración máxima de la grabación en curso
         self.every = every
 
         self.active = False
@@ -35,6 +37,7 @@ class TrajectoryRecorder:
         self._pending = False        # hubo un comando y aún no se vio su observación
         self._length = 0             # frames guardados (numera .pkl y .png)
         self._count = 0              # índice de carpeta de la trayectoria
+        self._root = None            # carpeta base de la grabación en curso
 
     # ── teclado ──────────────────────────────────────────────────────────────
     def start_keyboard_listener(self) -> None:
@@ -51,20 +54,32 @@ class TrajectoryRecorder:
     # ── control ──────────────────────────────────────────────────────────────
     @property
     def _folder(self) -> str:
-        return os.path.join(self.s.path, str(self._count).zfill(3))
+        return os.path.join(self._root, str(self._count).zfill(3))
 
-    def start(self) -> None:
+    def start(self, max_steps: int | None = None, metadata: dict | None = None,
+              root: str | None = None) -> str | None:
+        """Empieza una grabación; devuelve su carpeta (None si ya había una activa).
+        `root` reemplaza la carpeta base (por defecto server.path)."""
         if self.active:
             print("[Recording] Ya se está grabando. Pulsa 's' primero.")
-            return
-        self._count = len(os.listdir(self.s.path))
+            return None
+        self._root = os.path.expanduser(root or self.s.path)
+        os.makedirs(self._root, exist_ok=True)
+        # siguiente índice tras las carpetas numeradas existentes (ignora otros archivos)
+        existing = [int(d) for d in os.listdir(self._root) if d.isdigit()]
+        self._count = max(existing) + 1 if existing else 0
         os.makedirs(self._folder, exist_ok=True)
+        if metadata is not None:
+            with open(os.path.join(self._folder, "meta.json"), "w") as f:
+                json.dump(metadata, f, indent=2)
+        self._max_steps = max_steps or self.max_steps
         self._length = 0
         self._commands = 0
         self._pending = False
         self._start_step = self.s.sim_steps
         self.active = True
         print(f"[Recording] ▶ Grabando en {self._folder} (un frame cada {self.every} comandos)")
+        return self._folder
 
     def stop(self) -> None:
         if not self.active:
@@ -98,7 +113,7 @@ class TrajectoryRecorder:
             return
         self._pending = False
         self._save_frame(obs)
-        if self.s.sim_steps - self._start_step >= self.max_steps:
+        if self.s.sim_steps - self._start_step >= self._max_steps:
             self.stop()
 
     # ── guardado ─────────────────────────────────────────────────────────────

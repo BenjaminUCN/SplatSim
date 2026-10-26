@@ -95,6 +95,9 @@ class ZMQRobotServer:
                     result = self._robot.set_object_pose(**args)
                 elif method == "get_observations":
                     result = self._robot.get_observations()
+                elif method in getattr(self._robot, "REMOTE_METHODS", ()):
+                    # métodos extra que el robot expone explícitamente por ZMQ
+                    result = getattr(self._robot, method)(**args)
                 else:
                     result = {"error": "Invalid method"}
                     print(result)

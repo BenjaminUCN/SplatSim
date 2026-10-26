@@ -33,6 +33,8 @@ from .trail import EETrail
 
 class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
     ENV_CONFIG = ENV_CONFIG
+    # métodos que el cliente puede llamar por ZMQ además de los de la base
+    REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording")
 
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ, **kwargs):
@@ -146,8 +148,33 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             obs["joint_positions"] = self.get_joint_state()
             obs["sim_time"] = self.sim_steps * SIM_DT
             self.recorder.on_observation(obs)
+            obs["recording"] = self.recorder.active  # tras on_observation: refleja el auto-stop
         self.apple_window.set(obs.get("apple_rgb"))
         return obs
+
+    # ── control remoto (REMOTE_METHODS) ──────────────────────────────────────
+    def reset_robot(self, settle_steps: int = 120) -> None:
+        """Vuelve el brazo a la pose inicial al instante y cierra el gripper."""
+        c = self.pybullet_client
+        with self.lock:
+            for i in range(1, len(self.initial_joint_state)):
+                target = self.initial_joint_state[i - 1] * self.joint_signs[i - 1]
+                c.resetJointState(self.dummy_robot, i, target)
+                c.setJointMotorControl2(self.dummy_robot, i, c.POSITION_CONTROL,
+                                        targetPosition=target, force=500)
+            self.close_gripper()
+            self._step(settle_steps)
+
+    def start_recording(self, max_seconds: float | None = None, metadata: dict | None = None,
+                        root: str | None = None) -> str | None:
+        with self.lock:
+            max_steps = round(max_seconds / SIM_DT) if max_seconds else None
+            return self.recorder.start(max_steps, metadata, root)
+
+    def stop_recording(self) -> None:
+        with self.lock:
+            if self.recorder.active:
+                self.recorder.stop()
 
     # ── loop principal ───────────────────────────────────────────────────────
     def serve_loop(self):
