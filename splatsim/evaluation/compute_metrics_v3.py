@@ -456,8 +456,8 @@ def compute_path_length(gripper_positions: np.ndarray) -> float:
     return float(np.sum(np.linalg.norm(diffs, axis=1)))
 
 
-def compute_success(distance_curve: np.ndarray, position_threshold: float, sustain_frames=10):
-    # sustain_frames = 10 equals 0.5 seconds at 20 fps
+def compute_success(distance_curve: np.ndarray, position_threshold: float, sustain_frames: int):
+    # éxito: bajo el umbral durante sustain_frames frames seguidos
     success = False
     time_to_target = np.nan
 
@@ -477,7 +477,7 @@ def compute_success(distance_curve: np.ndarray, position_threshold: float, susta
 
 
 def compute_episode_metrics(
-    episode: EpisodeData, position_threshold: float
+    episode: EpisodeData, position_threshold: float, fps: float, sustain_seconds: float = 0.5
 ) -> EpisodeMetrics:
     """Calcula todas las métricas para un episodio ya cargado y parseado."""
     if episode.fruit_position is None:
@@ -510,7 +510,8 @@ def compute_episode_metrics(
 
     success = bool(final_position_error < position_threshold)
 
-    success, time_to_target = compute_success(distance_curve, position_threshold)
+    sustain_frames = max(1, round(sustain_seconds * fps))
+    success, time_to_target = compute_success(distance_curve, position_threshold, sustain_frames)
 
     orientation_error_deg = np.nan
     if episode.ee_orientations is not None and episode.fruit_orientation is not None:
@@ -1098,6 +1099,12 @@ def main():
         help="Umbral de distancia (m) para considerar éxito / objetivo alcanzado.",
     )
     parser.add_argument(
+        "--sustain_seconds",
+        type=float,
+        default=0.5,
+        help="Tiempo que el gripper debe mantenerse bajo --position_threshold para contar como éxito.",
+    )
+    parser.add_argument(
         "--euler_seq",
         type=str,
         default="xyz",
@@ -1179,7 +1186,12 @@ def main():
         if episode_data is None:
             warnings.warn(f"Episodio '{ep_dir.name}' fue omitido por falta de datos válidos.")
             continue
-        metrics = compute_episode_metrics(episode_data, position_threshold=args.position_threshold)
+        fps = 1.0 / episode_data.dt if episode_data.dt else args.fps
+        print(f"  fps: {fps:.2f} ({'sim_time' if episode_data.dt else '--fps'})")
+        metrics = compute_episode_metrics(
+            episode_data, position_threshold=args.position_threshold, fps=fps,
+            sustain_seconds=args.sustain_seconds,
+        )
         all_metrics.append(metrics)
 
         positions = (
@@ -1187,8 +1199,6 @@ def main():
             if args.quality_source == "gripper"
             else episode_data.ee_positions
         )
-        fps = 1.0 / episode_data.dt if episode_data.dt else args.fps
-        print(f"  fps: {fps:.2f} ({'sim_time' if episode_data.dt else '--fps'})")
         quality = compute_trajectory_quality(
             positions, episode_data.fruit_position, episode_data.episode_id, fps=fps
         )
