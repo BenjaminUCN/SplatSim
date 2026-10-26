@@ -18,6 +18,7 @@ class Args:
     gaussian_path : str = "/home/jennyw2/data/output/robot_iphone/point_cloud/iteration_30000/point_cloud.ply"
     robot_name: str = "robot_iphone"
     move_apple: bool = False
+    hz: int = 30  # frecuencia de control del cliente; debe coincidir con run_env_sim --hz
 
 
 def launch_robot_server(args: Args):
@@ -189,8 +190,8 @@ def launch_robot_server(args: Args):
             xml_path=xml, gripper_xml_path=gripper_xml, port=port, host=args.hostname
         )
     
-    elif args.robot == "sim_xarm5_splat_camera":
-        from splatsim.robots.sim_xarm5_pybullet_splat_camera import XArm5PybulletRobotServerCamera
+    elif args.robot in ("sim_xarm5_splat_camera", "sim_xarm5_splat_camera_2"):
+        from splatsim.robots.xarm.server import XArm5PybulletRobotServerCamera
 
         server = XArm5PybulletRobotServerCamera(
             port=port,
@@ -201,21 +202,8 @@ def launch_robot_server(args: Args):
             cam_i=347,
             use_gripper=use_gripper,
             move_apple=args.move_apple,
+            control_hz=args.hz,
         )
-
-    elif args.robot == "sim_xarm5_splat_camera_2":
-            from splatsim.robots.xarm.server import XArm5PybulletRobotServerCamera
-    
-            server = XArm5PybulletRobotServerCamera(
-                port=port,
-                host=args.hostname,
-                # camera_names=["base_rgb","wrist_rgb","apple_rgb"],
-                camera_names=["base_rgb","wrist_rgb"],
-                robot_name=args.robot_name,
-                cam_i=347,
-                use_gripper=use_gripper,
-                move_apple=args.move_apple,
-            )
 
     else:
         if args.robot == "xarm":

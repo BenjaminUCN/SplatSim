@@ -1,14 +1,22 @@
 """Constantes compartidas del servidor xArm5. Todo lo "ajustable" vive aquí."""
 from splatsim.robots.sim_robot_pybullet_base import PybulletRobotServerBase
 
-# ── Loop / grabación ─────────────────────────────────────────────────────────
-LOOP_HZ = 30              # frecuencia real del serve_loop (sleep = 1/LOOP_HZ)
-MAX_RECORD_SECONDS = 2    # duración máxima de una trayectoria
-RECORD_EVERY = 1          # guarda un frame cada N ticks
+# ── Simulación / control ─────────────────────────────────────────────────────
+SIM_DT = 1 / 240          # paso de PyBullet (lo fija la base con setTimeStep)
+CONTROL_HZ = 30           # frecuencia de comandos por defecto; launch_nodes --hz la sobrescribe
+LOOP_HZ = 240             # frecuencia del serve_loop (UI y física en reposo)
+IDLE_STEP_AFTER = 0.2     # s reales sin comandos tras los que el serve_loop vuelve a avanzar la física
+
+# ── Grabación ────────────────────────────────────────────────────────────────
+MAX_RECORD_SECONDS = 2    # duración máxima de una trayectoria, en tiempo simulado
+RECORD_EVERY = 1          # guarda un frame cada N comandos
 
 # ── Cámaras (intrínsecos) ────────────────────────────────────────────────────
-FOV_X = 1.2112585         # 69.4°
-FOV_Y = 0.7417649         # 42.5°  (ojo: es de 16:9, el render es 4:3)
+FOV_16_9 = (1.2112585, 0.7417649)            # 69.4° x 42.5° (ojo: 16:9, el render es 4:3)
+FOV_4_3 = (1.375955594372348, 1.1025297299614814)
+BASE_CAM_FOV = FOV_16_9
+WRIST_CAM_FOV = FOV_4_3
+APPLE_CAM_FOV = FOV_16_9
 IMAGE_W = 640
 IMAGE_H = 480
 

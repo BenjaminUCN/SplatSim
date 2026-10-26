@@ -5,18 +5,19 @@ from gaussian_splatting.scene.cameras import Camera
 from torchvision.transforms.functional import to_pil_image
 
 from .config import (
+    APPLE_CAM_FOV,
     APPLE_CAM_OFFSET_RPY,
     APPLE_CAM_OFFSET_XYZ,
+    BASE_CAM_FOV,
     BASE_CAM_RPY,
     BASE_CAM_XYZ,
-    FOV_X,
-    FOV_Y,
     IMAGE_H,
     IMAGE_W,
+    WRIST_CAM_FOV,
 )
 
 
-def build_splat_camera(server, T_cam_world, name: str, colmap_id: int) -> Camera:
+def build_splat_camera(server, T_cam_world, name: str, colmap_id: int, fov) -> Camera:
     """
     Convierte una pose 4x4 de cámara en el mundo PyBullet a un `Camera` del 3DGS.
     Aquí vive todo el bloque que antes estaba repetido 3 veces.
@@ -42,7 +43,7 @@ def build_splat_camera(server, T_cam_world, name: str, colmap_id: int) -> Camera
         colmap_id,
         R_cw.detach().cpu().numpy(),
         T_wc.detach().cpu().numpy(),
-        FOV_X, FOV_Y,
+        *fov,
         None, blank, None,
         name, 0,
         scale=scale.detach().cpu().numpy(),
@@ -70,7 +71,7 @@ class BaseCamera:
 
     def get(self) -> Camera:
         rot = self.s.pybullet_client.getMatrixFromQuaternion(self.rotation)
-        return build_splat_camera(self.s, _pose_matrix(self.position, rot), self.name, 1)
+        return build_splat_camera(self.s, _pose_matrix(self.position, rot), self.name, 1, BASE_CAM_FOV)
 
 
 class WristCamera:
@@ -98,7 +99,7 @@ class WristCamera:
         st = client.getLinkState(self.s.dummy_robot, self.link_index,
                                  computeForwardKinematics=True)
         T = _pose_matrix(st[4], client.getMatrixFromQuaternion(st[5]))
-        return build_splat_camera(self.s, T, self.name, 1)
+        return build_splat_camera(self.s, T, self.name, 1, WRIST_CAM_FOV)
 
 
 class AppleCamera:
@@ -119,4 +120,4 @@ class AppleCamera:
         T = np.eye(4)
         T[:3, :3] = R_apple @ R_off
         T[:3, 3] = np.array(pos) + R_apple @ np.array(APPLE_CAM_OFFSET_XYZ)
-        return build_splat_camera(self.s, T, self.name, 2)
+        return build_splat_camera(self.s, T, self.name, 2, APPLE_CAM_FOV)
