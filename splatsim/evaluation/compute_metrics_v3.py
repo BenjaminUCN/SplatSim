@@ -11,6 +11,7 @@ Incluye:
 from __future__ import annotations
 
 import argparse
+import json
 import pickle
 import warnings
 from dataclasses import dataclass, field
@@ -44,6 +45,7 @@ class EpisodeData:
     ee_orientation_source: Optional[str]  # 'ee_pos_quat' | 'euler_state' | None
     fruit_position: Optional[np.ndarray]  # (3,) — se asume estática en el episodio
     fruit_orientation: Optional[np.ndarray]  # (4,) quat xyzw, o None
+    dt: Optional[float] = None  # paso de tiempo simulado entre frames ('sim_time'), o None
     warnings_list: list = field(default_factory=list)
 
 
@@ -384,7 +386,14 @@ def build_episode_data(
         ee_positions_arr, ee_orientations_arr, gripper_offset, episode_id
     )
 
+    # paso de tiempo real de la grabación, si los frames traen 'sim_time'
+    sim_times = [f.get("sim_time") for f in frames]
+    dt = None
+    if len(sim_times) > 1 and None not in sim_times:
+        dt = float(np.median(np.diff(sim_times)))
+
     return EpisodeData(
+        dt=dt,
         episode_id=episode_id,
         num_frames=len(valid_idx),
         ee_positions=ee_positions_arr,
@@ -1067,7 +1076,20 @@ def main():
         "--output_dir",
         type=str,
         default="./metrics_output",
-        help="Directorio donde se guardarán metrics.csv y los gráficos.",
+        help=(
+            "Directorio base de resultados. Cada dataset se guarda en su propia subcarpeta "
+            "(ver --run_name), así no se sobrescriben resultados de otros datasets."
+        ),
+    )
+    parser.add_argument(
+        "--run_name",
+        type=str,
+        default=None,
+        help=(
+            "Nombre de la subcarpeta dentro de --output_dir. Por defecto se arma con las "
+            "dos últimas partes de --input_dir (ej. ~/data/policy_trials/261026_203030 "
+            "-> policy_trials_261026_203030)."
+        ),
     )
     parser.add_argument(
         "--position_threshold",
@@ -1102,7 +1124,10 @@ def main():
         "--fps",
         type=float,
         default=20.0,
-        help="Frecuencia de muestreo de los episodios (para velocidad/aceleración/jerk).",
+        help=(
+            "Frecuencia de muestreo (para velocidad/aceleración/jerk). Solo se usa en "
+            "episodios sin 'sim_time'; si los frames lo traen, se usa su dt real."
+        ),
     )
     parser.add_argument(
         "--left_axis",
@@ -1127,8 +1152,14 @@ def main():
     args = parser.parse_args()
 
     input_dir = Path(args.input_dir).expanduser().resolve()
-    output_dir = Path(args.output_dir).expanduser().resolve()
+    run_name = args.run_name or "_".join(input_dir.parts[-2:])
+    output_dir = Path(args.output_dir).expanduser().resolve() / run_name
     output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Resultados en: {output_dir}")
+
+    # parámetros usados, para poder comparar corridas después
+    with open(output_dir / "run_config.json", "w") as f:
+        json.dump({**vars(args), "input_dir": str(input_dir)}, f, indent=2)
 
     if args.quiet:
         warnings.filterwarnings("once")
@@ -1156,8 +1187,10 @@ def main():
             if args.quality_source == "gripper"
             else episode_data.ee_positions
         )
+        fps = 1.0 / episode_data.dt if episode_data.dt else args.fps
+        print(f"  fps: {fps:.2f} ({'sim_time' if episode_data.dt else '--fps'})")
         quality = compute_trajectory_quality(
-            positions, episode_data.fruit_position, episode_data.episode_id, fps=args.fps
+            positions, episode_data.fruit_position, episode_data.episode_id, fps=fps
         )
         if quality is not None:
             all_qualities.append(quality)
