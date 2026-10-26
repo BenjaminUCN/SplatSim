@@ -1,16 +1,18 @@
+import os
+import time
+
+import click
+import cv2 as cv
 import torch
-import torch.nn as nn
-import torch.optim as optim
+from PIL import Image
+from torch import nn, optim
 from torch.utils.data import DataLoader, random_split
 from torchvision import transforms
-from PIL import Image
-from model import SimpleCNN
-from data_utils import CustomImageDataset
 from tqdm import tqdm
-import os
-import cv2 as cv
-import click
-import time 
+
+from splatsim.image_classifier.data_utils import CustomImageDataset
+from splatsim.image_classifier.model import SimpleCNN
+
 
 def train(model, criterion, optimizer, train_loader, val_loader, epochs=10, checkpoint_path='best_model.pth'):
     best_val_loss = float('inf')

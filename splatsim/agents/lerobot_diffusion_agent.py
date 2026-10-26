@@ -1,21 +1,19 @@
 from __future__ import annotations
 
-from collections import deque
 import os
+from collections import deque
 from typing import Any, Dict
 
 import cv2
 import numpy as np
-import torch
-
 import pybullet as p
-
+import torch
 from lerobot.datasets import LeRobotDatasetMetadata
 from lerobot.policies import make_pre_post_processors
 from lerobot.policies.utils import build_inference_frame
-
-from image_classifier import SimpleCNN
 from torchvision import transforms
+
+from splatsim.image_classifier import SimpleCNN
 
 # Constants from config.json
 _IMAGE_KEY   = "observation.images.base_rgb"
