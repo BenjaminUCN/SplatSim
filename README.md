@@ -263,6 +263,17 @@ python scripts/train_queue.py configs/train/queue_example.yaml             # tra
 ```
 A queue file has a `base` config, `common` overrides, explicit `runs` (each with `name`, `description` and any training field) and an optional `sweep` (one run per combination of values, named like `h32-a16-2cam`). Each run's final config, log and status go to `~/data/train_queues/<queue>/`; relaunching skips finished runs (`--rerun` to repeat them, `--only <name>` to pick some). When the queue ends, `configs/registry.yaml` is regenerated so the new models show up in the panel with their name and description.
 
+### Training queue panel
+
+To keep adding trainings while one is running (e.g. queue the next one before leaving an 8-hour run overnight):
+```bash
+python scripts/train_server.py   # http://localhost:8082
+```
+- *New job*: name, description, base config, dataset (from the registry), camera arrangement or cameras, horizons, steps, batch size and any other training field as YAML. It checks that `horizon` is a multiple of 8, that `n_action_steps` fits in the horizon and that the dataset has the arrangement's cameras.
+- *Queue*: the current job's step, loss, speed, ETA and log tail; the job list (reorder, retry, duplicate, remove); **Pause queue** (finish the current job, don't start the next); **Stop current job** (stops it and pauses the queue); and *Import queue file* to add the runs of a `train_queue.py` file.
+
+The queue is saved in `~/data/train_queues/live/jobs.yaml` with each job's config and log. Trainings run in their own session: closing the panel does not stop them, and reopening it picks them up again. After each finished job the registry is regenerated, so the model appears in the simulator panel.
+
 ### Registry of recordings, datasets and models
 
 `configs/registry.yaml` links each model to the dataset it was trained on, and each dataset to the GELLO recordings it was converted from. Regenerate it after recording, converting or training:
