@@ -263,9 +263,10 @@ class ControlPanel:
             if m := re.search(r"\[Trials\] (\d+)/(\d+)", line):
                 info["done"] = int(m.group(1)) - 1     # el ensayo m.group(1) recién empieza
                 info["last"] = line.split("— ", 1)[-1].strip()
-            elif m := re.search(r"\[Trials\] (\d+) frames, dist final ([\d.]+) m, mín ([\d.]+) m", line):
+            elif m := re.search(r"\[Trials\] (\d+) frames, error de agarre final ([\d.]+) m, mín ([\d.]+) m", line):
                 info["done"] += 1
-                info["result"] = f"last: final {float(m.group(2)):.3f} m, min {float(m.group(3)):.3f} m"
+                info["result"] = (f"last: grasp error final {float(m.group(2)):.3f} m, "
+                                  f"min {float(m.group(3)):.3f} m")
             elif m := re.search(r"\[Trials\] Resultados en (.+)", line):
                 info["root"] = m.group(1).strip()
 

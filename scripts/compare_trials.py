@@ -7,14 +7,19 @@ con intervalo de confianza, test estadístico, desglose por posición del tomate
 Cada entrada es una carpeta de modelo (se juntan todas sus corridas <fecha>/trials.csv) o una
 corrida; "etiqueta=ruta" cambia el nombre que aparece en tablas y gráficos.
 
-Éxito: distancia mínima efector–tomate <= --success_dist durante el ensayo (o la final, con
---metric final_dist). Tests: con 2 modelos, exacto de Fisher; con más, chi-cuadrado de
+Éxito: error de agarre mínimo <= --success_dist (4 cm) durante el ensayo, es decir, el tomate
+llegó a estar en el punto de agarre del efector (configs/grasp_point.yaml). --metric elige
+min_grasp_err (por defecto), final_grasp_err, o las distancias crudas efector–tomate min_dist /
+final_dist (que no bajan de ~13 cm porque se miden desde el último link). Para ensayos antiguos
+sin columnas de agarre, se calculan desde los .pkl grabados de cada ensayo. Tests: con 2 modelos, exacto de Fisher; con más, chi-cuadrado de
 independencia y Fisher por pares con corrección de Holm. Los intervalos son de Wilson (95%).
 
 Salida (--out, por defecto ~/data/policy_trials/comparisons/<fecha>/): summary.md,
 summary.csv, per_position.csv, success_rate.png, success_by_position.png, distances.png.
 """
 import os
+import pickle
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from itertools import combinations
@@ -30,20 +35,25 @@ import tyro  # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 from scipy import stats  # noqa: E402
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from splatsim.utils.grasp_point import SUCCESS_RADIUS, grasp_error, load_grasp_point  # noqa: E402
+
 # paleta de referencia (modo claro): una serie = un color; magnitud = rampa azul de un tono
 SERIES = "#2a78d6"
 SURFACE = "#fcfcfb"
 TEXT = "#0b0b0b"
 TEXT_2 = "#52514e"
 GRID = "#e4e3df"
+METRICS = {"min_grasp_err": "min grasp error", "final_grasp_err": "final grasp error",
+           "min_dist": "min EE–tomato distance", "final_dist": "final EE–tomato distance"}
 BLUE_RAMP = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
 
 
 @dataclass
 class Args:
     runs: tyro.conf.Positional[tuple[str, ...]]   # carpetas de modelo o de corrida (etiqueta=ruta)
-    success_dist: float = 0.05                    # m: umbral de éxito
-    metric: str = "min_dist"                      # min_dist o final_dist
+    success_dist: float = SUCCESS_RADIUS          # m: umbral de éxito
+    metric: str = "min_grasp_err"                 # min_grasp_err, final_grasp_err, min_dist o final_dist
     out: str | None = None
 
 
@@ -62,10 +72,31 @@ def load_runs(entries) -> pd.DataFrame:
         df = pd.concat([pd.read_csv(c) for c in csvs], ignore_index=True)
         if df.empty:
             raise SystemExit(f"{path}: trials.csv sin ensayos")
+        if "min_grasp_err" not in df or df.min_grasp_err.isna().any():
+            df = _backfill_grasp(df)
         df["model"] = label
         frames.append(df)
         print(f"{label}: {len(df)} ensayos de {len(csvs)} corrida(s)")
     return pd.concat(frames, ignore_index=True)
+
+
+def _backfill_grasp(df: pd.DataFrame) -> pd.DataFrame:
+    """Calcula el error de agarre de ensayos antiguos desde los .pkl de cada carpeta de ensayo."""
+    point = load_grasp_point()
+    finals, mins = [], []
+    for folder in df.folder:
+        errs = []
+        for p in sorted(Path(folder).glob("*.pkl"), key=lambda p: (len(p.stem), p.stem)):
+            try:
+                with open(p, "rb") as f:
+                    obs = pickle.load(f)
+                errs.append(float(grasp_error(obs["state"], obs["plastic_apple_position"], point)))
+            except Exception:  # noqa: BLE001  .pkl ilegible: se omite ese frame
+                continue
+        finals.append(errs[-1] if errs else np.nan)
+        mins.append(min(errs) if errs else np.nan)
+    print(f"  error de agarre calculado desde los .pkl de {len(df)} ensayos")
+    return df.assign(final_grasp_err=finals, min_grasp_err=mins)
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -97,7 +128,8 @@ def summarize(df: pd.DataFrame, models: list[str]) -> pd.DataFrame:
         lo, hi = wilson(k, n)
         rows.append({"model": m, "trials": n, "successes": k, "success_rate": k / n,
                      "ci_low": lo, "ci_high": hi, "positions": d.pos_idx.nunique(),
-                     "median_min_dist": d.min_dist.median(), "median_final_dist": d.final_dist.median()})
+                     "median_min_grasp_err": d.min_grasp_err.median(),
+                     "median_final_grasp_err": d.final_grasp_err.median()})
     return pd.DataFrame(rows)
 
 
@@ -210,9 +242,10 @@ def plot_distances(df: pd.DataFrame, models: list[str], metric: str, threshold: 
     ax.set_xlim(-0.5, len(models) - 0.5)
     ax.set_ylim(bottom=0)
     ax.yaxis.grid(True, color=GRID, linewidth=0.8, zorder=0)
-    label = "Minimum" if metric == "min_dist" else "Final"
-    ax.set_ylabel(f"{label} EE–tomato distance (m)")
-    ax.set_title(f"{label} distance per trial\nbar = median · dashed = success ≤ {threshold:.2f} m",
+    label = "Minimum" if metric.startswith("min") else "Final"
+    what = "grasp error" if "grasp" in metric else "EE–tomato distance"
+    ax.set_ylabel(f"{label} {what} (m)")
+    ax.set_title(f"{label} {what} per trial\nbar = median · dashed = success ≤ {threshold:.2f} m",
                  fontsize=10, color=TEXT, loc="left")
     fig.tight_layout()
     fig.savefig(out, dpi=200)
@@ -227,8 +260,8 @@ def _markdown_table(df: pd.DataFrame) -> str:
 
 # ── main ─────────────────────────────────────────────────────────────────────
 def main(args: Args):
-    if args.metric not in ("min_dist", "final_dist"):
-        raise SystemExit("--metric debe ser min_dist o final_dist")
+    if args.metric not in METRICS:
+        raise SystemExit(f"--metric debe ser uno de {list(METRICS)}")
     df = load_runs(args.runs)
     models = list(dict.fromkeys(df.model))
     df["success"] = df[args.metric] <= args.success_dist
@@ -239,12 +272,12 @@ def main(args: Args):
     summary = summarize(df, models)
     test_lines = tests(summary)
     per_pos = (df.groupby(["model", "pos_idx"]).agg(trials=("success", "size"), successes=("success", "sum"),
-                                                    median_min_dist=("min_dist", "median"))
+                                                    median_min_grasp_err=("min_grasp_err", "median"))
                .reset_index())
     summary.to_csv(out / "summary.csv", index=False)
     per_pos.to_csv(out / "per_position.csv", index=False)
 
-    threshold_text = f"{'min' if args.metric == 'min_dist' else 'final'} distance ≤ {args.success_dist:.2f} m"
+    threshold_text = f"{METRICS[args.metric]} ≤ {args.success_dist:.2f} m"
     plot_success(summary, out / "success_rate.png", threshold_text)
     plot_by_position(df, models, out / "success_by_position.png")
     plot_distances(df, models, args.metric, args.success_dist, out / "distances.png")
@@ -254,7 +287,7 @@ def main(args: Args):
     md = [f"# Trial comparison ({datetime.now():%Y-%m-%d %H:%M})", "",
           f"Success: {threshold_text}.", "",
           _markdown_table(table[["model", "trials", "successes", "success_rate", "ci", "positions",
-                                 "median_min_dist", "median_final_dist"]]),
+                                 "median_min_grasp_err", "median_final_grasp_err"]]),
           "", "## Tests", "", *[f"- {line.strip()}" for line in test_lines],
           "", "## Sources", "", *[f"- `{e}`" for e in args.runs],
           "", "![success](success_rate.png)", "![by position](success_by_position.png)",

@@ -27,6 +27,8 @@ import tyro
 import yaml
 from gello.zmq_core.robot_node import ZMQClientRobot
 
+from splatsim.utils.grasp_point import grasp_error, load_grasp_point
+
 APPLE_NAME = "plastic_apple"
 APPLE_QUAT = (0.0, 0.0, 0.0, 1.0)
 
@@ -68,7 +70,7 @@ def reset_policy(agent) -> None:
     agent.make_new_prediction = True
 
 
-def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root) -> dict:
+def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_point) -> dict:
     call(robot, "stop_recording")
     call(robot, "reset_robot")
     robot.set_object_pose(APPLE_NAME, np.array(apple_pos), np.array(APPLE_QUAT), use_gravity=False)
@@ -78,18 +80,21 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root) -> dict:
     folder = call(robot, "start_recording", max_seconds=trial_seconds,
                   metadata=metadata, root=root)
 
-    distances = []
+    distances, grasp_errors = [], []
     while True:
         robot.command_joint_state(agent.act(obs))
         obs = robot.get_observations()
         ee = np.asarray(obs["state"][:3])
         apple = np.asarray(obs[f"{APPLE_NAME}_position"])
         distances.append(float(np.linalg.norm(ee - apple)))
+        # distancia del tomate al punto de agarre, en el marco del efector (configs/grasp_point.yaml)
+        grasp_errors.append(float(grasp_error(obs["state"], apple, grasp_point)))
         if not obs["recording"]:   # el servidor cortó al llegar a trial_seconds
             break
 
     return {"folder": folder, "frames": len(distances),
-            "final_dist": distances[-1], "min_dist": min(distances)}
+            "final_dist": distances[-1], "min_dist": min(distances),
+            "final_grasp_err": grasp_errors[-1], "min_grasp_err": min(grasp_errors)}
 
 
 def main(args: Args) -> None:
@@ -115,7 +120,9 @@ def main(args: Args) -> None:
 
     positions = args.positions if args.positions is not None else range(len(apple_grid))
     total = len(positions) * args.trials_per_position
-    fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist"]
+    fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
+              "final_grasp_err", "min_grasp_err"]
+    grasp_point = load_grasp_point()
 
     with open(os.path.join(root, "trials.csv"), "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -130,13 +137,14 @@ def main(args: Args) -> None:
                     metadata = {"pos_idx": pos_idx, "trial": trial, "apple_position": apple_pos,
                                 "trial_seconds": args.trial_seconds,
                                 "checkpoint": checkpoint, "run_name": run_name}
-                    result = run_trial(robot, agent, apple_pos, args.trial_seconds, metadata, root)
+                    result = run_trial(robot, agent, apple_pos, args.trial_seconds, metadata, root,
+                                       grasp_point)
                     row = {"pos_idx": pos_idx, "trial": trial,
                            "x": apple_pos[0], "y": apple_pos[1], "z": apple_pos[2], **result}
                     writer.writerow(row)
                     f.flush()
-                    print(f"[Trials] {result['frames']} frames, dist final "
-                          f"{result['final_dist']:.3f} m, mín {result['min_dist']:.3f} m")
+                    print(f"[Trials] {result['frames']} frames, error de agarre final "
+                          f"{result['final_grasp_err']:.3f} m, mín {result['min_grasp_err']:.3f} m")
         except KeyboardInterrupt:
             print("\n[Trials] Interrumpido.")
         finally:

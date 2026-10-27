@@ -490,13 +490,21 @@ python scripts/run_env_sim.py --agent replay_trajectory_and_save
 
 For the xArm5 LeRobot diffusion policy, see [Run the diffusion policy](#run-the-diffusion-policy) and [Automated policy trials](#automated-policy-trials).
 
+### Grasp point and success
+
+`obs["state"]` is the pose of the arm's last link, not the gripper tip, so the raw end-effector–tomato distance never drops below ~13 cm, even in a perfect demo. What is consistent is where the tomato sits **in the end-effector frame** at the end of the demos (≈ 17 cm along the tool axis):
+```bash
+python scripts/estimate_grasp_point.py --recordings ~/data/bc_data/gello_3plants   # writes configs/grasp_point.yaml
+```
+The **grasp error** of a frame is the distance between the tomato (in the end-effector frame) and that point (`splatsim/utils/grasp_point.py`). In the demos' last frames it is 1.9 cm (p50) and 3.4 cm (p90). `run_policy_trials.py` records the final and minimum grasp error of each trial, and a trial succeeds when it gets within 4 cm.
+
 ### Comparing models
 
 After running trials for several models (panel *Trials* or `run_policy_trials.py`), compare them:
 ```bash
 python scripts/compare_trials.py ~/data/policy_trials/2cam-h64 ~/data/policy_trials/1cam-h64 ~/data/policy_trials/3cam-h64
 ```
-Each argument is a model folder (all its runs are pooled) or a single run, optionally as `label=path`. A trial succeeds when the minimum end-effector–tomato distance is at most `--success_dist` (0.05 m; `--metric final_dist` uses the final distance). It reports each model's success rate with a 95% Wilson interval, a Fisher exact test (2 models) or a chi-square test plus Holm-corrected pairwise Fisher tests (3 or more), and writes `summary.md`, CSV tables and three figures (success rate, success per tomato position, distance per trial) to `~/data/policy_trials/comparisons/<date>/`. With 9 positions, plan on ~10 trials per position per model for these tests to detect moderate differences.
+Each argument is a model folder (all its runs are pooled) or a single run, optionally as `label=path`. Success is a minimum grasp error ≤ 4 cm by default (`--metric final_grasp_err`, or the raw `min_dist` / `final_dist`; `--success_dist` changes the threshold); trials recorded before the grasp error existed get it computed from their saved frames. It reports each model's success rate with a 95% Wilson interval, a Fisher exact test (2 models) or a chi-square test plus Holm-corrected pairwise Fisher tests (3 or more), and writes `summary.md`, CSV tables and three figures (success rate, success per tomato position, distance per trial) to `~/data/policy_trials/comparisons/<date>/`. With 9 positions, plan on ~10 trials per position per model for these tests to detect moderate differences.
 
 ## Credits, licenses and citations
 
