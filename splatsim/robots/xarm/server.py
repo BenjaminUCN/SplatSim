@@ -57,6 +57,8 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         # el hilo ZMQ, el serve_loop y el recorder comparten PyBullet y el renderer
         self.lock = threading.RLock()
         self.sim_steps = 0               # pasos de simulación dados vía _step()
+        self._last_images = {}           # cámaras de la última observación (vista previa del panel)
+        self._last_images_time = 0.0
         self._last_command_time = 0.0    # time.monotonic() del último comando
         # el recorder no toca la base en su constructor, así que es seguro crearlo antes
         self.recorder = TrajectoryRecorder(
@@ -179,11 +181,19 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             self.prep_image_rendering(data=data, cached_link_states=cached)
             return {name: self.render_image(name) for name in camera_names}
 
+    def recent_images(self, max_age: float) -> dict:
+        """Imágenes de la última observación pedida por un cliente, si tiene menos de max_age s."""
+        if time.monotonic() - self._last_images_time > max_age:
+            return {}
+        return dict(self._last_images)
+
     def get_observations(self):
         with self.lock:
             obs = super().get_observations()
             obs["joint_positions"] = self.get_joint_state()
             obs["sim_time"] = self.sim_steps * SIM_DT
+            self._last_images = {k: obs[k] for k in self.camera_names if obs.get(k) is not None}
+            self._last_images_time = time.monotonic()
             self.recorder.on_observation(obs)
             obs["recording"] = self.recorder.active  # tras on_observation: refleja el auto-stop
             obs["reset_joint_command"] = self.reset_joint_command()

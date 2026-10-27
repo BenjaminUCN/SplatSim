@@ -177,13 +177,18 @@ python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5
 
 The server renders `base_rgb`, `base2_rgb` and `wrist_rgb` from the gaussian splat; pick a subset with `--cameras base_rgb wrist_rgb` (every rendered camera is recorded). Camera FoV, recording length and other constants live in `splatsim/robots/xarm/config.py`.
 
-**Control panel (viser).** Open http://localhost:8080 in a browser. It shows the world frame, the end effector, the base camera frustums, the tomato and the saved grid positions in 3D, and has these folders:
+**Control panel (viser).** Open http://localhost:8080 in a browser. The 3D view shows the world frame, the end effector, the base camera frustums, the tomato and the saved grid positions. The controls are split into a main panel (docked right) with two tabs and a separate *Cameras* window (docked left); both can be moved, docked or minimized.
+
+*Run* tab:
 - *Robot*: Reset Robot Joints.
 - *Policy*: pick a model from `configs/registry.yaml` (by `name`, or `suggested_name`), see its description, cameras and dataset, and Run / Stop it. Run starts `run_env_sim.py --agent lerobot_diffusion --checkpoint <model>` in another process with the server's `--hz` and port (optionally resetting the robot first); its output goes to the server terminal. Reload Registry picks up a regenerated registry.
 - *Recording*: Start / Stop (same as `r`/`s` + Enter in the terminal) and the frame count.
-- *Base cameras*: one tab per camera with its xyz / rpy; drag the gizmo in the 3D view or type the values. Save Camera Poses.
+
+*Scene* tab:
 - *Tomato*: xyz, gizmo, Random Position, Save Position to Grid, and a list to load a saved grid position (or click its orange sphere in the 3D view).
-- *Camera previews*: one checkbox per camera; each one you turn on is rendered about twice per second (all off by default because each render costs time).
+- *Base cameras*: one tab per camera with its xyz / rpy; drag the gizmo in the 3D view or type the values. Save Camera Poses.
+
+*Cameras* window: one checkbox per camera (`base_rgb` and `wrist_rgb` on by default), refreshed about twice per second. While a client (e.g. a running policy) is requesting observations, the window reuses those images; otherwise each active camera costs one render.
 
 If `configs/apple_grid.yaml` has positions, the tomato starts at the first one.
 

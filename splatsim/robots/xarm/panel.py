@@ -22,6 +22,9 @@ from .config import APPLE_GRID_PATH, BASE_CAM_FOV, IMAGE_H, IMAGE_W
 
 STATUS_PERIOD = 0.2    # s entre refrescos de estado, pose del efector y de la manzana
 PREVIEW_PERIOD = 0.5   # s entre renders de la vista previa (cuesta un render del splat)
+PREVIEW_DEFAULT = ("base_rgb", "wrist_rgb")  # vistas activas al abrir el panel
+PREVIEW_PANEL_WIDTH = 360
+MAIN_PANEL_WIDTH = 380
 STOP_TIMEOUT = 5.0     # s que se espera a que la política termine tras Ctrl+C antes de matarla
 
 
@@ -46,11 +49,18 @@ class ControlPanel:
         self.v.scene.add_grid("/ground", width=2.0, height=2.0, cell_size=0.1, section_size=0.5)
         self._ee = self.v.scene.add_frame("/ee", axes_length=0.06, axes_radius=0.004)
 
-        self._build_robot_gui()
-        self._build_policy_gui()
-        self._build_recording_gui()
-        self._build_camera_gui()
-        self._build_apple_gui()
+        # panel principal a la derecha, en pestañas por tarea; vistas de cámara en
+        # una ventana aparte a la izquierda (se puede mover, acoplar o minimizar)
+        tabs = self.v.gui.add_tab_group()
+        with tabs.add_tab("Run", viser.Icon.PLAYER_PLAY):
+            self._build_robot_gui()
+            self._build_policy_gui()
+            self._build_recording_gui()
+        with tabs.add_tab("Scene", viser.Icon.ADJUSTMENTS):
+            self._build_apple_gui()
+            self._build_camera_gui()
+        self.v.gui.main_panel.dock_right()
+        self.v.gui.main_panel.set_width(MAIN_PANEL_WIDTH)
         self._build_preview_gui()
         print(f"[Panel] Panel de control en http://localhost:{port}")
 
@@ -305,20 +315,31 @@ class ControlPanel:
     # ── vista previa ─────────────────────────────────────────────────────────
     def _build_preview_gui(self):
         # una casilla y una imagen por cámara; cada vista activa cuesta un render
+        # (salvo que un cliente las esté pidiendo: entonces se reusan sus observaciones)
         self._previews = {}
-        with self.v.gui.add_folder("Camera previews"):
-            for name in self.s.cameras:
-                show = self.v.gui.add_checkbox(name, False)
+        panel = self.v.gui.add_panel()
+        with panel.add_tab("Cameras", viser.Icon.CAMERA):
+            checks = {name: self.v.gui.add_checkbox(name, name in PREVIEW_DEFAULT)
+                      for name in self.s.cameras}
+            for name, show in checks.items():
                 image = self.v.gui.add_image(
-                    np.zeros((IMAGE_H // 2, IMAGE_W // 2, 3), np.uint8), format="jpeg", visible=False)
+                    np.zeros((IMAGE_H // 2, IMAGE_W // 2, 3), np.uint8), label=name,
+                    format="jpeg", visible=show.value)
                 show.on_update(lambda _, s=show, i=image: setattr(i, "visible", s.value))
                 self._previews[name] = (show, image)
+        panel.dock_left()
+        panel.set_width(PREVIEW_PANEL_WIDTH)
 
     def _update_preview(self):
         names = [name for name, (show, _) in self._previews.items() if show.value]
         if not names:
             return
-        for name, img in self.s.render_preview(names).items():
+        images = self.s.recent_images(max_age=2 * PREVIEW_PERIOD)
+        to_render = [n for n in names if n not in images]
+        if to_render:
+            images.update(self.s.render_preview(to_render))
+        for name in names:
+            img = images.get(name)
             if img is None:
                 continue
             img = (np.clip(img.detach().permute(1, 2, 0).cpu().numpy(), 0, 1) * 255).astype(np.uint8)
