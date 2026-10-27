@@ -1,0 +1,23 @@
+# Example training queue for scripts/train_queue.py.
+#   python scripts/train_queue.py configs/train/queue_example.yaml --dry_run
+# Every run = base + common + its own fields (any field of configs/train/diffusion.yaml).
+base: configs/train/diffusion.yaml
+
+common:
+  push_to_hub: false
+  training_steps: 50000
+
+# explicit runs: name is required, description shows up in the registry and the panel
+runs:
+  - name: 2cam-h64
+    description: baseline, center + wrist cameras
+    arrangement: 2cam
+  - name: 1cam-h64
+    description: only the center base camera
+    arrangement: 1cam
+
+# optional sweep: one run per combination (named from the values, e.g. h32-2cam)
+sweep:
+  horizon: [32]
+  n_action_steps: [16]
+  arrangement: [2cam]
