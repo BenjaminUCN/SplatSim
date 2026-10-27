@@ -12,13 +12,14 @@ Por cada posición de la grilla y cada ensayo: resetea el brazo, ubica el tomate
 resetea la política, graba y deja actuar a la política hasta que el servidor corta
 la grabación (trial_seconds de tiempo simulado). La política se carga una sola vez.
 
-Salida en output_dir/<fecha>/: una carpeta por ensayo (000/, 001/, ... con meta.json)
+Salida en output_dir/<nombre del modelo>/<fecha>/: una carpeta por ensayo (000/, 001/, ... con meta.json)
 y trials.csv con un resumen (distancia final y mínima del efector al tomate).
 """
 import csv
 import datetime
 import os
 import pickle
+import re
 from dataclasses import dataclass
 
 import numpy as np
@@ -42,6 +43,8 @@ class Args:
     # modelo a evaluar (None -> el por defecto del agente); dataset: de configs/registry.yaml
     checkpoint: str | None = None
     dataset_root: str | None = None
+    # subcarpeta de output_dir; None -> nombre del modelo en el registro (o su carpeta)
+    run_name: str | None = None
 
 
 def call(robot: ZMQClientRobot, method: str, **args):
@@ -51,6 +54,13 @@ def call(robot: ZMQClientRobot, method: str, **args):
     if isinstance(result, dict) and "error" in result:
         raise RuntimeError(f"{method}: {result['error']}")
     return result
+
+
+def run_name_for(checkpoint: str) -> str:
+    """Nombre del modelo en configs/registry.yaml (name o suggested_name), o su carpeta."""
+    from splatsim.utils.registry import model_for_checkpoint, model_label
+    found = model_for_checkpoint(checkpoint)
+    return model_label(*found) if found else os.path.basename(checkpoint.rstrip("/"))
 
 
 def reset_policy(agent) -> None:
@@ -92,7 +102,10 @@ def main(args: Args) -> None:
 
     from splatsim.agents.lerobot_diffusion_agent import DEFAULT_CHECKPOINT, LeRobotDiffusionAgent
 
-    root = os.path.join(os.path.expanduser(args.output_dir),
+    checkpoint = args.checkpoint or DEFAULT_CHECKPOINT
+    # apto para nombre de carpeta (el panel pasa la etiqueta del modelo, que puede tener espacios)
+    run_name = re.sub(r"[^\w.+-]+", "_", args.run_name or run_name_for(checkpoint)).strip("_")
+    root = os.path.join(os.path.expanduser(args.output_dir), run_name,
                         datetime.datetime.now().strftime("%y%m%d_%H%M%S"))
     os.makedirs(root, exist_ok=True)
 
@@ -116,7 +129,7 @@ def main(args: Args) -> None:
                     print(f"\n[Trials] {n}/{total} — posición {pos_idx} {apple_pos}, ensayo {trial}")
                     metadata = {"pos_idx": pos_idx, "trial": trial, "apple_position": apple_pos,
                                 "trial_seconds": args.trial_seconds,
-                                "checkpoint": args.checkpoint or DEFAULT_CHECKPOINT}
+                                "checkpoint": checkpoint, "run_name": run_name}
                     result = run_trial(robot, agent, apple_pos, args.trial_seconds, metadata, root)
                     row = {"pos_idx": pos_idx, "trial": trial,
                            "x": apple_pos[0], "y": apple_pos[1], "z": apple_pos[2], **result}

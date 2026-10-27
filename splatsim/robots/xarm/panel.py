@@ -216,7 +216,7 @@ class ControlPanel:
         if not grid:
             self._trial_status.content = "**The grid is empty**: save positions in the Scene tab"
             return
-        cmd = ["scripts/run_policy_trials.py", "--checkpoint", model["path"],
+        cmd = ["scripts/run_policy_trials.py", "--checkpoint", model["path"], "--run_name", label,
                "--robot_port", str(self.s.zmq_port),
                "--trials_per_position", str(int(self._trials_per_pos.value)),
                "--trial_seconds", str(float(self._trial_seconds.value))]

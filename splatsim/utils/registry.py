@@ -25,11 +25,20 @@ def loadable_models(registry: dict) -> dict:
             if m.get("finished") and os.path.isdir(m["path"])}
 
 
+def model_for_checkpoint(checkpoint: str, registry: dict | None = None) -> tuple[str, dict] | None:
+    """(clave, entrada) del modelo de la carpeta `checkpoint`, o None si no está registrado."""
+    registry = registry if registry is not None else load_registry()
+    target = os.path.realpath(os.path.expanduser(checkpoint))
+    for key, model in (registry.get("models") or {}).items():
+        if os.path.realpath(model["path"]) == target:
+            return key, model
+    return None
+
+
 def dataset_for_checkpoint(checkpoint: str, registry: dict | None = None) -> dict | None:
     """Entrada del dataset con que se entrenó el modelo de la carpeta `checkpoint`."""
     registry = registry if registry is not None else load_registry()
-    target = os.path.realpath(os.path.expanduser(checkpoint))
-    for model in (registry.get("models") or {}).values():
-        if os.path.realpath(model["path"]) == target and model.get("dataset"):
-            return (registry.get("datasets") or {}).get(model["dataset"])
-    return None
+    found = model_for_checkpoint(checkpoint, registry)
+    if found is None or not found[1].get("dataset"):
+        return None
+    return (registry.get("datasets") or {}).get(found[1]["dataset"])

@@ -258,7 +258,7 @@ Without `--checkpoint` it uses `DEFAULT_CHECKPOINT` in `splatsim/agents/lerobot_
    python scripts/run_policy_trials.py --positions 0 4 8 --trials-per-position 1   # only some positions
    ```
 
-Results are saved in `~/data/policy_trials/<date>/` (change with `--output-dir`):
+Results are saved in `~/data/policy_trials/<model name>/<date>/` (change the base with `--output-dir` and the model folder with `--run-name`; by default it is the model's `name` or `suggested_name` in `configs/registry.yaml`):
 - `000/`, `001/`, ...: one recording per trial, in the same format as demonstrations, plus a `meta.json` with the tomato position and trial index.
 - `trials.csv`: one row per trial with the number of frames and the final and minimum distance between the end effector and the tomato.
 
@@ -442,6 +442,68 @@ python scripts/run_env_sim.py --agent replay_trajectory_and_save
 ## Visualizing a trained policy in the Splat Sim
 
 For the xArm5 LeRobot diffusion policy, see [Run the diffusion policy](#run-the-diffusion-policy) and [Automated policy trials](#automated-policy-trials).
+
+## Credits, licenses and citations
+
+This fork builds on the following projects. If you use it in a publication, please cite the ones your work relies on.
+
+| Project | Used for | License |
+|---|---|---|
+| [SplatSim](https://github.com/qureshinomaan/SplatSim) | Base simulator (PyBullet + gaussian splat rendering) | No license file in the upstream repository; ask the authors before redistributing |
+| [3D Gaussian Splatting](https://github.com/graphdeco-inria/gaussian-splatting) (submodule) | Splat training and rendering | Inria/MPII license: **research and evaluation use only, non-commercial** |
+| [GELLO](https://github.com/wuphilipp/gello_software) (submodule, [fork](https://github.com/BenjaminUCN/gello_software)) | Teleoperation, ZMQ robot client/server | MIT |
+| [LeRobot](https://github.com/huggingface/lerobot) | Datasets, diffusion policy training and inference | Apache 2.0 |
+| [Diffusion Policy](https://diffusion-policy.cs.columbia.edu/) | Policy architecture (LeRobot implementation) | — (method) |
+| [viser](https://github.com/nerfstudio-project/viser) | Web control panel | Apache 2.0 (LICENSE file; the PyPI metadata says MIT) |
+| [PyBullet](https://github.com/bulletphysics/bullet3) | Physics simulation | zlib |
+| [pybullet-URDF-models](https://github.com/GPT-RL/pybullet-URDF-models) (submodule, [fork](https://github.com/BenjaminUCN/pybullet-URDF-models)) | Object models | MIT |
+
+All of them allow academic use and publication. When you redistribute code (for example, publishing this repository with the paper), keep each project's license and copyright notice, and note that the gaussian-splatting license does not allow commercial use.
+
+```bibtex
+@article{qureshi2024splatsim,
+  title={SplatSim: Zero-Shot Sim2Real Transfer of RGB Manipulation Policies Using Gaussian Splatting},
+  author={Qureshi, Mohammad Nomaan and Garg, Sparsh and Yandun, Francisco and Held, David and Kantor, George and Silwal, Abhisesh},
+  journal={arXiv preprint arXiv:2409.10161},
+  year={2024}
+}
+
+@article{kerbl3Dgaussians,
+  title={3D Gaussian Splatting for Real-Time Radiance Field Rendering},
+  author={Kerbl, Bernhard and Kopanas, Georgios and Leimk{\"u}hler, Thomas and Drettakis, George},
+  journal={ACM Transactions on Graphics},
+  volume={42},
+  number={4},
+  year={2023}
+}
+
+@misc{wu2023gello,
+  title={GELLO: A General, Low-Cost, and Intuitive Teleoperation Framework for Robot Manipulators},
+  author={Philipp Wu and Yide Shentu and Zhongke Yi and Xingyu Lin and Pieter Abbeel},
+  year={2023}
+}
+
+@misc{cadene2024lerobot,
+  author={Cadene, Remi and Alibert, Simon and Soare, Alexander and Gallouedec, Quentin and Zouitine, Adil and Palma, Steven and Kooijmans, Pepijn and Aractingi, Michel and Shukor, Mustafa and Aubakirova, Dana and Russi, Martino and Capuano, Francesco and Pascal, Caroline and Choghari, Jade and Moss, Jess and Wolf, Thomas},
+  title={LeRobot: State-of-the-art Machine Learning for Real-World Robotics in Pytorch},
+  howpublished={\url{https://github.com/huggingface/lerobot}},
+  year={2024}
+}
+
+@inproceedings{chi2023diffusionpolicy,
+  title={Diffusion Policy: Visuomotor Policy Learning via Action Diffusion},
+  author={Chi, Cheng and Feng, Siyuan and Du, Yilun and Xu, Zhenjia and Cousineau, Eric and Burchfiel, Benjamin and Song, Shuran},
+  booktitle={Proceedings of Robotics: Science and Systems (RSS)},
+  year={2023}
+}
+
+@article{yi2025viser,
+  title={Viser: Imperative, web-based 3d visualization in python},
+  author={Yi, Brent and Kim, Chung Min and Kerr, Justin and Wu, Gina and Feng, Rebecca and Zhang, Anthony and Kulhanek, Jonas and Choi, Hongsuk and Ma, Yi and Tancik, Matthew and Kanazawa, Angjoo},
+  journal={arXiv preprint arXiv:2507.22885},
+  year={2025}
+}
+```
 
 ## A list of TODOs
 
