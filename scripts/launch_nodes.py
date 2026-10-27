@@ -28,6 +28,9 @@ class Args:
     panel_port: int = 8080
     # xArm5 (sim y real): cómo se siguen los objetivos articulares: position / interp / velocity
     control_mode: str = "position"
+    # sim xArm5: tiempo simulado por comando. fixed = 1/hz (políticas, ensayos; dt fijo por frame),
+    # realtime = el tiempo real entre comandos (teleop con GELLO, aunque el lazo no alcance hz)
+    sim_clock: str = "fixed"
 
 
 def launch_robot_server(args: Args):
@@ -216,6 +219,7 @@ def launch_robot_server(args: Args):
             gui=args.gui,
             panel_port=args.panel_port,
             control_mode=args.control_mode,
+            sim_clock=args.sim_clock,
         )
 
     else:

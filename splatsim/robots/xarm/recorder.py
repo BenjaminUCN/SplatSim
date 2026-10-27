@@ -13,8 +13,9 @@ import numpy as np
 class TrajectoryRecorder:
     """
     Graba un frame por cada comando recibido (cada RECORD_EVERY comandos), usando
-    la observación que el cliente pide justo después del comando. Así el dt simulado
-    entre frames es fijo: every / control_hz.
+    la observación que el cliente pide justo después del comando. Con sim_clock=fixed el dt
+    simulado entre frames es fijo: every / control_hz; con realtime sigue al lazo del cliente
+    (cada frame guarda sim_time).
 
     El hilo del teclado solo deja una petición; start/stop se ejecutan en tick(),
     desde el serve_loop y con el lock de la simulación tomado.

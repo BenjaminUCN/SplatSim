@@ -5,6 +5,8 @@ from splatsim.robots.sim_robot_pybullet_base import PybulletRobotServerBase
 SIM_DT = 1 / 240          # paso de PyBullet (lo fija la base con setTimeStep)
 CONTROL_HZ = 30           # frecuencia de comandos por defecto; launch_nodes --hz la sobrescribe
 LOOP_HZ = 240             # frecuencia del serve_loop (UI y física en reposo)
+SIM_CLOCKS = ("fixed", "realtime")  # tiempo simulado por comando: 1/hz fijo o el tiempo real
+MAX_REALTIME_STEP = 0.25  # s: tope del avance por comando con sim_clock=realtime
 IDLE_STEP_AFTER = 0.2     # s reales sin comandos tras los que el serve_loop vuelve a avanzar la física
 LOW_LEVEL_HZ = 30         # lazo de control articular (igual que el hilo del driver real del xArm5)
 

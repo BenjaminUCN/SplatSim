@@ -21,12 +21,14 @@ from .config import (
     ENV_CONFIG,
     FLOOR_Z,
     IDLE_STEP_AFTER,
+    MAX_REALTIME_STEP,
     LOW_LEVEL_HZ,
     LOOP_HZ,
     MAX_RECORD_SECONDS,
     NUM_DOFS,
     RECORD_EVERY,
     CONTROL_HZ,
+    SIM_CLOCKS,
     SIM_DT,
 )
 from .debug_ui import (
@@ -48,11 +50,18 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
                  gui: str = "viser", panel_port: int = 8080, control_mode: str = "position",
-                 **kwargs):
+                 sim_clock: str = "fixed", **kwargs):
         """gui: "viser" (panel web en http://localhost:<panel_port>) o "pybullet"
         (sliders y botones de PyBullet; --move_apple agrega los de la manzana).
         control_mode: position / interp / velocity (ver splatsim/robots/joint_controller.py),
-        la misma ley que usa el driver real del xArm5."""
+        la misma ley que usa el driver real del xArm5.
+        sim_clock: cuánto tiempo simulado avanza cada comando. "fixed": exactamente 1/control_hz
+        (dt fijo por frame aunque el cliente vaya más lento; políticas y ensayos). "realtime": el
+        tiempo real desde el comando anterior, así la simulación sigue a GELLO a velocidad real
+        aunque el lazo del cliente no alcance control_hz."""
+        if sim_clock not in SIM_CLOCKS:
+            raise ValueError(f"sim_clock debe ser uno de {SIM_CLOCKS}, no {sim_clock!r}")
+        self.sim_clock = sim_clock
         # traj_save_path se acepta por compatibilidad pero no se usa (igual que antes)
         self._num_dofs = NUM_DOFS
         self.control_hz = control_hz
@@ -64,13 +73,15 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self.joint_ctrl = JointController(control_mode, 1 / control_hz)
         self._holding = True             # en reposo el brazo se sostiene en su posición
         print(f"[xArm5] control_mode={control_mode}")
-        print(f"[xArm5] control_hz={control_hz} → {self.steps_per_command} pasos por comando")
+        print(f"[xArm5] control_hz={control_hz} → {self.steps_per_command} pasos por comando"
+              + (" (sim_clock=realtime: los pasos siguen al tiempo real)" if sim_clock == "realtime" else ""))
         # el hilo ZMQ, el serve_loop y el recorder comparten PyBullet y el renderer
         self.lock = threading.RLock()
         self.sim_steps = 0               # pasos de simulación dados vía _step()
         self._last_images = {}           # cámaras de la última observación (vista previa del panel)
         self._last_images_time = 0.0
         self._last_command_time = 0.0    # time.monotonic() del último comando
+        self._steps_at_command = 0       # sim_steps al terminar el último comando
         # el recorder no toca la base en su constructor, así que es seguro crearlo antes
         self.recorder = TrajectoryRecorder(
             self, round(MAX_RECORD_SECONDS / SIM_DT), RECORD_EVERY)
@@ -190,9 +201,9 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             self.joint_ctrl.set_target(joint_state[:5], now)
             if self.use_gripper:
                 self.gripper.command(joint_state[-1])
-            # cada comando avanza exactamente 1/control_hz s simulados (frames con dt fijo),
-            # en ticks del lazo articular de steps_per_tick pasos
-            remaining = self.steps_per_command
+            # cada comando avanza 1/control_hz s simulados (o el tiempo real transcurrido con
+            # sim_clock=realtime), en ticks del lazo articular de steps_per_tick pasos
+            remaining = self._command_steps()
             while remaining > 0:
                 n = min(self.steps_per_tick, remaining)
                 kind, values = self.joint_ctrl.step(
@@ -201,7 +212,27 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
                 self._step(n)
                 remaining -= n
             self._last_command_time = time.monotonic()
+            self._steps_at_command = self.sim_steps
             self.recorder.on_command()
+
+    def _command_steps(self) -> int:
+        """Pasos de simulación que avanza el comando actual."""
+        if self.sim_clock == "fixed" or not self._last_command_time:
+            return self.steps_per_command
+        elapsed = min(time.monotonic() - self._last_command_time, MAX_REALTIME_STEP)
+        # periodo real entre objetivos para interp/velocity (el lazo puede ir bajo control_hz)
+        self.joint_ctrl.nominal_period = 0.8 * self.joint_ctrl.nominal_period + 0.2 * elapsed
+        # lo que el serve_loop ya simuló en reposo desde el comando anterior no se repite
+        done = self.sim_steps - self._steps_at_command
+        return max(1, round(elapsed / SIM_DT) - done)
+
+    def set_sim_clock(self, clock: str) -> None:
+        if clock not in SIM_CLOCKS:
+            raise ValueError(f"sim_clock debe ser uno de {SIM_CLOCKS}, no {clock!r}")
+        with self.lock:
+            self.sim_clock = clock
+            self.joint_ctrl.nominal_period = 1 / self.control_hz
+        print(f"[xArm5] sim_clock={clock}")
 
     def set_object_pose(self, *args, **kwargs) -> None:
         with self.lock:  # también se llama desde el hilo ZMQ
@@ -242,6 +273,7 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             obs["joint_positions"] = self.get_joint_state()
             obs["sim_time"] = self.sim_steps * SIM_DT
             obs["control_mode"] = self.joint_ctrl.mode
+            obs["sim_clock"] = self.sim_clock
             self._last_images = {k: obs[k] for k in self.camera_names if obs.get(k) is not None}
             self._last_images_time = time.monotonic()
             self.recorder.on_observation(obs)

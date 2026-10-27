@@ -23,7 +23,7 @@ from splatsim.utils.registry import load_registry, loadable_models, model_label
 
 from .apple import load_grid
 from .debug_ui import save_camera_poses
-from .config import APPLE_GRID_PATH, BASE_CAM_FOV, IMAGE_H, IMAGE_W
+from .config import APPLE_GRID_PATH, BASE_CAM_FOV, IMAGE_H, IMAGE_W, SIM_CLOCKS
 
 STATUS_PERIOD = 0.2    # s entre refrescos de estado, pose del efector y de la manzana
 PREVIEW_PERIOD = 0.5   # s entre renders de la vista previa (cuesta un render del splat)
@@ -108,7 +108,11 @@ class ControlPanel:
             # se puede cambiar con una política corriendo: retoma desde la posición actual
             mode = self.v.gui.add_dropdown("Control mode", list(MODES),
                                            initial_value=self.s.joint_ctrl.mode)
+            # fixed: cada comando avanza 1/hz simulado; realtime: el tiempo real (teleop con GELLO)
+            clock = self.v.gui.add_dropdown("Sim clock", list(SIM_CLOCKS),
+                                            initial_value=self.s.sim_clock)
         self._on_user(mode, lambda h: self.s.set_control_mode(h.value))
+        self._on_user(clock, lambda h: self.s.set_sim_clock(h.value))
 
     # ── política ─────────────────────────────────────────────────────────────
     def _build_policy_gui(self):

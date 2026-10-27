@@ -350,12 +350,23 @@ def main(args):
 
     save_path = None
     start_time = time.time()
+    loop_hz = None  # frecuencia real del lazo (promedio móvil), para ver si alcanza --hz
+    prev_loop_start = None
     try:
      while True:
         loop_start = time.time()
+        if prev_loop_start is not None:
+            inst = 1 / max(loop_start - prev_loop_start, 1e-6)
+            loop_hz = inst if loop_hz is None else 0.9 * loop_hz + 0.1 * inst
+        prev_loop_start = loop_start
 
         num = time.time() - start_time
-        message = f"\rTime passed: {round(num, 2)}          "
+        message = f"\rTime passed: {round(num, 2)}"
+        if loop_hz is not None:
+            message += f"  loop {loop_hz:4.1f}/{args.hz} Hz"
+            if loop_hz < 0.9 * args.hz:
+                message += " (bajo --hz)"
+        message += "          "
         print_color(
             message,
             color="white",
