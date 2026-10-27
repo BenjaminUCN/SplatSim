@@ -70,6 +70,8 @@ from tqdm import tqdm
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
+from splatsim.utils.episode_selection import load_discarded
+
 # ============================================================
 
 
@@ -84,6 +86,7 @@ class ConversionConfig:
 
     wrist_camera: bool = True
     cameras: list[str] | None = None  # subconjunto de cámaras a convertir (por defecto todas)
+    ignore_selection: bool = False    # incluir también los episodios descartados en selection.yaml
     wrist_offset: int | None = None
     use_videos: bool = True
 
@@ -179,7 +182,7 @@ def pkl_sort_key(p: Path):
         return (1, 0, p.stem)
 
 
-def discover_episodes(input_dirs: list[Path]) -> list[Path]:
+def discover_episodes(input_dirs: list[Path], use_selection: bool = True) -> list[Path]:
     """
     Descubre episodios (subcarpetas con .pkl) dentro de una o más
     carpetas raíz.
@@ -205,7 +208,13 @@ def discover_episodes(input_dirs: list[Path]) -> list[Path]:
         if not found:
             warnings.warn(f"No se encontraron episodios (.pkl) en {input_dir}")
 
-        print(f"  {input_dir}: {len(found)} episodios encontrados")
+        # episodios descartados con scripts/review_recordings.py (selection.yaml)
+        discarded = load_discarded(input_dir) if use_selection else set()
+        skipped = [d for d in found if d.name in discarded]
+        found = [d for d in found if d.name not in discarded]
+
+        print(f"  {input_dir}: {len(found)} episodios encontrados"
+              + (f" ({len(skipped)} descartados en selection.yaml)" if skipped else ""))
         episodes.extend(found)
 
     if not episodes:
@@ -704,7 +713,7 @@ def run_conversion(config: ConversionConfig, repo_suffix: str):
     print("SplatSim / Real -> LeRobot v3")
     print("=" * 70)
 
-    episode_dirs = discover_episodes(config.input_dirs)
+    episode_dirs = discover_episodes(config.input_dirs, use_selection=not config.ignore_selection)
     print(f"\nFound {len(episode_dirs)} episodes total\n")
 
     # Las features del dataset (image_keys, shapes, state/action dims) se
@@ -840,6 +849,12 @@ def build_parser():
     )
     p.add_argument("--use_images", action="store_true")
     p.add_argument(
+        "--ignore_selection",
+        action="store_true",
+        help="Incluir también los episodios descartados en <input_dir>/selection.yaml "
+        "(scripts/review_recordings.py).",
+    )
+    p.add_argument(
         "--repo_suffix",
         type=str,
         default=None,
@@ -866,6 +881,7 @@ def main():
         wrist_offset=args.wrist_offset,
         wrist_camera=not args.no_wrist_camera,
         cameras=args.cameras,
+        ignore_selection=args.ignore_selection,
         use_videos=not args.use_images,
     )
 
