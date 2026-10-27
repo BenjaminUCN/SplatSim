@@ -181,7 +181,7 @@ The server renders `base_rgb`, `base2_rgb` and `wrist_rgb` from the gaussian spl
 
 *Run* tab:
 - *Robot*: Reset Robot Joints.
-- *Policy*: pick a model from `configs/registry.yaml` (by `name`, or `suggested_name`), see its description, cameras and dataset, and Run / Stop it. Run starts `run_env_sim.py --agent lerobot_diffusion --checkpoint <model>` in another process with the server's `--hz` and port (optionally resetting the robot first); its output goes to the server terminal. Reload Registry picks up a regenerated registry.
+- *Policy*: pick a model from `configs/registry.yaml` (by `name`, or `suggested_name`), see its description, cameras and dataset, and Run / Stop it. Run starts `run_env_sim.py --agent lerobot_diffusion --checkpoint <model>` in another process with the server's `--hz` and port (optionally resetting the robot first); its output goes to the server terminal. Reload Registry picks up a regenerated registry. Its *Trials* subfolder runs `run_policy_trials.py` for the selected model (trials per position, seconds per trial, grid positions such as `0,2,5-7` or empty for all) and shows the progress, the last trial's distances and the results folder. Run and Run Trials share the Stop button: only one client drives the robot at a time.
 - *Recording*: Start / Stop (same as `r`/`s` + Enter in the terminal) and the frame count.
 
 *Scene* tab:

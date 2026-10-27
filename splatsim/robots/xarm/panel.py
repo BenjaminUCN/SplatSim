@@ -5,10 +5,13 @@ propios hilos, así que solo encolan acciones; update() las ejecuta desde el ser
 con el lock de la simulación tomado (mismo patrón que las peticiones del recorder).
 """
 import atexit
+import os
 import queue
+import re
 import signal
 import subprocess
 import sys
+import threading
 import time
 
 import numpy as np
@@ -26,6 +29,22 @@ PREVIEW_DEFAULT = ("base_rgb", "wrist_rgb")  # vistas activas al abrir el panel
 PREVIEW_PANEL_WIDTH = 360
 MAIN_PANEL_WIDTH = 380
 STOP_TIMEOUT = 5.0     # s que se espera a que la política termine tras Ctrl+C antes de matarla
+
+
+def _parse_indices(text: str, n: int) -> list[int] | None:
+    """'0,2,5-7' -> [0, 2, 5, 6, 7]; vacío -> None (todas). Valida contra n posiciones."""
+    text = text.strip()
+    if not text:
+        return None
+    out = []
+    for part in text.split(","):
+        a, _, b = part.strip().partition("-")
+        lo, hi = int(a), int(b or a)
+        out += range(lo, hi + 1)
+    bad = [i for i in out if not 0 <= i < n]
+    if bad:
+        raise ValueError(f"{bad} out of range (grid has {n} positions)")
+    return out
 
 
 def _xyzw_to_wxyz(q):
@@ -90,6 +109,8 @@ class ControlPanel:
         self._models = {}            # etiqueta del dropdown -> (carpeta, entrada del registro)
         self._policy_proc = None
         self._policy_label = None
+        self._policy_trials = False
+        self._trial_info = {}
         self._stop_deadline = None
         with self.v.gui.add_folder("Policy"):
             self._model_select = self.v.gui.add_dropdown("Model", ["-"])
@@ -99,8 +120,18 @@ class ControlPanel:
             stop = self.v.gui.add_button("Stop")
             reload = self.v.gui.add_button("Reload Registry")
             self._policy_status = self.v.gui.add_markdown("No policy running")
+            # ensayos automáticos sobre la grilla de la manzana (run_policy_trials.py)
+            with self.v.gui.add_folder("Trials", expand_by_default=False):
+                self._trials_per_pos = self.v.gui.add_number("Trials per position", 3, min=1, step=1)
+                self._trial_seconds = self.v.gui.add_number("Trial seconds", 15.0, min=1.0, step=1.0)
+                self._trial_positions = self.v.gui.add_text(
+                    "Positions", "", hint="Grid indices, e.g. 0,2,5-7 (empty = all)")
+                run_trials = self.v.gui.add_button("Run Trials", color="blue")
+                self._trial_progress = self.v.gui.add_progress_bar(0.0, visible=False)
+                self._trial_status = self.v.gui.add_markdown("")
         self._model_select.on_update(lambda _: self._show_model_info())
         self._on_click(run, self._run_policy)
+        self._on_click(run_trials, self._run_trials)
         self._on_click(stop, self._stop_policy)
         reload.on_click(lambda _: self._load_models())
         self._load_models()
@@ -143,33 +174,98 @@ class ControlPanel:
             lines.append(f"**⚠ the server does not render {', '.join(missing)}** (launch_nodes --cameras)")
         self._model_info.content = "  \n".join(line for line in lines if line)
 
-    def _run_policy(self):
+    def _selected_model(self):
+        """(etiqueta, modelo) elegido, o None si no se puede correr (avisa en el estado)."""
         if self._policy_proc is not None:
             self._policy_status.content = f"**Already running** {self._policy_label}: press Stop first"
-            return
+            return None
         if self._model_select.value not in self._models:
-            return
+            return None
         label = self._model_select.value
         _, model = self._models[label]
         missing = self._missing_cameras(model)
         if missing:
             self._policy_status.content = f"**Cannot run**: the server does not render {', '.join(missing)}"
+            return None
+        return label, model
+
+    def _run_policy(self):
+        selected = self._selected_model()
+        if selected is None:
             return
+        label, model = selected
         if self._reset_first.value:
             self.s.reset_robot()
-        cmd = [sys.executable, "scripts/run_env_sim.py", "--agent", "lerobot_diffusion",
-               "--hz", str(self.s.control_hz), "--robot_port", str(self.s.zmq_port),
-               "--checkpoint", model["path"]]
+        self._start_client(
+            ["scripts/run_env_sim.py", "--agent", "lerobot_diffusion",
+             "--hz", str(self.s.control_hz), "--robot_port", str(self.s.zmq_port),
+             "--checkpoint", model["path"]],
+            label, trials=False)
+
+    def _run_trials(self):
+        selected = self._selected_model()
+        if selected is None:
+            return
+        label, model = selected
+        grid = load_grid()
+        try:
+            positions = _parse_indices(self._trial_positions.value, len(grid))
+        except ValueError as e:
+            self._trial_status.content = f"**Positions**: {e}"
+            return
+        if not grid:
+            self._trial_status.content = "**The grid is empty**: save positions in the Scene tab"
+            return
+        cmd = ["scripts/run_policy_trials.py", "--checkpoint", model["path"],
+               "--robot_port", str(self.s.zmq_port),
+               "--trials_per_position", str(int(self._trials_per_pos.value)),
+               "--trial_seconds", str(float(self._trial_seconds.value))]
+        if positions is not None:
+            cmd += ["--positions", *map(str, positions)]
+        n = len(positions if positions is not None else grid) * int(self._trials_per_pos.value)
+        self._trial_info = {"done": 0, "total": n, "last": "", "root": None}
+        self._trial_progress.value, self._trial_progress.visible = 0.0, True
+        self._trial_status.content = f"0/{n} trials; loading the model..."
+        self._start_client(cmd, label, trials=True)
+
+    def _start_client(self, args, label, trials: bool):
+        """Lanza un cliente (política o ensayos) en otro proceso; su salida va a esta terminal."""
+        cmd = [sys.executable, *args]
         print(f"[Panel] {' '.join(cmd)}")
-        self._policy_proc = subprocess.Popen(cmd)   # su salida va a esta misma terminal
+        if trials:
+            # se lee su salida para mostrar el avance; sin buffer para que llegue al momento
+            self._policy_proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"})
+            threading.Thread(target=self._read_trials_output, args=(self._policy_proc,),
+                             daemon=True).start()
+        else:
+            self._policy_proc = subprocess.Popen(cmd)
         self._policy_label = label
+        self._policy_trials = trials
         self._stop_deadline = None
-        self._policy_status.content = f"**▶ Running** {label} (pid {self._policy_proc.pid}); loading takes ~10 s"
+        what = "trials of " if trials else ""
+        self._policy_status.content = (f"**▶ Running** {what}{label} (pid {self._policy_proc.pid}); "
+                                       "loading takes ~10 s")
+
+    def _read_trials_output(self, proc):
+        """Hilo: reenvía la salida de run_policy_trials.py y extrae el avance."""
+        info = self._trial_info
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            if m := re.search(r"\[Trials\] (\d+)/(\d+)", line):
+                info["done"] = int(m.group(1)) - 1     # el ensayo m.group(1) recién empieza
+                info["last"] = line.split("— ", 1)[-1].strip()
+            elif m := re.search(r"\[Trials\] (\d+) frames, dist final ([\d.]+) m, mín ([\d.]+) m", line):
+                info["done"] += 1
+                info["result"] = f"last: final {float(m.group(2)):.3f} m, min {float(m.group(3)):.3f} m"
+            elif m := re.search(r"\[Trials\] Resultados en (.+)", line):
+                info["root"] = m.group(1).strip()
 
     def _stop_policy(self):
         if self._policy_proc is None:
             return
-        self._policy_proc.send_signal(signal.SIGINT)   # como Ctrl+C: run_env_sim cierra limpio
+        self._policy_proc.send_signal(signal.SIGINT)   # como Ctrl+C: los scripts cierran limpio
         self._stop_deadline = time.monotonic() + STOP_TIMEOUT
         self._policy_status.content = f"Stopping {self._policy_label}..."
 
@@ -177,15 +273,33 @@ class ControlPanel:
         proc = self._policy_proc
         if proc is None:
             return
+        if self._policy_trials:
+            self._show_trials_progress()
         code = proc.poll()
         if code is None:
             if self._stop_deadline is not None and time.monotonic() > self._stop_deadline:
                 proc.kill()
             return
-        stopped = self._stop_deadline is not None
-        self._policy_status.content = (f"Stopped {self._policy_label}" if stopped
-                                       else f"**{self._policy_label} exited** (code {code}); see the terminal")
+        if self._stop_deadline is not None:
+            self._policy_status.content = f"Stopped {self._policy_label}"
+        elif code == 0:
+            self._policy_status.content = f"Finished {self._policy_label}"
+        else:
+            self._policy_status.content = f"**{self._policy_label} failed** (code {code}); see the terminal"
+        if self._policy_trials:
+            self._show_trials_progress()
         self._policy_proc = None
+
+    def _show_trials_progress(self):
+        info = self._trial_info
+        done, total = info["done"], info["total"]
+        self._trial_progress.value = 100.0 * done / max(total, 1)
+        lines = [f"{done}/{total} trials" + (f" — now {info['last']}" if info["last"] and done < total else "")]
+        if info.get("result"):
+            lines.append(info["result"])
+        if info["root"]:
+            lines.append(f"results in `{info['root']}`")
+        self._trial_status.content = "  \n".join(lines)
 
     def _kill_policy(self):
         if self._policy_proc is not None and self._policy_proc.poll() is None:
