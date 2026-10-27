@@ -1,0 +1,31 @@
+# Training config for scripts/train_diffusion.py.
+# Copy this file for each experiment, or override any field from the CLI:
+#   python scripts/train_diffusion.py --config configs/train/diffusion.yaml --horizon 32 --cameras base_rgb
+
+# ── Run ──────────────────────────────────────────────────────────────────────
+model_name: null          # null -> diffusion_<MMDD_HHMM>
+output_root: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial
+device: cuda
+
+# ── Dataset ──────────────────────────────────────────────────────────────────
+dataset_id: LuEduSoHu/splatsim_xarm5_lite_10fps_261020_2010
+dataset_root: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010
+cameras: null             # subset of the dataset cameras, e.g. [base_rgb, wrist_rgb]; null -> all
+
+# ── Policy (DiffusionConfig) ─────────────────────────────────────────────────
+n_obs_steps: 2            # observation horizon
+horizon: 64               # predicted action horizon; multiple of 8 with the default U-Net
+n_action_steps: 32        # actions executed per prediction; <= horizon - n_obs_steps + 1
+
+# ── Optimization ─────────────────────────────────────────────────────────────
+training_steps: 50000
+batch_size: 32
+num_workers: 12           # 16 caused OOM with 56 GB in WSL
+prefetch_factor: 3
+image_augmentation: true  # brightness, contrast, random erasing, gaussian noise
+
+# ── Logging / saving ─────────────────────────────────────────────────────────
+log_freq: 1
+save_freq: 10000
+push_to_hub: true         # uploads to <hub_user>/robot_learning_tutorial_<model_name>
+hub_user: LuEduSoHu

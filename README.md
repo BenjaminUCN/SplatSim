@@ -202,6 +202,15 @@ Convert recordings to a LeRobot dataset (it detects the image numbering of each 
 python splatsim/utils/lerobot_transform_v2.py --input_dir <traj_folder> --output_dir <dataset_dir> --fps 10 [--cameras base_rgb base2_rgb wrist_rgb]
 ```
 
+### Train the diffusion policy
+
+Parameters (dataset, cameras, `n_obs_steps`, `horizon`, `n_action_steps`, steps, batch size, Hub upload…) live in `configs/train/diffusion.yaml`. Copy it per experiment, or override any field from the CLI:
+```bash
+python scripts/train_diffusion.py --config configs/train/diffusion.yaml
+python scripts/train_diffusion.py --config configs/train/diffusion.yaml --horizon 32 --cameras base_rgb --no-push-to-hub
+```
+The output folder `<output_root>/<model_name>/` gets the final policy, checkpoints every `save_freq` steps and the resolved `train_config.yaml`.
+
 ### Run the diffusion policy
 
 Start the server as above, then run the policy with the same `--hz` it was trained at (10 for the current datasets):
