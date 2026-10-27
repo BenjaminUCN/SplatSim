@@ -4,7 +4,6 @@ import os
 from collections import deque
 from typing import Any, Dict
 
-import cv2
 import numpy as np
 import pybullet as p
 import torch
@@ -159,27 +158,18 @@ class LeRobotDiffusionAgent:
         state = obs["state"]
         state = self.safe_to_numpy(state).astype(np.float32).flatten()
         
-        # for img_key in [img_key for img_key in obs.keys() if img_key.endswith("_rgb")]:
-        #     camera_image = obs[img_key]
-        #     camera_image = np.transpose(camera_image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
-        #     camera_image = (camera_image * 255).astype(np.uint8)
-        
-        base_image = obs["base_rgb"]
-        if hasattr(base_image, 'detach'):
-            base_image = np.transpose(base_image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
-            base_image = (base_image * 255).astype(np.uint8)
-            base_image = cv2.cvtColor(base_image, cv2.COLOR_BGR2RGB)
-        
-        wrist_image = obs["wrist_rgb"]
-        if hasattr(wrist_image, 'detach'):
-            wrist_image = np.transpose(wrist_image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
-            wrist_image = (wrist_image * 255).astype(np.uint8)
-            base_image = cv2.cvtColor(base_image, cv2.COLOR_BGR2RGB)
-        
-        frame = {
-            "base_rgb": base_image,
-            "wrist_rgb": wrist_image,
-        }
+        # una imagen por cada cámara con la que se entrenó (observation.images.<cam>);
+        # el servidor entrega tensores RGB CxHxW en [0, 1], igual que los PNG del dataset
+        frame = {}
+        for key in self.dataset_metadata.features:
+            if not key.startswith("observation.images."):
+                continue
+            cam = key.removeprefix("observation.images.")
+            image = obs[cam]
+            if hasattr(image, 'detach'):
+                image = np.transpose(image.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
+                image = (np.clip(image, 0, 1) * 255).astype(np.uint8)  # como el recorder
+            frame[cam] = image
         for name in self.dataset_metadata.features['observation.state']['names']:
             frame[name] = state[self.dataset_metadata.features['observation.state']['names'].index(name)]
 
@@ -278,11 +268,9 @@ class LeRobotDiffusionAgent:
         
         
         if self.make_new_prediction:
-            obs_frame = self._build_obs(obs)
+            obs_frame = self._build_obs(obs)  # ya normalizado por self.preprocess
 
-            obs = self.preprocess(obs_frame)
-
-            action = self.policy.select_action(obs)
+            action = self.policy.select_action(obs_frame)
             action = self.postprocess(action)
             
             action_np = action.squeeze().cpu().numpy()
