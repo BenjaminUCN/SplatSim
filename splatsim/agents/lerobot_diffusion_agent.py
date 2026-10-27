@@ -89,6 +89,13 @@ class LeRobotDiffusionAgent:
                 
         print("[LeRobotDiffusionAgent] Loading dataset metadata.")
         self.dataset_metadata = LeRobotDatasetMetadata(dataset_id, root=dataset_root)
+        # features del dataset sin las cámaras que la política no usa: build_inference_frame
+        # exige cada imagen que aparezca aquí, así el servidor solo renderiza las necesarias
+        self.input_features = {
+            k: ft for k, ft in self.dataset_metadata.features.items()
+            if not k.startswith("observation.images.") or k in self.policy.config.image_features
+        }
+        print(f"[LeRobotDiffusionAgent] Cámaras: {list(self.policy.config.image_features)}")
 
         print("[LeRobotDiffusionAgent] Making pre-post processors.")
         self.preprocess, self.postprocess = make_pre_post_processors(
@@ -158,12 +165,10 @@ class LeRobotDiffusionAgent:
         state = obs["state"]
         state = self.safe_to_numpy(state).astype(np.float32).flatten()
         
-        # una imagen por cada cámara con la que se entrenó (observation.images.<cam>);
-        # el servidor entrega tensores RGB CxHxW en [0, 1], igual que los PNG del dataset
+        # una imagen por cada cámara que usa la política (puede ser un subconjunto de las
+        # del dataset); el servidor entrega tensores RGB CxHxW en [0, 1], igual que los PNG
         frame = {}
-        for key in self.dataset_metadata.features:
-            if not key.startswith("observation.images."):
-                continue
+        for key in self.policy.config.image_features:
             cam = key.removeprefix("observation.images.")
             image = obs[cam]
             if hasattr(image, 'detach'):
@@ -175,7 +180,7 @@ class LeRobotDiffusionAgent:
 
         frame = build_inference_frame(
             observation=frame,
-            ds_features=self.dataset_metadata.features,
+            ds_features=self.input_features,
             device=self.device,
         )
 
