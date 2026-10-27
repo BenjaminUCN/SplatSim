@@ -254,6 +254,15 @@ python scripts/train_diffusion.py --config configs/train/diffusion.yaml --horizo
 ```
 The output folder `<output_root>/<model_name>/` gets the final policy, checkpoints every `save_freq` steps and the resolved `train_config.yaml`.
 
+### Training queue
+
+Train several models one after another, e.g. to compare camera arrangements or horizons:
+```bash
+python scripts/train_queue.py configs/train/queue_example.yaml --dry_run   # list the runs
+python scripts/train_queue.py configs/train/queue_example.yaml             # train them
+```
+A queue file has a `base` config, `common` overrides, explicit `runs` (each with `name`, `description` and any training field) and an optional `sweep` (one run per combination of values, named like `h32-a16-2cam`). Each run's final config, log and status go to `~/data/train_queues/<queue>/`; relaunching skips finished runs (`--rerun` to repeat them, `--only <name>` to pick some). When the queue ends, `configs/registry.yaml` is regenerated so the new models show up in the panel with their name and description.
+
 ### Registry of recordings, datasets and models
 
 `configs/registry.yaml` links each model to the dataset it was trained on, and each dataset to the GELLO recordings it was converted from. Regenerate it after recording, converting or training:
@@ -469,6 +478,14 @@ python scripts/run_env_sim.py --agent replay_trajectory_and_save
 ## Visualizing a trained policy in the Splat Sim
 
 For the xArm5 LeRobot diffusion policy, see [Run the diffusion policy](#run-the-diffusion-policy) and [Automated policy trials](#automated-policy-trials).
+
+### Comparing models
+
+After running trials for several models (panel *Trials* or `run_policy_trials.py`), compare them:
+```bash
+python scripts/compare_trials.py ~/data/policy_trials/2cam-h64 ~/data/policy_trials/1cam-h64 ~/data/policy_trials/3cam-h64
+```
+Each argument is a model folder (all its runs are pooled) or a single run, optionally as `label=path`. A trial succeeds when the minimum end-effector–tomato distance is at most `--success_dist` (0.05 m; `--metric final_dist` uses the final distance). It reports each model's success rate with a 95% Wilson interval, a Fisher exact test (2 models) or a chi-square test plus Holm-corrected pairwise Fisher tests (3 or more), and writes `summary.md`, CSV tables and three figures (success rate, success per tomato position, distance per trial) to `~/data/policy_trials/comparisons/<date>/`. With 9 positions, plan on ~10 trials per position per model for these tests to detect moderate differences.
 
 ## Credits, licenses and citations
 
