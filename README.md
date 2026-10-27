@@ -174,7 +174,9 @@ python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5
 - `--move_apple`: adds sliders and a "Set Random Apple Position" button to move the tomato in the PyBullet GUI.
 - `--hz`: the rate at which the client sends commands. **It must match `--hz` of the client** (`run_env_sim.py`, default 30). Each command advances the simulation by exactly `1/hz` seconds, so recorded frames are evenly spaced in simulated time.
 
-The server renders `base_rgb` and `wrist_rgb` from the gaussian splat. The PyBullet GUI also has sliders to tune the base camera pose and a "Reset Robot Joints" button. Camera FoV, recording length and other constants live in `splatsim/robots/xarm/config.py`.
+The server renders `base_rgb`, `base2_rgb` and `wrist_rgb` from the gaussian splat; pick a subset with `--cameras base_rgb wrist_rgb` (every rendered camera is recorded). The PyBullet GUI also has a "Reset Robot Joints" button. Camera FoV, recording length and other constants live in `splatsim/robots/xarm/config.py`.
+
+**Base cameras.** `base_rgb` and `base2_rgb` are fixed cameras with independent poses, each with its own X/Y/Z/Roll/Pitch/Yaw sliders (`base`, `base2`). The "Save Camera Poses" button writes both poses to `configs/camera_poses.yaml`, which the server loads on startup and which overrides the defaults in `BASE_CAMS` (`config.py`). Fix the camera poses before recording a dataset, and record with all cameras so you can later train on 1, 2 or 3 of them from the same demonstrations.
 
 ### Record demonstrations
 
@@ -193,6 +195,11 @@ One frame is saved per command received, in `traj_folder`:
 Check that recordings have a constant time step:
 ```bash
 python scripts/check_recording_timing.py [traj_folder]
+```
+
+Convert recordings to a LeRobot dataset (it detects the image numbering of each episode, both the current per-frame one and the interleaved one of older recordings; note that it pushes the dataset to the Hugging Face Hub at the end):
+```bash
+python splatsim/utils/lerobot_transform_v2.py --input_dir <traj_folder> --output_dir <dataset_dir> --fps 10 [--cameras base_rgb base2_rgb wrist_rgb]
 ```
 
 ### Run the diffusion policy

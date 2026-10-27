@@ -13,6 +13,11 @@ Soporta DOS esquemas de entrada, detectados automáticamente por episodio:
        - convención de índices: base_idx = 2*(idx-1), wrist_idx = 2*(idx-1)+1
        - nombres de pkl numéricos: 00001.pkl, 00002.pkl, ...
 
+     Dos formas de numerar las imágenes, detectadas por episodio:
+       - por frame (servidor xArm5 actual): <cam>_00001.png va con 00001.pkl,
+         para cualquier cámara (base_rgb, base2_rgb, wrist_rgb, ...)
+       - intercalada (grabaciones antiguas): ver convención de arriba
+
   2. REAL (gello, brazo físico):
        - pkl SIN 'action': trae 'control' (6,) + 'gripper_position' (escalar)
          -> action_real = concat(control, gripper_position)  (7,)
@@ -46,6 +51,7 @@ from __future__ import annotations
 
 import argparse
 import pickle
+import re
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -77,6 +83,7 @@ class ConversionConfig:
     robot_type: str = "xarm5_lite"
 
     wrist_camera: bool = True
+    cameras: list[str] | None = None  # subconjunto de cámaras a convertir (por defecto todas)
     wrist_offset: int | None = None
     use_videos: bool = True
 
@@ -298,22 +305,50 @@ def infer_image_keys(
     episode_dir: Path,
     image_dir_name: str,
     wrist_camera: bool,
+    cameras: list[str] | None = None,
 ) -> list[str]:
+    """Cámaras presentes en el episodio (<cam>_rgb_<idx>.png), base_rgb primero y wrist al final."""
 
     image_dir = episode_dir / image_dir_name
 
-    keys = []
+    found = {
+        m.group(1)
+        for p in image_dir.glob("*.png")
+        if (m := re.match(r"^(.+_rgb)_\d+\.png$", p.name))
+    }
 
-    if list(image_dir.glob("base_rgb*.png")):
-        keys.append("base_rgb")
+    if cameras is not None:
+        missing = set(cameras) - found
+        if missing:
+            raise RuntimeError(f"Cámaras {sorted(missing)} no están en {image_dir} (hay {sorted(found)})")
+        found = set(cameras)
 
-    if wrist_camera and list(image_dir.glob("wrist_rgb*.png")):
-        keys.append("wrist_rgb")
+    if not wrist_camera:
+        found.discard("wrist_rgb")
 
-    if not keys:
+    if not found:
         raise RuntimeError(f"No image streams found in {image_dir}")
 
-    return keys
+    return sorted(found, key=lambda k: (k.startswith("wrist"), k != "base_rgb", k))
+
+
+def uses_per_frame_naming(
+    episode_dir: Path,
+    image_dir_name: str,
+    image_keys: list[str],
+) -> bool:
+    """True si cada pkl tiene una imagen por cámara con su mismo número (<cam>_00001.png
+    junto a 00001.pkl). En la numeración intercalada antigua cada índice es de una sola
+    cámara, así que esta prueba falla."""
+
+    image_dir = episode_dir / image_dir_name
+    pkls = sorted(episode_dir.glob("*.pkl"), key=pkl_sort_key)[:5]
+
+    return bool(pkls) and all(
+        (image_dir / f"{key}_{pkl.stem}.png").exists()
+        for pkl in pkls
+        for key in image_keys
+    )
 
 
 def infer_image_shape(
@@ -580,6 +615,8 @@ def process_episode(
             else 0
         )
 
+    per_frame = uses_per_frame_naming(episode_dir, image_dir_name, image_keys)
+
     n_missing = 0
 
     for position, pkl_path in enumerate(pkl_files):
@@ -600,7 +637,12 @@ def process_episode(
         #   wrist_idx = base_idx + 1  (con offset adicional si se detectó)
         for key in image_keys:
 
-            if key == "base_rgb":
+            if per_frame:
+                img_path = image_dir / f"{key}_{pkl_path.stem}.png"
+                if not img_path.exists():
+                    img_path = None
+
+            elif key == "base_rgb":
                 base_idx = 2 * position + base_start_offset
                 img_path = find_image(image_dir, key, base_idx)
                 if img_path is None:
@@ -698,7 +740,9 @@ def run_conversion(config: ConversionConfig, repo_suffix: str):
     print(f"Esquema detectado: '{schema}'")
     print(f"Carpeta de imágenes detectada: '{image_dir_name}'")
 
-    image_keys = infer_image_keys(reference_episode, image_dir_name, config.wrist_camera)
+    image_keys = infer_image_keys(
+        reference_episode, image_dir_name, config.wrist_camera, config.cameras
+    )
 
     image_shapes = {
         k: infer_image_shape(reference_episode, image_dir_name, k)
@@ -787,6 +831,13 @@ def build_parser():
     p.add_argument("--robot_type", type=str, default="xarm5_lite")
     p.add_argument("--wrist_offset", type=int, default=None, choices=[0, 1])
     p.add_argument("--no_wrist_camera", action="store_true")
+    p.add_argument(
+        "--cameras",
+        nargs="+",
+        default=None,
+        help="Cámaras a incluir, ej. --cameras base_rgb base2_rgb wrist_rgb "
+        "(por defecto todas las que tenga el primer episodio).",
+    )
     p.add_argument("--use_images", action="store_true")
     p.add_argument(
         "--repo_suffix",
@@ -814,6 +865,7 @@ def main():
 
         wrist_offset=args.wrist_offset,
         wrist_camera=not args.no_wrist_camera,
+        cameras=args.cameras,
         use_videos=not args.use_images,
     )
 

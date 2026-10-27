@@ -20,9 +20,13 @@ APPLE_CAM_FOV = FOV_16_9
 IMAGE_W = 640
 IMAGE_H = 480
 
-# Cámara base (xarm5_lite_plant_v2)
-BASE_CAM_XYZ = (-0.079, 0.0, 0.142)
-BASE_CAM_RPY = (-1.562, 0.0, -4.708)
+# Cámaras base fijas en el mundo: nombre -> (xyz, rpy) por defecto, cada una con sus sliders.
+# Si CAMERA_POSES_PATH existe, las poses guardadas ahí (botón "Save Camera Poses") reemplazan a estas.
+BASE_CAMS = {
+    "base_rgb": ((-0.079, 0.0, 0.142), (-1.562, 0.0, -4.708)),   # xarm5_lite_plant_v2
+    "base2_rgb": ((-0.079, 0.3, 0.142), (-1.562, 0.0, -4.708)),  # punto de partida: ajustar con sliders
+}
+CAMERA_POSES_PATH = "configs/camera_poses.yaml"
 BASE_CAM_RANGE_XYZ = 1.5  # ± metros alrededor del valor inicial
 BASE_CAM_RANGE_RPY = 3.15 # ± radianes
 

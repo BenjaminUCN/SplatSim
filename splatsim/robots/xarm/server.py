@@ -25,7 +25,13 @@ from .config import (
     CONTROL_HZ,
     SIM_DT,
 )
-from .debug_ui import AppleWindow, BaseCameraTuner, ResetJointsButton
+from .debug_ui import (
+    AppleWindow,
+    BaseCameraTuner,
+    ResetJointsButton,
+    SaveCameraPosesButton,
+    load_base_camera_poses,
+)
 from .gripper import XArm5Gripper
 from .recorder import TrajectoryRecorder
 from .trail import EETrail
@@ -57,15 +63,19 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self._lower_floor(FLOOR_Z)
 
         self.apple = AppleController(self, movable=move_apple)
-        self.cameras = {}
-        base_cam = BaseCamera(self)
-        self.cameras[base_cam.name] = base_cam
+        base_cams = [BaseCamera(self, name, xyz, rpy)
+                     for name, (xyz, rpy) in load_base_camera_poses().items()]
+        self.cameras = {cam.name: cam for cam in base_cams}
         wrist_cam = WristCamera(self)
         self.cameras[wrist_cam.name] = wrist_cam
         apple_cam = AppleCamera(self, self.apple)
         self.cameras[apple_cam.name] = apple_cam
+        unknown = set(self.camera_names) - set(self.cameras)
+        if unknown:
+            raise ValueError(f"Cámaras desconocidas {sorted(unknown)}; disponibles: {sorted(self.cameras)}")
 
-        self.base_cam_tuner = BaseCameraTuner(self, base_cam)
+        self.base_cam_tuners = [BaseCameraTuner(self, cam) for cam in base_cams]
+        self.save_cam_poses_button = SaveCameraPosesButton(self, base_cams)
         self.reset_button = ResetJointsButton(self)
         self.apple_window = AppleWindow(show_apple_window)
         self.trail = EETrail(self)
@@ -187,7 +197,9 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         with self.lock:
             self.gripper.patch_for_splat()      # solo actúa la primera vez
             self.apple.update()
-            self.base_cam_tuner.update()
+            for tuner in self.base_cam_tuners:
+                tuner.update()
+            self.save_cam_poses_button.update()
             self.reset_button.update()
             self.recorder.tick()
             self.trail.update(active=self.recorder.active)

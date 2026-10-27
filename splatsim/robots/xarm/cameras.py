@@ -9,8 +9,6 @@ from .config import (
     APPLE_CAM_OFFSET_RPY,
     APPLE_CAM_OFFSET_XYZ,
     BASE_CAM_FOV,
-    BASE_CAM_RPY,
-    BASE_CAM_XYZ,
     IMAGE_H,
     IMAGE_W,
     WRIST_CAM_FOV,
@@ -58,20 +56,20 @@ def _pose_matrix(pos, rot_matrix_flat) -> np.ndarray:
 
 
 class BaseCamera:
-    """Cámara fija en el mundo. Su pose se puede cambiar desde los sliders."""
-    name = "base_rgb"
+    """Cámara fija en el mundo (base_rgb, base2_rgb, ...). Su pose se cambia desde los sliders."""
 
-    def __init__(self, server):
+    def __init__(self, server, name: str, xyz, rpy):
         self.s = server
-        self.position = BASE_CAM_XYZ
-        self.rotation = server.pybullet_client.getQuaternionFromEuler(BASE_CAM_RPY)
+        self.name = name
+        self.set_pose(xyz, rpy)
 
-    def set_pose(self, position, quaternion):
-        self.position, self.rotation = position, quaternion
+    def set_pose(self, xyz, rpy):
+        self.xyz, self.rpy = tuple(xyz), tuple(rpy)
 
     def get(self) -> Camera:
-        rot = self.s.pybullet_client.getMatrixFromQuaternion(self.rotation)
-        return build_splat_camera(self.s, _pose_matrix(self.position, rot), self.name, 1, BASE_CAM_FOV)
+        quat = self.s.pybullet_client.getQuaternionFromEuler(self.rpy)
+        rot = self.s.pybullet_client.getMatrixFromQuaternion(quat)
+        return build_splat_camera(self.s, _pose_matrix(self.xyz, rot), self.name, 1, BASE_CAM_FOV)
 
 
 class WristCamera:
