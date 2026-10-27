@@ -169,7 +169,9 @@ def main(args):
             startup_steps = 100
             query_new_joints_per_startup_step = True
         elif args.agent == "dummy" or args.agent == "none":
-            agent = DummyAgent(num_dofs=robot_client.num_dofs())
+            # robots that report a reset pose (e.g. the xArm5 splat server) go there instead of zeros
+            reset_target = robot_client.get_observations().get("reset_joint_command")
+            agent = DummyAgent(num_dofs=robot_client.num_dofs(), target=reset_target)
             startup_steps = 2
             query_new_joints_per_startup_step = True
         elif args.agent == "policy":

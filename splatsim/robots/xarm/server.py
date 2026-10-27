@@ -149,10 +149,16 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             obs["sim_time"] = self.sim_steps * SIM_DT
             self.recorder.on_observation(obs)
             obs["recording"] = self.recorder.active  # tras on_observation: refleja el auto-stop
+            obs["reset_joint_command"] = self.reset_joint_command()
         self.apple_window.set(obs.get("apple_rgb"))
         return obs
 
     # ── control remoto (REMOTE_METHODS) ──────────────────────────────────────
+    def reset_joint_command(self) -> np.ndarray:
+        """Comando (5 joints + gripper cerrado) que lleva el brazo a la pose de reset."""
+        arm = [self.initial_joint_state[i] * self.joint_signs[i] for i in range(5)]
+        return np.array([*arm, 0.0])
+
     def reset_robot(self, settle_steps: int = 120) -> None:
         """Vuelve el brazo a la pose inicial al instante y cierra el gripper."""
         c = self.pybullet_client

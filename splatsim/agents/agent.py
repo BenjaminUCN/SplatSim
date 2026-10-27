@@ -1,4 +1,4 @@
-from typing_extensions import Any, Dict, Protocol
+from typing_extensions import Any, Dict, Optional, Protocol
 
 import numpy as np
 
@@ -17,11 +17,14 @@ class Agent(Protocol):
 
 
 class DummyAgent(Agent):
-    def __init__(self, num_dofs: int):
+    """Always commands the same joint state: `target` if given, otherwise zeros."""
+
+    def __init__(self, num_dofs: int, target: Optional[np.ndarray] = None):
         self.num_dofs = num_dofs
+        self.target = np.zeros(num_dofs) if target is None else np.asarray(target, dtype=float)
 
     def act(self, obs: Dict[str, Any]) -> np.ndarray:
-        return np.zeros(self.num_dofs)
+        return self.target.copy()
 
 
 class BimanualAgent(Agent):
