@@ -1,0 +1,14 @@
+# Tomato positions (x, y, z) in PyBullet world coordinates used by scripts/run_policy_trials.py.
+# Add positions with the "Save Apple Position to Grid" button (launch_nodes.py --move_apple)
+# or edit this list by hand.
+positions:
+- [-0.9, 0.2, 0.1]
+- [-0.9, 0.2274, 0.3395]
+- [-0.8716, 0.0337, 0.3395]
+- [-0.8716, -0.2274, 0.3395]
+- [-0.8716, -0.2274, 0.1774]
+- [-0.8716, 0.0253, 0.1137]
+- [-0.8716, 0.3368, 0.1137]
+- [-0.8716, 0.3368, -0.0195]
+- [-0.8716, 0.0421, -0.0195]
+- [-0.8716, -0.32, -0.0195]

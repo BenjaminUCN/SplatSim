@@ -5,7 +5,10 @@ Primero lanzar el servidor (con el mismo --hz con que se entrenó la política):
 Luego:
     python scripts/run_policy_trials.py --trials-per-position 3 --trial-seconds 15
 
-Por cada posición de APPLE_GRID y cada ensayo: resetea el brazo, ubica el tomate,
+Las posiciones del tomate se leen de configs/apple_grid.yaml (se agregan con el botón
+"Save Apple Position to Grid" del servidor con --move_apple, o editando el archivo).
+
+Por cada posición de la grilla y cada ensayo: resetea el brazo, ubica el tomate,
 resetea la política, graba y deja actuar a la política hasta que el servidor corta
 la grabación (trial_seconds de tiempo simulado). La política se carga una sola vez.
 
@@ -20,15 +23,9 @@ from dataclasses import dataclass
 
 import numpy as np
 import tyro
+import yaml
 from gello.zmq_core.robot_node import ZMQClientRobot
 
-# Posiciones del tomate (x, y, z) en el mundo de PyBullet. Editar antes de correr.
-# Referencia: los sliders de --move_apple usan x∈[-0.9,-0.3], y∈[-0.8,0.8], z∈[-0.5,0.6].
-APPLE_GRID = [
-    (-0.50, -0.15, 0.05), (-0.50, 0.00, 0.05), (-0.50, 0.15, 0.05),
-    (-0.50, -0.15, 0.15), (-0.50, 0.00, 0.15), (-0.50, 0.15, 0.15),
-    (-0.50, -0.15, 0.25), (-0.50, 0.00, 0.25), (-0.50, 0.15, 0.25),
-]
 APPLE_NAME = "plastic_apple"
 APPLE_QUAT = (0.0, 0.0, 0.0, 1.0)
 
@@ -37,7 +34,8 @@ APPLE_QUAT = (0.0, 0.0, 0.0, 1.0)
 class Args:
     trials_per_position: int = 3
     trial_seconds: float = 15.0   # duración de cada ensayo, en tiempo simulado
-    positions: tuple[int, ...] | None = None  # índices de APPLE_GRID a usar (por defecto todos)
+    positions: tuple[int, ...] | None = None  # índices de la grilla a usar (por defecto todos)
+    grid_path: str = "configs/apple_grid.yaml"
     output_dir: str = "~/data/policy_trials"
     robot_port: int = 6001
     hostname: str = "127.0.0.1"
@@ -82,6 +80,13 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root) -> dict:
 
 
 def main(args: Args) -> None:
+    with open(args.grid_path) as f:
+        apple_grid = [tuple(p) for p in (yaml.safe_load(f) or {}).get("positions") or []]
+    if not apple_grid:
+        raise SystemExit(f"{args.grid_path} no tiene posiciones: guárdalas con el botón "
+                         "'Save Apple Position to Grid' (launch_nodes.py --move_apple).")
+    print(f"[Trials] {len(apple_grid)} posiciones cargadas de {args.grid_path}")
+
     from splatsim.agents.lerobot_diffusion_agent import LeRobotDiffusionAgent
 
     root = os.path.join(os.path.expanduser(args.output_dir),
@@ -91,7 +96,7 @@ def main(args: Args) -> None:
     robot = ZMQClientRobot(port=args.robot_port, host=args.hostname)
     agent = LeRobotDiffusionAgent(device="cuda")
 
-    positions = args.positions if args.positions is not None else range(len(APPLE_GRID))
+    positions = args.positions if args.positions is not None else range(len(apple_grid))
     total = len(positions) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist"]
 
@@ -101,7 +106,7 @@ def main(args: Args) -> None:
         n = 0
         try:
             for pos_idx in positions:
-                apple_pos = APPLE_GRID[pos_idx]
+                apple_pos = apple_grid[pos_idx]
                 for trial in range(args.trials_per_position):
                     n += 1
                     print(f"\n[Trials] {n}/{total} — posición {pos_idx} {apple_pos}, ensayo {trial}")

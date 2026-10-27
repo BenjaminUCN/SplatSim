@@ -206,7 +206,7 @@ python scripts/run_env_sim.py --agent lerobot_diffusion --hz 10
 
 `scripts/run_policy_trials.py` evaluates the policy over a grid of tomato positions without manual timing. It loads the policy once, then for each position and trial it resets the arm, places the tomato, resets the policy, records the rollout and stops after a fixed simulated duration.
 
-1. Edit `APPLE_GRID` at the top of `scripts/run_policy_trials.py` with the tomato positions `(x, y, z)` to test.
+1. Define the tomato positions `(x, y, z)` to test in `configs/apple_grid.yaml`. The easiest way is to start the server with `--move_apple`, place the tomato with the sliders and press **Save Apple Position to Grid** for each position you want; you can also edit the file by hand.
 2. Start the server (no `--move_apple` needed):
    ```bash
    python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --hz 10
