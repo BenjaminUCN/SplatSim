@@ -95,8 +95,6 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         # controles: cada uno tiene update(), que el serve_loop llama con el lock tomado
         if gui == "viser":
             from .panel import ControlPanel  # viser solo hace falta con este modo
-            c = self.pybullet_client
-            c.configureDebugVisualizer(c.COV_ENABLE_GUI, 0)  # oculta el panel lateral de PyBullet
             self.controls = [ControlPanel(self, base_cams, port=panel_port)]
         elif gui == "pybullet":
             self.controls = [*(BaseCameraTuner(self, cam) for cam in base_cams),
@@ -166,6 +164,13 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
                 c.setJointMotorControl2(self.dummy_robot, i, c.VELOCITY_CONTROL,
                                         targetVelocity=values[i - 1], force=500)
 
+    def set_control_mode(self, mode: str) -> None:
+        """Cambia el modo de control; el próximo comando parte de la posición actual."""
+        with self.lock:
+            self.joint_ctrl = JointController(mode, self.joint_ctrl.nominal_period, self.joint_ctrl.g)
+            self._hold()
+        print(f"[xArm5] control_mode={mode}")
+
     def _hold(self) -> None:
         """Sostiene el brazo donde está (p.ej. al quedar sin comandos en modo velocidad)."""
         q = self._arm_positions()
@@ -211,6 +216,8 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
     def render_preview(self, camera_names) -> dict:
         """Renderiza las cámaras con la escena actual, sin pasar por get_observations
         (que alimenta al recorder). Lo usa la vista previa del panel."""
+        if getattr(self, "gaussians_backup", None) is None:
+            return {}                    # sin cámaras en camera_names no se carga el splat
         c = self.pybullet_client
         with self.lock:
             data = {}

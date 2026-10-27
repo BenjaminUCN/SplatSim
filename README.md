@@ -181,7 +181,7 @@ The server renders `base_rgb`, `base_left_rgb`, `base_right_rgb` and `wrist_rgb`
 **Control panel (viser).** Open http://localhost:8080 in a browser. The 3D view shows the world frame, the end effector, the base camera frustums, the tomato and the saved grid positions. The controls are split into a main panel (docked right) with two tabs and a separate *Cameras* window (docked left); both can be moved, docked or minimized.
 
 *Run* tab:
-- *Robot*: Reset Robot Joints.
+- *Robot*: Reset Robot Joints, and the control mode (`position` / `interp` / `velocity`, see [Control modes](#control-modes)); it can be changed while a policy runs and resumes from the current pose.
 - *Policy*: pick a model from `configs/registry.yaml` (by `name`, or `suggested_name`), see its description, cameras and dataset, and Run / Stop it. Run starts `run_env_sim.py --agent lerobot_diffusion --checkpoint <model>` in another process with the server's `--hz` and port (optionally resetting the robot first); its output goes to the server terminal. Reload Registry picks up a regenerated registry. Its *Trials* subfolder runs `run_policy_trials.py` for the selected model (trials per position, seconds per trial, grid positions such as `0,2,5-7` or empty for all) and shows the progress, the last trial's distances and the results folder. Run and Run Trials share the Stop button: only one client drives the robot at a time.
 - *Recording*: Start / Stop (same as `r`/`s` + Enter in the terminal) and the frame count.
 

@@ -17,6 +17,7 @@ import time
 import numpy as np
 import viser
 
+from splatsim.robots.joint_controller import MODES
 from splatsim.utils.camera_setup import load_camera_setup
 from splatsim.utils.registry import load_registry, loadable_models, model_label
 
@@ -103,6 +104,11 @@ class ControlPanel:
     def _build_robot_gui(self):
         with self.v.gui.add_folder("Robot"):
             self._on_click(self.v.gui.add_button("Reset Robot Joints"), self.s.reset_robot)
+            # cómo se siguen los objetivos articulares (ver splatsim/robots/joint_controller.py);
+            # se puede cambiar con una política corriendo: retoma desde la posición actual
+            mode = self.v.gui.add_dropdown("Control mode", list(MODES),
+                                           initial_value=self.s.joint_ctrl.mode)
+        self._on_user(mode, lambda h: self.s.set_control_mode(h.value))
 
     # ── política ─────────────────────────────────────────────────────────────
     def _build_policy_gui(self):
