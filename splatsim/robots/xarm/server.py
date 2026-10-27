@@ -95,6 +95,8 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         # controles: cada uno tiene update(), que el serve_loop llama con el lock tomado
         if gui == "viser":
             from .panel import ControlPanel  # viser solo hace falta con este modo
+            c = self.pybullet_client
+            c.configureDebugVisualizer(c.COV_ENABLE_GUI, 0)  # oculta el panel lateral de PyBullet
             self.controls = [ControlPanel(self, base_cams, port=panel_port)]
         elif gui == "pybullet":
             self.controls = [*(BaseCameraTuner(self, cam) for cam in base_cams),
