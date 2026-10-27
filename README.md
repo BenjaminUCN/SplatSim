@@ -167,16 +167,26 @@ Each scene also needs `data/labels_path/<robot_name>_labels.npy` and `data/pcds_
 ### Run the simulation server
 
 ```bash
-python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --move_apple --hz 10
+python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --hz 10
 ```
 
 - `--robot_name`: the scene from `objects.yaml` (`xarm5_lite_plant_v3` is the latest).
-- `--move_apple`: adds sliders and a "Set Random Apple Position" button to move the tomato in the PyBullet GUI.
+- `--gui`: `viser` (default) opens a web control panel at http://localhost:8080 (`--panel_port`); `pybullet` keeps the old PyBullet sliders and buttons instead.
+- `--move_apple`: only with `--gui pybullet`, adds the tomato sliders and buttons (the viser panel always has them).
 - `--hz`: the rate at which the client sends commands. **It must match `--hz` of the client** (`run_env_sim.py`, default 30). Each command advances the simulation by exactly `1/hz` seconds, so recorded frames are evenly spaced in simulated time.
 
-The server renders `base_rgb`, `base2_rgb` and `wrist_rgb` from the gaussian splat; pick a subset with `--cameras base_rgb wrist_rgb` (every rendered camera is recorded). The PyBullet GUI also has a "Reset Robot Joints" button. Camera FoV, recording length and other constants live in `splatsim/robots/xarm/config.py`.
+The server renders `base_rgb`, `base2_rgb` and `wrist_rgb` from the gaussian splat; pick a subset with `--cameras base_rgb wrist_rgb` (every rendered camera is recorded). Camera FoV, recording length and other constants live in `splatsim/robots/xarm/config.py`.
 
-**Base cameras.** `base_rgb` and `base2_rgb` are fixed cameras with independent poses, each with its own X/Y/Z/Roll/Pitch/Yaw sliders (`base`, `base2`). The "Save Camera Poses" button writes both poses to `configs/camera_poses.yaml`, which the server loads on startup and which overrides the defaults in `BASE_CAMS` (`config.py`). Fix the camera poses before recording a dataset, and record with all cameras so you can later train on 1, 2 or 3 of them from the same demonstrations.
+**Control panel (viser).** Open http://localhost:8080 in a browser. It shows the world frame, the end effector, the base camera frustums, the tomato and the saved grid positions in 3D, and has these folders:
+- *Robot*: Reset Robot Joints.
+- *Recording*: Start / Stop (same as `r`/`s` + Enter in the terminal) and the frame count.
+- *Base cameras*: one tab per camera with its xyz / rpy; drag the gizmo in the 3D view or type the values. Save Camera Poses.
+- *Tomato*: xyz, gizmo, Random Position, Save Position to Grid, and a list to load a saved grid position (or click its orange sphere in the 3D view).
+- *Camera previews*: one checkbox per camera; each one you turn on is rendered about twice per second (all off by default because each render costs time).
+
+If `configs/apple_grid.yaml` has positions, the tomato starts at the first one.
+
+**Base cameras.** `base_rgb` and `base2_rgb` are fixed cameras with independent poses, each with its own controls (panel tab, or X/Y/Z/Roll/Pitch/Yaw sliders `base`, `base2` with `--gui pybullet`). "Save Camera Poses" writes both poses to `configs/camera_poses.yaml`, which the server loads on startup and which overrides the defaults in `BASE_CAMS` (`config.py`). Fix the camera poses before recording a dataset, and record with all cameras so you can later train on 1, 2 or 3 of them from the same demonstrations.
 
 ### Record demonstrations
 
@@ -222,8 +232,8 @@ python scripts/run_env_sim.py --agent lerobot_diffusion --hz 10
 
 `scripts/run_policy_trials.py` evaluates the policy over a grid of tomato positions without manual timing. It loads the policy once, then for each position and trial it resets the arm, places the tomato, resets the policy, records the rollout and stops after a fixed simulated duration.
 
-1. Define the tomato positions `(x, y, z)` to test in `configs/apple_grid.yaml`. The easiest way is to start the server with `--move_apple`, place the tomato with the sliders and press **Save Apple Position to Grid** for each position you want; you can also edit the file by hand.
-2. Start the server (no `--move_apple` needed):
+1. Define the tomato positions `(x, y, z)` to test in `configs/apple_grid.yaml`. The easiest way is to place the tomato from the control panel (*Tomato* folder) and press **Save Position to Grid** for each position you want; you can also edit the file by hand.
+2. Start the server:
    ```bash
    python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --hz 10
    ```

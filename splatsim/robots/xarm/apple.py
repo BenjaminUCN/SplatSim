@@ -11,6 +11,15 @@ _GRID_HEADER = """\
 """
 
 
+def load_grid() -> list:
+    """Posiciones guardadas en APPLE_GRID_PATH (lista vacía si no hay archivo)."""
+    try:
+        with open(APPLE_GRID_PATH) as f:
+            return (yaml.safe_load(f) or {}).get("positions") or []
+    except FileNotFoundError:
+        return []
+
+
 class AppleController:
     def __init__(self, server, movable: bool = False):
         self.s = server
@@ -23,6 +32,12 @@ class AppleController:
         # mass=0 => cuerpo estático (no solo "sin gravedad")
         server.pybullet_client.changeDynamics(self.body_id, -1, mass=0)
         print("[xArm5] gravedad desactivada para la apple")
+
+        # parte en la primera posición de la grilla, si hay
+        grid = load_grid()
+        if grid:
+            self.move_to(grid[0])
+            print(f"[xArm5] apple en la posición #0 de la grilla: {grid[0]}")
 
         if movable:
             self._create_sliders()
@@ -39,8 +54,12 @@ class AppleController:
         self._save_btn = c.addUserDebugParameter("Save Apple Position to Grid", 1, 0, 0)
         self._prev_save = 0
 
-    def _move_to(self, xyz):
-        self.s.set_object_pose(APPLE_NAME, list(xyz), [0, 0, 0, 1], use_gravity=False)
+    def move_to(self, xyz):
+        self.s.set_object_pose(APPLE_NAME, np.array(xyz), np.array([0, 0, 0, 1]), use_gravity=False)
+
+    @staticmethod
+    def random_position():
+        return [np.random.uniform(*APPLE_RANGE[a]) for a in "xyz"]
 
     def update(self) -> None:
         """Llamar cada tick."""
@@ -51,29 +70,25 @@ class AppleController:
         vals = [c.readUserDebugParameter(s) for s in self._sliders]
         if any(abs(v - p) > 1e-6 for v, p in zip(vals, self._prev)):
             self._prev = vals
-            self._move_to(vals)
+            self.move_to(vals)
 
         btn = c.readUserDebugParameter(self._rand_btn)
         if btn != self._prev_rand:  # en PyBullet un botón se detecta porque cambia su valor
             self._prev_rand = btn
             print("[xArm5] Setting random apple position.")
-            self._move_to([np.random.uniform(*APPLE_RANGE[a]) for a in "xyz"])
+            self.move_to(self.random_position())
 
         btn = c.readUserDebugParameter(self._save_btn)
         if btn != self._prev_save:
             self._prev_save = btn
-            self._save_to_grid()
+            self.save_to_grid()
 
-    def _save_to_grid(self) -> None:
+    def save_to_grid(self) -> None:
         """Agrega la posición actual de la manzana a APPLE_GRID_PATH."""
         pos, _ = self.s.pybullet_client.getBasePositionAndOrientation(self.body_id)
         pos = [round(float(v), 4) for v in pos]
 
-        try:
-            with open(APPLE_GRID_PATH) as f:
-                positions = (yaml.safe_load(f) or {}).get("positions") or []
-        except FileNotFoundError:
-            positions = []
+        positions = load_grid()
         if pos in positions:
             print(f"[xArm5] La posición {pos} ya está en la grilla (#{positions.index(pos)}).")
             return

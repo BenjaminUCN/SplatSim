@@ -21,6 +21,9 @@ class Args:
     hz: int = 30  # frecuencia de control del cliente; debe coincidir con run_env_sim --hz
     # cámaras renderizadas en cada observación (xArm5); se graban todas
     cameras: tuple[str, ...] = ("base_rgb", "base2_rgb", "wrist_rgb")
+    # controles del xArm5: "viser" (panel web) o "pybullet" (sliders de PyBullet)
+    gui: str = "viser"
+    panel_port: int = 8080
 
 
 def launch_robot_server(args: Args):
@@ -204,6 +207,8 @@ def launch_robot_server(args: Args):
             use_gripper=use_gripper,
             move_apple=args.move_apple,
             control_hz=args.hz,
+            gui=args.gui,
+            panel_port=args.panel_port,
         )
 
     else:

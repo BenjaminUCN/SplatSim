@@ -43,7 +43,10 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
     REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording")
 
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
-                 show_apple_window: bool = True, control_hz: int = CONTROL_HZ, **kwargs):
+                 show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
+                 gui: str = "viser", panel_port: int = 8080, **kwargs):
+        """gui: "viser" (panel web en http://localhost:<panel_port>) o "pybullet"
+        (sliders y botones de PyBullet; --move_apple agrega los de la manzana)."""
         # traj_save_path se acepta por compatibilidad pero no se usa (igual que antes)
         self._num_dofs = NUM_DOFS
         # cada comando avanza exactamente 1/control_hz s simulados
@@ -62,7 +65,7 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self._remove_wall()
         self._lower_floor(FLOOR_Z)
 
-        self.apple = AppleController(self, movable=move_apple)
+        self.apple = AppleController(self, movable=move_apple and gui == "pybullet")
         base_cams = [BaseCamera(self, name, xyz, rpy)
                      for name, (xyz, rpy) in load_base_camera_poses().items()]
         self.cameras = {cam.name: cam for cam in base_cams}
@@ -74,9 +77,18 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         if unknown:
             raise ValueError(f"Cámaras desconocidas {sorted(unknown)}; disponibles: {sorted(self.cameras)}")
 
-        self.base_cam_tuners = [BaseCameraTuner(self, cam) for cam in base_cams]
-        self.save_cam_poses_button = SaveCameraPosesButton(self, base_cams)
-        self.reset_button = ResetJointsButton(self)
+        # controles: cada uno tiene update(), que el serve_loop llama con el lock tomado
+        if gui == "viser":
+            from .panel import ControlPanel  # viser solo hace falta con este modo
+            c = self.pybullet_client
+            c.configureDebugVisualizer(c.COV_ENABLE_GUI, 0)  # oculta el panel lateral de PyBullet
+            self.controls = [ControlPanel(self, base_cams, port=panel_port)]
+        elif gui == "pybullet":
+            self.controls = [*(BaseCameraTuner(self, cam) for cam in base_cams),
+                             SaveCameraPosesButton(self, base_cams),
+                             ResetJointsButton(self)]
+        else:
+            raise ValueError(f"gui debe ser 'viser' o 'pybullet', no {gui!r}")
         self.apple_window = AppleWindow(show_apple_window)
         self.trail = EETrail(self)
         self.recorder.start_keyboard_listener()
@@ -152,6 +164,19 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             return None
         return render(camera, self.robot_gaussian, self.pipeline, self.background)["render"]
 
+    def render_preview(self, camera_names) -> dict:
+        """Renderiza las cámaras con la escena actual, sin pasar por get_observations
+        (que alimenta al recorder). Lo usa la vista previa del panel."""
+        c = self.pybullet_client
+        with self.lock:
+            data = {}
+            for name, body in zip(self.splat_object_name_list, self.urdf_object_list):
+                data[f"{name}_position"], data[f"{name}_orientation"] = \
+                    c.getBasePositionAndOrientation(body)
+            cached = get_curr_link_states(self.dummy_robot, self.use_link_centers)
+            self.prep_image_rendering(data=data, cached_link_states=cached)
+            return {name: self.render_image(name) for name in camera_names}
+
     def get_observations(self):
         with self.lock:
             obs = super().get_observations()
@@ -197,10 +222,8 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         with self.lock:
             self.gripper.patch_for_splat()      # solo actúa la primera vez
             self.apple.update()
-            for tuner in self.base_cam_tuners:
-                tuner.update()
-            self.save_cam_poses_button.update()
-            self.reset_button.update()
+            for control in self.controls:
+                control.update()
             self.recorder.tick()
             self.trail.update(active=self.recorder.active)
             # mientras se graba solo los comandos avanzan la física (dt fijo por frame,

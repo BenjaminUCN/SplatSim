@@ -31,6 +31,17 @@ def load_base_camera_poses() -> dict:
     return poses
 
 
+def save_camera_poses(cameras) -> None:
+    """Escribe la pose actual de las cámaras base en CAMERA_POSES_PATH."""
+    poses = {cam.name: {"xyz": [round(float(v), 4) for v in cam.xyz],
+                        "rpy": [round(float(v), 4) for v in cam.rpy]}
+             for cam in cameras}
+    with open(CAMERA_POSES_PATH, "w") as f:
+        f.write(_POSES_HEADER)
+        yaml.safe_dump(poses, f, default_flow_style=None, sort_keys=False)
+    print(f"[xArm5] Poses de {', '.join(poses)} guardadas en {CAMERA_POSES_PATH}")
+
+
 class BaseCameraTuner:
     """Sliders X/Y/Z/Roll/Pitch/Yaw que mueven una cámara base y dibujan sus ejes."""
 
@@ -83,13 +94,7 @@ class SaveCameraPosesButton:
         if val == self._prev:
             return
         self._prev = val
-        poses = {cam.name: {"xyz": [round(float(v), 4) for v in cam.xyz],
-                            "rpy": [round(float(v), 4) for v in cam.rpy]}
-                 for cam in self.cameras}
-        with open(CAMERA_POSES_PATH, "w") as f:
-            f.write(_POSES_HEADER)
-            yaml.safe_dump(poses, f, default_flow_style=None, sort_keys=False)
-        print(f"[xArm5] Poses de {', '.join(poses)} guardadas en {CAMERA_POSES_PATH}")
+        save_camera_poses(self.cameras)
 
 
 class ResetJointsButton:
