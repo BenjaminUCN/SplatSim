@@ -12,6 +12,11 @@ carpeta en segundo plano para poder mostrar todas a la vez.
 
 La selección se guarda en <carpeta>/selection.yaml (splatsim/utils/episode_selection.py);
 lerobot_transform_v2.py omite los episodios descartados.
+
+Etiquetas de parada para el clasificador visual (splatsim/utils/stop_labels.py): en sim se
+proponen solas con el error de agarre (configs/grasp_point.yaml); en la carpeta Stop labels se
+aceptan, se corrigen ("válido desde este frame") o se excluyen, y quedan en
+<carpeta>/stop_labels.yaml. Las grabaciones reales (sin posición del tomate) se etiquetan a mano.
 """
 import hashlib
 import os
@@ -31,12 +36,22 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from splatsim.utils.episode_selection import load_discarded, save_discarded  # noqa: E402
+from splatsim.utils.grasp_point import GRASP_POINT_PATH, grasp_error, load_grasp_point  # noqa: E402
+from splatsim.utils.stop_labels import (  # noqa: E402
+    VALID_RADIUS,
+    auto_valid_from,
+    episode_labels,
+    load_stop_labels,
+    save_stop_labels,
+)
 
 CACHE_DIR = Path("~/.cache/splatsim/trails").expanduser()
 APPLE_KEY = "plastic_apple_position"
 COLORMAP = "viridis"         # inicio (violeta) -> fin (amarillo)
 PLAYBACK_FPS = 10
 _IMG = re.compile(r"^(.+_rgb)_(\d+)\.png$")
+# colores de la trayectoria por etiqueta de parada (paleta de referencia)
+LABEL_COLORS = {1: (0, 131, 0), 0: (42, 120, 214), -1: (175, 175, 170)}
 
 
 @dataclass
@@ -59,6 +74,13 @@ class RecordingFolder:
                                key=lambda d: (not d.name.isdigit(), int(d.name) if d.name.isdigit() else 0, d.name))
         self.names = [d.name for d in self.episodes]
         self.discarded = load_discarded(path)
+        self.stop_labels = load_stop_labels(path)
+        try:
+            self.grasp_point = load_grasp_point()
+        except FileNotFoundError:
+            self.grasp_point = None
+            print(f"[Review] Falta {GRASP_POINT_PATH} (scripts/estimate_grasp_point.py): "
+                  "sin etiquetas automáticas")
         key = hashlib.md5(str(path.resolve()).encode()).hexdigest()[:8]
         self._cache_path = CACHE_DIR / f"{path.name}-{key}.pkl"
         self._cache = self._load_cache()
@@ -86,7 +108,7 @@ class RecordingFolder:
         with self._lock:
             entry = self._cache.get(name)
         ep = self.path / name
-        if entry and entry["mtime"] == ep.stat().st_mtime:
+        if entry and entry["mtime"] == ep.stat().st_mtime and "rpy" in entry:
             return entry
         return None
 
@@ -96,7 +118,7 @@ class RecordingFolder:
         if entry is not None:
             return entry
         ep = self.path / name
-        ee, grip, t, apple, bad = [], [], [], None, []
+        ee, rpy, grip, t, apple, bad = [], [], [], [], None, []
         for p in sorted(ep.glob("*.pkl"), key=_pkl_key):
             try:
                 with open(p, "rb") as f:
@@ -105,11 +127,13 @@ class RecordingFolder:
                 bad.append(p.name)
                 continue
             ee.append(np.asarray(obs["state"][:3], dtype=float))
+            rpy.append(np.asarray(obs["state"][3:6], dtype=float))
             grip.append(float(np.ravel(obs["state"])[6]) if len(obs["state"]) > 6 else 0.0)
             t.append(obs.get("sim_time", np.nan))
             if apple is None and obs.get(APPLE_KEY) is not None:
                 apple = np.asarray(obs[APPLE_KEY], dtype=float)
         entry = {"mtime": ep.stat().st_mtime, "ee": np.array(ee).reshape(-1, 3),
+                 "rpy": np.array(rpy).reshape(-1, 3),
                  "gripper": np.array(grip), "sim_time": np.array(t, dtype=float), "apple": apple,
                  "unreadable": bad}
         with self._lock:
@@ -128,6 +152,23 @@ class RecordingFolder:
                         per_cam.setdefault(m.group(1), []).append((int(m.group(2)), Path(f.path)))
             self._images[name] = {cam: [p for _, p in sorted(files)] for cam, files in sorted(per_cam.items())}
         return self._images[name]
+
+    def grasp_err(self, entry: dict) -> np.ndarray | None:
+        """Error de agarre por frame (None si no hay tomate o punto de agarre)."""
+        if entry["apple"] is None or self.grasp_point is None or not len(entry["ee"]):
+            return None
+        state = np.hstack([entry["ee"], entry["rpy"]])
+        return grasp_error(state, entry["apple"], self.grasp_point)
+
+    def labels(self, name: str, entry: dict) -> tuple[np.ndarray, str]:
+        return episode_labels(len(entry["ee"]), self.stop_labels.get(name), self.grasp_err(entry))
+
+    def set_stop_label(self, name: str, label: dict | None) -> None:
+        if label is None:
+            self.stop_labels.pop(name, None)
+        else:
+            self.stop_labels[name] = label
+        save_stop_labels(self.path, self.stop_labels)
 
     def set_discarded(self, name: str, discarded: bool) -> None:
         (self.discarded.add if discarded else self.discarded.discard)(name)
@@ -170,19 +211,33 @@ class Reviewer:
             self.load_progress = gui.add_progress_bar(0.0)
             self.load_status = gui.add_markdown("")
         with gui.add_folder("Episode"):
-            self.filter_select = gui.add_dropdown("Show", ["all", "kept", "discarded"], initial_value="all")
+            self.filter_select = gui.add_dropdown("Show", ["all", "kept", "discarded", "stop: unlabeled"],
+                                                  initial_value="all")
             self.episode_select = gui.add_dropdown("Episode", ["-"])
             nav = gui.add_button_group("Navigate", ["◀ Prev", "Next ▶"])
             self.discard_box = gui.add_checkbox("Discard episode", False,
                                                 hint="Excluded from datasets (selection.yaml)")
             self.episode_info = gui.add_markdown("")
+        with gui.add_folder("Stop labels"):
+            self.stop_info = gui.add_markdown("")
+            self.stop_plot = gui.add_uplot(
+                (np.arange(2.0), np.zeros(2), np.zeros(2)),
+                ({"label": "frame"},
+                 {"label": "grasp error (cm)", "stroke": "#2a78d6", "width": 2},
+                 {"label": f"in position ≤ {VALID_RADIUS * 100:.0f} cm", "stroke": "#008300",
+                  "width": 1, "dash": [4, 3]}),
+                height=170, aspect=2.0)
+            set1 = gui.add_button_group("Label", ["Accept auto", "Valid from this frame"])
+            set2 = gui.add_button_group("Other", ["No valid frames", "Exclude", "Reset"])
         with gui.add_folder("Playback"):
             self.frame_slider = gui.add_slider("Frame", 0, 1, 1, 0)
             self.play_button = gui.add_button("Play", icon=viser.Icon.PLAYER_PLAY)
         with gui.add_folder("View"):
             self.show_all = gui.add_checkbox("Show other trails", True)
-            gui.add_markdown(f"Trail color: start → end (`{COLORMAP}`); "
-                             "other trails: gray = kept, red = discarded")
+            self.color_mode = gui.add_dropdown("Trail color", ["gradient", "stop label"],
+                                               initial_value="gradient")
+            gui.add_markdown(f"Gradient: start → end (`{COLORMAP}`). Stop label: green = in position, "
+                             "blue = not yet, gray = not used. Other trails: gray = kept, red = discarded")
 
         cams = gui.add_panel()
         self._cams_tab = cams.add_tab("Cameras", viser.Icon.CAMERA)
@@ -201,6 +256,9 @@ class Reviewer:
         self.frame_slider.on_update(lambda _: self._show_frame(int(self.frame_slider.value)))
         self.play_button.on_click(lambda _: self._toggle_play())
         self.show_all.on_update(lambda _: self._draw_background())
+        self.color_mode.on_update(lambda _: self.trail_data is not None and self._draw_trail())
+        set1.on_click(lambda e: self._stop_action(e.target.value))
+        set2.on_click(lambda e: self._stop_action(e.target.value))
 
     # ── carpeta ──────────────────────────────────────────────────────────────
     def open_folder(self, name: str):
@@ -237,13 +295,17 @@ class Reviewer:
             return [n for n in f.names if n not in f.discarded]
         if mode == "discarded":
             return [n for n in f.names if n in f.discarded]
+        if mode == "stop: unlabeled":
+            return [n for n in f.names if n not in f.stop_labels and n not in f.discarded]
         return list(f.names)
 
     def _label(self, name: str) -> str:
         entry = self.folder.cached(name)
         frames = f" · {len(entry['ee'])} fr" if entry else ""
         broken = " · ⚠" if entry and entry.get("unreadable") else ""
-        return f"{name}{frames}{broken}" + (" · ✗" if name in self.folder.discarded else "")
+        manual = self.folder.stop_labels.get(name)
+        stop = (" · ⊘" if manual.get("exclude") else " · ✓") if manual else ""
+        return f"{name}{frames}{broken}{stop}" + (" · ✗" if name in self.folder.discarded else "")
 
     def _refresh_episode_list(self):
         names = self._visible_names()
@@ -269,6 +331,7 @@ class Reviewer:
         self.frame_slider.value = 0
         self._show_frame(0)
         self._show_info()
+        self._show_stop()
         self._draw_background()
 
     def _step_episode(self, delta: int):
@@ -283,6 +346,56 @@ class Reviewer:
         self._refresh_episode_list()
         self._show_info()
         self._draw_background()
+
+    def _stop_action(self, action: str):
+        f, d, name = self.folder, self.trail_data, self.episode
+        if d is None:
+            return
+        if action == "Accept auto":
+            err = f.grasp_err(d)
+            if err is None:
+                self.stop_info.content = "**No automatic label** (no tomato position): set it by hand"
+                return
+            f.set_stop_label(name, {"valid_from": auto_valid_from(err)})
+        elif action == "Valid from this frame":
+            f.set_stop_label(name, {"valid_from": int(self.frame_slider.value)})
+        elif action == "No valid frames":
+            f.set_stop_label(name, {"valid_from": None})
+        elif action == "Exclude":
+            f.set_stop_label(name, {"exclude": True})
+        elif action == "Reset":
+            f.set_stop_label(name, None)
+        self._refresh_episode_list()
+        self._show_stop()
+        self._draw_trail()
+
+    def _show_stop(self):
+        f, d = self.folder, self.trail_data
+        n = len(d["ee"])
+        labels, source = f.labels(self.episode, d)
+        err = f.grasp_err(d)
+        manual = f.stop_labels.get(self.episode)
+        if source == "excluded":
+            head = "**excluded** from the classifier dataset"
+        elif source == "none":
+            head = "no label yet (no tomato position): set **Valid from this frame** or **No valid frames**"
+        else:
+            vf = manual["valid_from"] if source == "manual" else auto_valid_from(err)
+            where = f"valid from frame **{vf}**" if vf is not None else "**no valid frames**"
+            head = f"{'**manual**' if source == 'manual' else 'auto (not reviewed)'}: {where}"
+        counts = f"{(labels == 1).sum()} in position · {(labels == 0).sum()} not · {(labels == -1).sum()} unused"
+        lines = [head, counts]
+        if err is not None:
+            lines.append(f"grasp error: last frame {err[-1] * 100:.1f} cm, min {err.min() * 100:.1f} cm")
+            if source == "manual" and manual.get("valid_from") is not None and \
+                    err[manual["valid_from"]:].max() > 2 * VALID_RADIUS:
+                lines.append("⚠ the arm is > 6 cm from the grasp point after valid_from")
+        done = sum(1 for n_ in f.names if n_ in f.stop_labels)
+        lines.append(f"folder: {done}/{len(f.names)} episodes labeled by hand")
+        self.stop_info.content = "  \n".join(lines)
+        x = np.arange(n, dtype=float)
+        y = err * 100 if err is not None else np.zeros(n)
+        self.stop_plot.data = (x, y, np.full(n, VALID_RADIUS * 100))
 
     def _show_info(self):
         d, f = self.trail_data, self.folder
@@ -308,7 +421,11 @@ class Reviewer:
         d = self.trail_data
         ee = d["ee"]
         if len(ee) >= 2:
-            c = (colormaps[COLORMAP](np.linspace(0, 1, len(ee)))[:, :3] * 255).astype(np.uint8)
+            if self.color_mode.value == "stop label":
+                labels, _ = self.folder.labels(self.episode, d)
+                c = np.array([LABEL_COLORS[int(v)] for v in labels], np.uint8)
+            else:
+                c = (colormaps[COLORMAP](np.linspace(0, 1, len(ee)))[:, :3] * 255).astype(np.uint8)
             points = np.stack([ee[:-1], ee[1:]], axis=1)
             colors = np.stack([c[:-1], c[1:]], axis=1)
             self.v.scene.add_line_segments("/trail", points, colors, thickness=3, thickness_units="screen")
