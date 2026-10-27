@@ -3,7 +3,9 @@
 #   python scripts/train_diffusion.py --config configs/train/diffusion.yaml --horizon 32 --cameras base_rgb
 
 # ── Run ──────────────────────────────────────────────────────────────────────
-model_name: null          # null -> diffusion_<MMDD_HHMM>
+model_name: null          # null -> diffusion_<MMDD_HHMM> (output folder)
+name: ""                  # short name shown in configs/registry.yaml and the panel, e.g. 1cam-50k
+description: ""           # what this model tries to improve, e.g. "1 cam, more steps"
 output_root: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial
 device: cuda
 

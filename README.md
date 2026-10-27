@@ -221,6 +221,14 @@ python scripts/train_diffusion.py --config configs/train/diffusion.yaml --horizo
 ```
 The output folder `<output_root>/<model_name>/` gets the final policy, checkpoints every `save_freq` steps and the resolved `train_config.yaml`.
 
+### Registry of recordings, datasets and models
+
+`configs/registry.yaml` links each model to the dataset it was trained on, and each dataset to the GELLO recordings it was converted from. Regenerate it after recording, converting or training:
+```bash
+python scripts/build_registry.py   # defaults: ~/data/bc_data, ~/lerobot/splatsim_test_data, ~/lerobot/examples/tutorial/diffusion/outputs
+```
+Models are matched to datasets exactly through the normalization statistics stored in the model, and datasets to recordings through their sequence of episode lengths. Fill in `name`, `description` and `notes` by hand (or set `name` / `description` in the training config): regenerating keeps them. Each model also gets a `suggested_name` built from its metadata.
+
 ### Run the diffusion policy
 
 Start the server as above, then run the policy with the same `--hz` it was trained at (10 for the current datasets):

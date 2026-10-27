@@ -1,0 +1,1013 @@
+# Registro de grabaciones (bc_data), datasets LeRobot y modelos. Generado por
+# scripts/build_registry.py; vuelve a correrlo tras grabar, convertir o entrenar.
+# Edita a mano solo name / description / notes: se conservan al regenerar.
+#   name: nombre corto para elegir el modelo (vacío -> se usa suggested_name)
+#   description: qué se intentó mejorar (p.ej. "1 cámara, más pasos")
+generated: 2026-10-27 14:43
+roots: {recordings: /home/magister/data/bc_data, datasets: /home/magister/lerobot/splatsim_test_data, models: /home/magister/lerobot/examples/tutorial/diffusion/outputs}
+recordings:
+  gello:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/data/bc_data/gello
+    episodes: 11
+    frames: 280
+    cameras: [base_rgb, wrist_rgb]
+    image_numbering: per_frame
+    first_episode: 2026-10-26 19:56
+    last_episode: 2026-10-26 20:08
+    shared_episodes: {}
+    datasets: []
+  gello base:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/data/bc_data/gello base
+    episodes: 1
+    frames: 99
+    cameras: [base_rgb]
+    image_numbering: per_frame
+    first_episode: 2026-06-09 17:21
+    last_episode: 2026-06-09 17:21
+    shared_episodes: {}
+    datasets: []
+  gello_3plants:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/data/bc_data/gello_3plants
+    episodes: 206
+    frames: 15142
+    cameras: [base_rgb, wrist_rgb]
+    image_numbering: interleaved
+    first_episode: 2026-08-10 15:07
+    last_episode: 2026-08-26 16:01
+    shared_episodes: {}
+    datasets: [splatsim_xarm5_lite_10fps_261020_2010]
+  gello_model:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/data/bc_data/gello_model
+    episodes: 100
+    frames: 3965
+    cameras: [base_rgb, wrist_rgb]
+    image_numbering: interleaved
+    first_episode: 2026-06-25 15:14
+    last_episode: 2026-06-26 15:39
+    shared_episodes: {}
+    datasets: []
+  gello_v2_dual:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/data/bc_data/gello_v2_dual
+    episodes: 401
+    frames: 27116
+    cameras: [base_rgb, wrist_rgb]
+    image_numbering: interleaved
+    first_episode: 2026-06-15 19:28
+    last_episode: 2026-06-15 19:16
+    shared_episodes: {gello_v3_: 201-301}
+    datasets: ['0603_1654', '0604_1633', '0605_1723', 0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724, '060_1723', 060_1723/splatsim_lerobot_splatsim_10fps_260605_1724,
+      splatsim_lerobot_splatsim_10fps_260609_0303, splatsim_xarm5_lite_10fps_260610_0210, splatsim_xarm5_lite_10fps_260612_1930,
+      splatsim_xarm5_lite_10fps_260612_1931, splatsim_xarm5_lite_10fps_260616_0234, splatsim_xarm5_lite_10fps_260618_1445,
+      splatsim_xarm5_lite_10fps_260619_1723, splatsim_xarm5_lite_10fps_260622_1924, splatsim_xarm5_lite_10fps_260623_0204,
+      splatsim_xarm5_lite_10fps_260704_1203]
+  gello_v3_:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/data/bc_data/gello_v3_
+    episodes: 351
+    frames: 20884
+    cameras: [base_rgb, wrist_rgb]
+    image_numbering: interleaved
+    first_episode: 2026-06-15 15:44
+    last_episode: 2026-06-19 16:18
+    shared_episodes: {gello_v2_dual: 201-301}
+    datasets: ['0603_1654', '0604_1633', '0605_1723', 0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724, '060_1723', 060_1723/splatsim_lerobot_splatsim_10fps_260605_1724,
+      splatsim_lerobot_splatsim_10fps_260609_0303, splatsim_xarm5_lite_10fps_260610_0210, splatsim_xarm5_lite_10fps_260616_0234,
+      splatsim_xarm5_lite_10fps_260617_0248, splatsim_xarm5_lite_10fps_260617_1732, splatsim_xarm5_lite_10fps_260618_1445,
+      splatsim_xarm5_lite_10fps_260619_1723, splatsim_xarm5_lite_10fps_260622_1924, splatsim_xarm5_lite_10fps_260623_0204,
+      splatsim_xarm5_lite_10fps_260704_1203]
+datasets:
+  '0512_1621':
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0512_1621
+    created: 2026-05-12 16:21
+    episodes: 1
+    frames: 38
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [cam_high]
+    image_shape: [224, 224, 3]
+    state_dim: 6
+    sources: []
+    models: []
+  '0513_1242':
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0513_1242
+    created: 2026-05-13 12:42
+    episodes: 52
+    frames: 3157
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [cam_high]
+    image_shape: [480, 640, 3]
+    state_dim: 6
+    sources: []
+    models: []
+  '0513_1715':
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0513_1715
+    created: 2026-05-13 17:15
+    episodes: 52
+    frames: 3157
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [cam_high]
+    image_shape: [480, 640, 3]
+    state_dim: 6
+    sources: []
+    models: []
+  0513_2028:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0513_2028
+    created: 2026-05-13 20:28
+    episodes: 52
+    frames: 3157
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 6
+    sources: []
+    models: [robot_learning_tutorial/diffusion]
+  0528_1804:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0528_1804
+    created: 2026-05-28 18:04
+    episodes: 51
+    frames: 1192
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 6
+    sources: []
+    models: []
+  0529_1607:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0529_1607
+    created: 2026-05-29 16:07
+    episodes: 102
+    frames: 2948
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 6
+    sources: []
+    models: [robot_learning_tutorial/diffusion_0528_1804]
+  '0601_1755':
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0601_1755
+    created: 2026-06-01 17:55
+    episodes: 102
+    frames: 2948
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources: []
+    models: [robot_learning_tutorial/diffusion_0601_1755, robot_learning_tutorial/diffusion_0602_0230]
+  0602_1901:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0602_1901
+    created: 2026-06-02 19:01
+    episodes: 202
+    frames: 6988
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources: []
+    models: [robot_learning_tutorial/diffusion_0602_1917]
+  '0603_1654':
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0603_1654
+    created: 2026-06-03 16:54
+    episodes: 303
+    frames: 21036
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 101-302, dataset_episodes: 101-302, matched_episodes: 201/202, frames_dropped: 6}
+    - {recording: gello_v3_, recording_episodes: 201-301, dataset_episodes: 201-301, matched_episodes: 100/101, frames_dropped: 1}
+    models: [robot_learning_tutorial/diffusion_0603_1702]
+  '0604_1633':
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0604_1633
+    created: 2026-06-04 16:33
+    episodes: 303
+    frames: 21095
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 0-302, dataset_episodes: 0-302, matched_episodes: 302/303, frames_dropped: 6}
+    - {recording: gello_v3_, recording_episodes: 201-301, dataset_episodes: 201-301, matched_episodes: 100/101, frames_dropped: 1}
+    models: [robot_learning_tutorial/diffusion_0604_1706]
+  '0605_1723':
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0605_1723
+    created: 2026-06-05 17:23
+    episodes: 401
+    frames: 27110
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 0-400, dataset_episodes: 0-400, matched_episodes: 400/401, frames_dropped: 7}
+    - {recording: gello_v3_, recording_episodes: 201-301, dataset_episodes: 201-301, matched_episodes: 100/101, frames_dropped: 1}
+    models: []
+  0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724
+    created: 2026-06-05 17:24
+    episodes: 401
+    frames: 27110
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 0-400, dataset_episodes: 0-400, matched_episodes: 400/401, frames_dropped: 7}
+    - {recording: gello_v3_, recording_episodes: 201-301, dataset_episodes: 201-301, matched_episodes: 100/101, frames_dropped: 1}
+    models: [robot_learning_tutorial/diffusion_0605_1802]
+  '060_1723':
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/060_1723
+    created: 2026-06-05 18:02
+    episodes: 401
+    frames: 27110
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 0-400, dataset_episodes: 0-400, matched_episodes: 400/401, frames_dropped: 7}
+    - {recording: gello_v3_, recording_episodes: 201-301, dataset_episodes: 201-301, matched_episodes: 100/101, frames_dropped: 1}
+    models: []
+  060_1723/splatsim_lerobot_splatsim_10fps_260605_1724:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/060_1723/splatsim_lerobot_splatsim_10fps_260605_1724
+    created: 2026-06-05 17:24
+    episodes: 401
+    frames: 27110
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 0-400, dataset_episodes: 0-400, matched_episodes: 400/401, frames_dropped: 7}
+    - {recording: gello_v3_, recording_episodes: 201-301, dataset_episodes: 201-301, matched_episodes: 100/101, frames_dropped: 1}
+    models: []
+  splatsim_lerobot_splatsim_10fps_260609_0303:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_lerobot_splatsim_10fps_260609_0303
+    created: 2026-06-09 03:03
+    episodes: 401
+    frames: 27109
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 0-400, dataset_episodes: 0-400, matched_episodes: 401/401, frames_dropped: 7}
+    - {recording: gello_v3_, recording_episodes: 201-301, dataset_episodes: 201-301, matched_episodes: 101/101, frames_dropped: 1}
+    models: []
+  splatsim_xarm5_lite_10fps_260610_0210:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260610_0210
+    created: 2026-06-10 02:10
+    episodes: 401
+    frames: 26802
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 0-400, dataset_episodes: 0-400, matched_episodes: 401/401, frames_dropped: 314}
+    - {recording: gello_v3_, recording_episodes: 201-304, dataset_episodes: 201-304, matched_episodes: 102/104, frames_dropped: 77}
+    models: [robot_learning_tutorial/diffusion_0610_0210]
+  splatsim_xarm5_lite_10fps_260612_1930:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_1930
+    created: 2026-06-12 19:30
+    episodes: 10
+    frames: 675
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 0-9, dataset_episodes: 0-9, matched_episodes: 10/10, frames_dropped: 0}
+    models: []
+  splatsim_xarm5_lite_10fps_260612_1931:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_1931
+    created: 2026-06-12 19:31
+    episodes: 10
+    frames: 675
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 0-9, dataset_episodes: 0-9, matched_episodes: 10/10, frames_dropped: 0}
+    models: []
+  splatsim_xarm5_lite_10fps_260612_1952:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_1952
+    created: 2026-06-12 19:52
+    episodes: 1
+    frames: 59
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources: []
+    models: []
+  splatsim_xarm5_lite_10fps_260612_2006:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_2006
+    created: 2026-06-12 20:06
+    episodes: 1
+    frames: 59
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources: []
+    models: []
+  splatsim_xarm5_lite_10fps_260612_2011:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_2011
+    created: 2026-06-12 20:11
+    episodes: 1
+    frames: 59
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources: []
+    models: []
+  splatsim_xarm5_lite_10fps_260612_2115:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_2115
+    created: 2026-06-12 21:15
+    episodes: 1
+    frames: 59
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources: []
+    models: []
+  splatsim_xarm5_lite_10fps_260615_1901:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260615_1901
+    created: 2026-06-15 19:01
+    episodes: 1
+    frames: 29
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources: []
+    models: []
+  splatsim_xarm5_lite_10fps_260616_0234:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260616_0234
+    created: 2026-06-16 02:34
+    episodes: 401
+    frames: 26802
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 0-400, dataset_episodes: 0-400, matched_episodes: 401/401, frames_dropped: 314}
+    - {recording: gello_v3_, recording_episodes: 201-304, dataset_episodes: 201-304, matched_episodes: 102/104, frames_dropped: 77}
+    models: []
+  splatsim_xarm5_lite_10fps_260616_1804:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260616_1804
+    created: 2026-06-16 18:04
+    episodes: 0
+    frames: 0
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources: []
+    models: []
+  splatsim_xarm5_lite_10fps_260617_0248:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260617_0248
+    created: 2026-06-17 02:48
+    episodes: 201
+    frames: 11214
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v3_, recording_episodes: 0-200, dataset_episodes: 0-200, matched_episodes: 201/201, frames_dropped: 156}
+    models: [robot_learning_tutorial/diffusion_0617_0248]
+  splatsim_xarm5_lite_10fps_260617_1732:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260617_1732
+    created: 2026-06-17 17:32
+    episodes: 301
+    frames: 21831
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v3_, recording_episodes: 0-200, dataset_episodes: 0-200, matched_episodes: 201/201, frames_dropped: 157}
+    models: [robot_learning_tutorial/diffusion_0617_1732]
+  splatsim_xarm5_lite_10fps_260618_1445:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260618_1445
+    created: 2026-06-18 14:45
+    episodes: 302
+    frames: 18314
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v3_, recording_episodes: 0-301, dataset_episodes: 0-301, matched_episodes: 302/302, frames_dropped: 234}
+    - {recording: gello_v2_dual, recording_episodes: 201-301, dataset_episodes: 201-301, matched_episodes: 101/101, frames_dropped: 77}
+    models: [robot_learning_tutorial/diffusion_0618_1445]
+  splatsim_xarm5_lite_10fps_260619_1723:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260619_1723
+    created: 2026-06-19 17:23
+    episodes: 351
+    frames: 20649
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v3_, recording_episodes: 0-350, dataset_episodes: 0-350, matched_episodes: 351/351, frames_dropped: 235}
+    - {recording: gello_v2_dual, recording_episodes: 201-304, dataset_episodes: 201-304, matched_episodes: 102/104, frames_dropped: 78}
+    models: [robot_learning_tutorial/diffusion_0619_1723]
+  splatsim_xarm5_lite_10fps_260622_1924:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260622_1924
+    created: 2026-06-22 19:24
+    episodes: 362
+    frames: 25103
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v3_, recording_episodes: 0-350, dataset_episodes: 0-350, matched_episodes: 351/351, frames_dropped: 1}
+    - {recording: gello_v2_dual, recording_episodes: 201-304, dataset_episodes: 201-304, matched_episodes: 102/104, frames_dropped: 1}
+    models: []
+  splatsim_xarm5_lite_10fps_260623_0204:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260623_0204
+    created: 2026-06-23 02:04
+    episodes: 362
+    frames: 25103
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v3_, recording_episodes: 0-350, dataset_episodes: 0-350, matched_episodes: 351/351, frames_dropped: 1}
+    - {recording: gello_v2_dual, recording_episodes: 201-304, dataset_episodes: 201-304, matched_episodes: 102/104, frames_dropped: 1}
+    models: [robot_learning_tutorial/diffusion_0623_0204]
+  splatsim_xarm5_lite_10fps_260704_1203:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260704_1203
+    created: 2026-07-04 12:03
+    episodes: 400
+    frames: 24315
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v3_, recording_episodes: 0-304, dataset_episodes: 0-304, matched_episodes: 302/305, frames_dropped: 233}
+    - {recording: gello_v2_dual, recording_episodes: 200-399, dataset_episodes: 200-399, matched_episodes: 200/200, frames_dropped: 155}
+    models: [robot_learning_tutorial/diffusion_0704_1501]
+  splatsim_xarm5_lite_10fps_260726_1024:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260726_1024
+    created: 2026-07-26 10:24
+    episodes: 201
+    frames: 22570
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources: []
+    models: [robot_learning_tutorial/diffusion_0726_1024]
+  splatsim_xarm5_lite_10fps_261020_2010:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010
+    created: 2026-10-20 20:10
+    episodes: 206
+    frames: 15141
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_3plants, recording_episodes: 0-205, dataset_episodes: 0-205, matched_episodes: 206/206, frames_dropped: 1}
+    models: [robot_learning_tutorial/diffusion_1021_1640]
+models:
+  robot_learning_tutorial/diffusion:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion
+    started: null
+    saved: 2026-05-14 02:10
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: []
+    train_config: null
+    dataset: 0513_2028
+    dataset_match: stats
+    same_stats_datasets: ['0513_1715', '0513_1242']
+    suggested_name: 1cam-unknown-52ep-h64-0514
+  robot_learning_tutorial/diffusion_0528_1804:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0528_1804
+    started: 2026-05-28 18:04
+    saved: 2026-05-31 02:18
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: []
+    train_config: null
+    dataset: 0529_1607
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-unknown-102ep-h64-0528
+  robot_learning_tutorial/diffusion_0601_1755:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0601_1755
+    started: 2026-06-01 17:55
+    saved: 2026-06-01 20:29
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: []
+    train_config: null
+    dataset: '0601_1755'
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-unknown-102ep-h64-0601
+  robot_learning_tutorial/diffusion_0602_0230:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0602_0230
+    started: 2026-06-02 02:30
+    saved: 2026-06-02 05:44
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: []
+    train_config: null
+    dataset: '0601_1755'
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-unknown-102ep-h64-0602
+  robot_learning_tutorial/diffusion_0602_1917:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0602_1917
+    started: 2026-06-02 19:17
+    saved: 2026-06-02 23:43
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: 0602_1901
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-unknown-202ep-h64-0602
+  robot_learning_tutorial/diffusion_0603_1702:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0603_1702
+    started: 2026-06-03 17:02
+    saved: 2026-06-04 02:53
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: '0603_1654'
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-v2_dual+v3-303ep-h64-0603
+  robot_learning_tutorial/diffusion_0604_1706:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0604_1706
+    started: 2026-06-04 17:06
+    saved: 2026-06-05 02:37
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: '0604_1633'
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-v2_dual+v3-303ep-h64-0604
+  robot_learning_tutorial/diffusion_0605_1802:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0605_1802
+    started: 2026-06-05 18:02
+    saved: 2026-06-06 05:37
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: 0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724
+    dataset_match: stats
+    same_stats_datasets: [060_1723/splatsim_lerobot_splatsim_10fps_260605_1724, '0605_1723', '060_1723']
+    suggested_name: 2cam-v2_dual+v3-401ep-h64-0605
+  robot_learning_tutorial/diffusion_0610_0210:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0610_0210
+    started: 2026-06-10 02:10
+    saved: 2026-06-10 22:16
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: splatsim_xarm5_lite_10fps_260610_0210
+    dataset_match: stats
+    same_stats_datasets: [splatsim_xarm5_lite_10fps_260616_0234]
+    suggested_name: 1cam-v2_dual+v3-401ep-h64-0610
+  robot_learning_tutorial/diffusion_0617_0248:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0617_0248
+    started: 2026-06-17 02:48
+    saved: 2026-06-17 07:22
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: splatsim_xarm5_lite_10fps_260617_0248
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-v3-201ep-h64-0617
+  robot_learning_tutorial/diffusion_0617_1732:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0617_1732
+    started: 2026-06-17 17:32
+    saved: 2026-06-18 01:13
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: splatsim_xarm5_lite_10fps_260617_1732
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-v3-301ep-h64-0617
+  robot_learning_tutorial/diffusion_0618_1445:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0618_1445
+    started: 2026-06-18 14:45
+    saved: 2026-06-18 19:23
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: splatsim_xarm5_lite_10fps_260618_1445
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-v3+v2_dual-302ep-h64-0618
+  robot_learning_tutorial/diffusion_0619_1723:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0619_1723
+    started: 2026-06-19 17:23
+    saved: 2026-06-19 22:03
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: splatsim_xarm5_lite_10fps_260619_1723
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-v3+v2_dual-351ep-h64-0619
+  robot_learning_tutorial/diffusion_0623_0204:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0623_0204
+    started: 2026-06-23 02:04
+    saved: 2026-06-24 08:49
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: splatsim_xarm5_lite_10fps_260623_0204
+    dataset_match: stats
+    same_stats_datasets: [splatsim_xarm5_lite_10fps_260622_1924]
+    suggested_name: 2cam-v3+v2_dual-362ep-h64-0623
+  robot_learning_tutorial/diffusion_0704_1501:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0704_1501
+    started: 2026-07-04 15:01
+    saved: 2026-07-05 02:16
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: splatsim_xarm5_lite_10fps_260704_1203
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-v3+v2_dual-400ep-h64-0704
+  robot_learning_tutorial/diffusion_0726_1024:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0726_1024
+    started: 2026-07-26 10:24
+    saved: 2026-07-27 07:49
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: splatsim_xarm5_lite_10fps_260726_1024
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-unknown-201ep-h64-0726
+  robot_learning_tutorial/diffusion_1021_1640:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_1021_1640
+    started: 2026-10-21 16:40
+    saved: 2026-10-22 00:52
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: splatsim_xarm5_lite_10fps_261020_2010
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-3plants-206ep-h64-1021

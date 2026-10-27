@@ -35,7 +35,9 @@ DEFAULT_CONFIG = "configs/train/diffusion.yaml"
 @dataclass
 class TrainConfig:
     # run
-    model_name: str | None = None      # None -> diffusion_<MMDD_HHMM>
+    model_name: str | None = None      # None -> diffusion_<MMDD_HHMM> (carpeta de salida)
+    name: str = ""                     # nombre corto para configs/registry.yaml
+    description: str = ""              # qué intenta mejorar este modelo
     output_root: str = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial"
     device: str = "cuda"
     # dataset
