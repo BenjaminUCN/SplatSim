@@ -8,6 +8,7 @@ import time
 import numpy as np
 
 from splatsim.robots.sim_robot_pybullet_base import PybulletRobotServerBase
+from splatsim.utils.camera_setup import base_camera_poses
 from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 
 from gaussian_renderer import render
@@ -30,7 +31,6 @@ from .debug_ui import (
     BaseCameraTuner,
     ResetJointsButton,
     SaveCameraPosesButton,
-    load_base_camera_poses,
 )
 from .gripper import XArm5Gripper
 from .recorder import TrajectoryRecorder
@@ -71,7 +71,7 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
 
         self.apple = AppleController(self, movable=move_apple and gui == "pybullet")
         base_cams = [BaseCamera(self, name, xyz, rpy)
-                     for name, (xyz, rpy) in load_base_camera_poses().items()]
+                     for name, (xyz, rpy) in base_camera_poses().items()]
         self.cameras = {cam.name: cam for cam in base_cams}
         wrist_cam = WristCamera(self)
         self.cameras[wrist_cam.name] = wrist_cam

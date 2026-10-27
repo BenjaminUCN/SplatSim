@@ -56,7 +56,7 @@ def _pose_matrix(pos, rot_matrix_flat) -> np.ndarray:
 
 
 class BaseCamera:
-    """Cámara fija en el mundo (base_rgb, base2_rgb, ...). Su pose se cambia desde los sliders."""
+    """Cámara fija en el mundo (base_rgb, base_left_rgb, ...). Su pose se cambia desde los sliders."""
 
     def __init__(self, server, name: str, xyz, rpy):
         self.s = server

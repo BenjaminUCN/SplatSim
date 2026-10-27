@@ -175,7 +175,7 @@ python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5
 - `--move_apple`: only with `--gui pybullet`, adds the tomato sliders and buttons (the viser panel always has them).
 - `--hz`: the rate at which the client sends commands. **It must match `--hz` of the client** (`run_env_sim.py`, default 30). Each command advances the simulation by exactly `1/hz` seconds, so recorded frames are evenly spaced in simulated time.
 
-The server renders `base_rgb`, `base2_rgb` and `wrist_rgb` from the gaussian splat; pick a subset with `--cameras base_rgb wrist_rgb` (every rendered camera is recorded). Camera FoV, recording length and other constants live in `splatsim/robots/xarm/config.py`.
+The server renders `base_rgb`, `base_left_rgb`, `base_right_rgb` and `wrist_rgb` from the gaussian splat; render only an arrangement with `--arrangement 2cam`, or any subset with `--cameras base_rgb wrist_rgb` (every rendered camera is recorded). Camera FoV, recording length and other constants live in `splatsim/robots/xarm/config.py`.
 
 **Control panel (viser).** Open http://localhost:8080 in a browser. The 3D view shows the world frame, the end effector, the base camera frustums, the tomato and the saved grid positions. The controls are split into a main panel (docked right) with two tabs and a separate *Cameras* window (docked left); both can be moved, docked or minimized.
 
@@ -192,7 +192,15 @@ The server renders `base_rgb`, `base2_rgb` and `wrist_rgb` from the gaussian spl
 
 If `configs/apple_grid.yaml` has positions, the tomato starts at the first one.
 
-**Base cameras.** `base_rgb` and `base2_rgb` are fixed cameras with independent poses, each with its own controls (panel tab, or X/Y/Z/Roll/Pitch/Yaw sliders `base`, `base2` with `--gui pybullet`). "Save Camera Poses" writes both poses to `configs/camera_poses.yaml`, which the server loads on startup and which overrides the defaults in `BASE_CAMS` (`config.py`). Fix the camera poses before recording a dataset, and record with all cameras so you can later train on 1, 2 or 3 of them from the same demonstrations.
+**Cameras and arrangements.** `configs/camera_poses.yaml` defines the fixed base cameras (`base_rgb` in the center, `base_left_rgb` and `base_right_rgb` to the sides) and the camera arrangements, which are the subsets used to train and evaluate:
+
+| Arrangement | Cameras |
+|---|---|
+| `1cam` | `base_rgb` |
+| `2cam` | `base_rgb`, `wrist_rgb` |
+| `3cam` | `base_left_rgb`, `base_right_rgb`, `wrist_rgb` |
+
+Record with all cameras (the default) so every arrangement is trained on the same demonstrations; then pick the arrangement with `arrangement:` in the training config. Adjust the poses in the panel (*Scene* tab, one tab per base camera, or `--gui pybullet` sliders) and press Save Camera Poses, which rewrites the poses and keeps the arrangements; edit the arrangements by hand. In the *Cameras* window, the Arrangement list turns on the previews of an arrangement.
 
 ### Record demonstrations
 
@@ -215,7 +223,7 @@ python scripts/check_recording_timing.py [traj_folder]
 
 Convert recordings to a LeRobot dataset (it detects the image numbering of each episode, both the current per-frame one and the interleaved one of older recordings; note that it pushes the dataset to the Hugging Face Hub at the end):
 ```bash
-python splatsim/utils/lerobot_transform_v2.py --input_dir <traj_folder> --output_dir <dataset_dir> --fps 10 [--cameras base_rgb base2_rgb wrist_rgb]
+python splatsim/utils/lerobot_transform_v2.py --input_dir <traj_folder> --output_dir <dataset_dir> --fps 10 [--cameras base_rgb base_left_rgb base_right_rgb wrist_rgb]
 ```
 
 ### Train the diffusion policy

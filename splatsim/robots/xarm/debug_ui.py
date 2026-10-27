@@ -1,45 +1,16 @@
 """Herramientas de depuración: sliders de cámaras base, botón de reset, ventana de la manzana."""
 import cv2
 import numpy as np
-import yaml
 
-from .config import (
-    BASE_CAM_RANGE_RPY,
-    BASE_CAM_RANGE_XYZ,
-    BASE_CAMS,
-    CAMERA_POSES_PATH,
-)
+from splatsim.utils.camera_setup import CAMERA_POSES_PATH, save_base_camera_poses
 
-_POSES_HEADER = """\
-# Poses (xyz in meters, rpy in radians) of the fixed base cameras in PyBullet world coordinates.
-# Written by the "Save Camera Poses" button of the xArm5 server; they override BASE_CAMS
-# in splatsim/robots/xarm/config.py.
-"""
-
-
-def load_base_camera_poses() -> dict:
-    """BASE_CAMS con las poses de CAMERA_POSES_PATH encima: nombre -> (xyz, rpy)."""
-    poses = dict(BASE_CAMS)
-    try:
-        with open(CAMERA_POSES_PATH) as f:
-            saved = yaml.safe_load(f) or {}
-    except FileNotFoundError:
-        return poses
-    for name, pose in saved.items():
-        poses[name] = (tuple(pose["xyz"]), tuple(pose["rpy"]))
-        print(f"[xArm5] {name}: pose de {CAMERA_POSES_PATH} xyz={pose['xyz']} rpy={pose['rpy']}")
-    return poses
+from .config import BASE_CAM_RANGE_RPY, BASE_CAM_RANGE_XYZ
 
 
 def save_camera_poses(cameras) -> None:
     """Escribe la pose actual de las cámaras base en CAMERA_POSES_PATH."""
-    poses = {cam.name: {"xyz": [round(float(v), 4) for v in cam.xyz],
-                        "rpy": [round(float(v), 4) for v in cam.rpy]}
-             for cam in cameras}
-    with open(CAMERA_POSES_PATH, "w") as f:
-        f.write(_POSES_HEADER)
-        yaml.safe_dump(poses, f, default_flow_style=None, sort_keys=False)
-    print(f"[xArm5] Poses de {', '.join(poses)} guardadas en {CAMERA_POSES_PATH}")
+    save_base_camera_poses({cam.name: (cam.xyz, cam.rpy) for cam in cameras})
+    print(f"[xArm5] Poses de {', '.join(cam.name for cam in cameras)} guardadas en {CAMERA_POSES_PATH}")
 
 
 class BaseCameraTuner:

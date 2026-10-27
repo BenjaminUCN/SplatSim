@@ -13,6 +13,7 @@ device: cuda
 dataset_id: LuEduSoHu/splatsim_xarm5_lite_10fps_261020_2010
 dataset_root: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010
 cameras: null             # subset of the dataset cameras, e.g. [base_rgb, wrist_rgb]; null -> all
+arrangement: null         # or a camera arrangement from configs/camera_poses.yaml, e.g. 2cam
 
 # ── Policy (DiffusionConfig) ─────────────────────────────────────────────────
 n_obs_steps: 2            # observation horizon

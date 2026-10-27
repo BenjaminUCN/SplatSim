@@ -19,8 +19,10 @@ class Args:
     robot_name: str = "robot_iphone"
     move_apple: bool = False
     hz: int = 30  # frecuencia de control del cliente; debe coincidir con run_env_sim --hz
-    # cámaras renderizadas en cada observación (xArm5); se graban todas
-    cameras: tuple[str, ...] = ("base_rgb", "base2_rgb", "wrist_rgb")
+    # cámaras renderizadas en cada observación (xArm5); se graban todas.
+    # arrangement (p.ej. 2cam, ver configs/camera_poses.yaml) reemplaza a cameras
+    cameras: tuple[str, ...] = ("base_rgb", "base_left_rgb", "base_right_rgb", "wrist_rgb")
+    arrangement: str | None = None
     # controles del xArm5: "viser" (panel web) o "pybullet" (sliders de PyBullet)
     gui: str = "viser"
     panel_port: int = 8080
@@ -197,11 +199,13 @@ def launch_robot_server(args: Args):
     
     elif args.robot in ("sim_xarm5_splat_camera", "sim_xarm5_splat_camera_2"):
         from splatsim.robots.xarm.server import XArm5PybulletRobotServerCamera
+        from splatsim.utils.camera_setup import arrangement_cameras
 
         server = XArm5PybulletRobotServerCamera(
             port=port,
             host=args.hostname,
-            camera_names=list(args.cameras),
+            camera_names=(arrangement_cameras(args.arrangement) if args.arrangement
+                          else list(args.cameras)),
             robot_name=args.robot_name,
             cam_i=347,
             use_gripper=use_gripper,

@@ -15,7 +15,7 @@ Soporta DOS esquemas de entrada, detectados automáticamente por episodio:
 
      Dos formas de numerar las imágenes, detectadas por episodio:
        - por frame (servidor xArm5 actual): <cam>_00001.png va con 00001.pkl,
-         para cualquier cámara (base_rgb, base2_rgb, wrist_rgb, ...)
+         para cualquier cámara (base_rgb, base_left_rgb, wrist_rgb, ...)
        - intercalada (grabaciones antiguas): ver convención de arriba
 
   2. REAL (gello, brazo físico):
@@ -835,7 +835,7 @@ def build_parser():
         "--cameras",
         nargs="+",
         default=None,
-        help="Cámaras a incluir, ej. --cameras base_rgb base2_rgb wrist_rgb "
+        help="Cámaras a incluir, ej. --cameras base_rgb base_left_rgb base_right_rgb wrist_rgb "
         "(por defecto todas las que tenga el primer episodio).",
     )
     p.add_argument("--use_images", action="store_true")

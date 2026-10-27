@@ -1,0 +1,18 @@
+# Fixed base cameras (pose in PyBullet world coordinates: xyz in meters, rpy in radians)
+# and camera arrangements (subsets used to train and evaluate; every camera is recorded).
+# Poses are written by the "Save Camera Poses" button of the xArm5 control panel;
+# arrangements are edited by hand.
+cameras:
+  base_rgb:
+    xyz: [-0.079, 0.0, 0.142]
+    rpy: [-1.562, 0.0, -4.708]
+  base_left_rgb:
+    xyz: [-0.079, -0.25, 0.142]
+    rpy: [-1.562, 0.0, -4.958]
+  base_right_rgb:
+    xyz: [-0.079, 0.25, 0.142]
+    rpy: [-1.562, 0.0, -4.458]
+arrangements:
+  1cam: [base_rgb]
+  2cam: [base_rgb, wrist_rgb]
+  3cam: [base_left_rgb, base_right_rgb, wrist_rgb]

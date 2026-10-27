@@ -29,6 +29,8 @@ from lerobot.transforms import (
 )
 from lerobot.utils.feature_utils import dataset_to_policy_features
 
+from splatsim.utils.camera_setup import arrangement_cameras
+
 DEFAULT_CONFIG = "configs/train/diffusion.yaml"
 
 
@@ -44,6 +46,7 @@ class TrainConfig:
     dataset_id: str = "LuEduSoHu/splatsim_xarm5_lite_10fps_261020_2010"
     dataset_root: str = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010"
     cameras: tuple[str, ...] | None = None  # subconjunto de cámaras del dataset; None -> todas
+    arrangement: str | None = None      # arreglo de configs/camera_poses.yaml (en vez de cameras)
     # policy
     n_obs_steps: int = 2
     horizon: int = 64
@@ -162,7 +165,10 @@ def main(cfg: TrainConfig):
 
     output_features = {key: ft for key, ft in features.items() if ft.type is FeatureType.ACTION}
     input_features = {key: ft for key, ft in features.items() if key not in output_features}
-    input_features = select_cameras(input_features, cfg.cameras)
+    if cfg.arrangement and cfg.cameras:
+        raise SystemExit("Usa cameras o arrangement, no ambos")
+    cameras = tuple(arrangement_cameras(cfg.arrangement)) if cfg.arrangement else cfg.cameras
+    input_features = select_cameras(input_features, cameras)
 
     policy_cfg = DiffusionConfig(
         input_features=input_features,

@@ -17,6 +17,7 @@ import time
 import numpy as np
 import viser
 
+from splatsim.utils.camera_setup import load_camera_setup
 from splatsim.utils.registry import load_registry, loadable_models, model_label
 
 from .apple import load_grid
@@ -432,7 +433,11 @@ class ControlPanel:
         # (salvo que un cliente las esté pidiendo: entonces se reusan sus observaciones)
         self._previews = {}
         panel = self.v.gui.add_panel()
+        arrangements = load_camera_setup()["arrangements"]
         with panel.add_tab("Cameras", viser.Icon.CAMERA):
+            # un arreglo (configs/camera_poses.yaml) marca de una vez sus cámaras
+            arrangement = self.v.gui.add_dropdown(
+                "Arrangement", ["custom", *arrangements], initial_value="custom")
             checks = {name: self.v.gui.add_checkbox(name, name in PREVIEW_DEFAULT)
                       for name in self.s.cameras}
             for name, show in checks.items():
@@ -443,6 +448,14 @@ class ControlPanel:
                 self._previews[name] = (show, image)
         panel.dock_left()
         panel.set_width(PREVIEW_PANEL_WIDTH)
+
+        @arrangement.on_update
+        def _(event):
+            if event.client is None or arrangement.value == "custom":
+                return
+            selected = arrangements[arrangement.value]
+            for name, check in checks.items():
+                check.value = name in selected
 
     def _update_preview(self):
         names = [name for name, (show, _) in self._previews.items() if show.value]
