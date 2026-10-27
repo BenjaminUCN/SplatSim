@@ -26,6 +26,8 @@ class Args:
     # controles del xArm5: "viser" (panel web) o "pybullet" (sliders de PyBullet)
     gui: str = "viser"
     panel_port: int = 8080
+    # xArm5 (sim y real): cómo se siguen los objetivos articulares: position / interp / velocity
+    control_mode: str = "position"
 
 
 def launch_robot_server(args: Args):
@@ -213,6 +215,7 @@ def launch_robot_server(args: Args):
             control_hz=args.hz,
             gui=args.gui,
             panel_port=args.panel_port,
+            control_mode=args.control_mode,
         )
 
     else:
@@ -222,7 +225,8 @@ def launch_robot_server(args: Args):
         elif args.robot == "xarm5_lite":
             from splatsim.robots.xarm5_lite_robot_plant import XArmRobot
 
-            robot = XArmRobot(ip=args.robot_ip)
+            robot = XArmRobot(ip=args.robot_ip, control_mode=args.control_mode,
+                              command_hz=args.hz)
         elif args.robot == "ur":
             from splatsim.robots.ur import URRobot
 

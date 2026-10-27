@@ -15,10 +15,13 @@ from gaussian_renderer import render
 
 from .apple import AppleController
 from .cameras import AppleCamera, BaseCamera, WristCamera
+from splatsim.robots.joint_controller import JointController
+
 from .config import (
     ENV_CONFIG,
     FLOOR_Z,
     IDLE_STEP_AFTER,
+    LOW_LEVEL_HZ,
     LOOP_HZ,
     MAX_RECORD_SECONDS,
     NUM_DOFS,
@@ -44,15 +47,23 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
 
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
-                 gui: str = "viser", panel_port: int = 8080, **kwargs):
+                 gui: str = "viser", panel_port: int = 8080, control_mode: str = "position",
+                 **kwargs):
         """gui: "viser" (panel web en http://localhost:<panel_port>) o "pybullet"
-        (sliders y botones de PyBullet; --move_apple agrega los de la manzana)."""
+        (sliders y botones de PyBullet; --move_apple agrega los de la manzana).
+        control_mode: position / interp / velocity (ver splatsim/robots/joint_controller.py),
+        la misma ley que usa el driver real del xArm5."""
         # traj_save_path se acepta por compatibilidad pero no se usa (igual que antes)
         self._num_dofs = NUM_DOFS
         self.control_hz = control_hz
         self.zmq_port = kwargs.get("port", 5556)  # para lanzar clientes desde el panel
         # cada comando avanza exactamente 1/control_hz s simulados
         self.steps_per_command = round((1 / control_hz) / SIM_DT)
+        # lazo articular a LOW_LEVEL_HZ dentro de cada comando, como el hilo del driver real
+        self.steps_per_tick = round((1 / LOW_LEVEL_HZ) / SIM_DT)
+        self.joint_ctrl = JointController(control_mode, 1 / control_hz)
+        self._holding = True             # en reposo el brazo se sostiene en su posición
+        print(f"[xArm5] control_mode={control_mode}")
         print(f"[xArm5] control_hz={control_hz} → {self.steps_per_command} pasos por comando")
         # el hilo ZMQ, el serve_loop y el recorder comparten PyBullet y el renderer
         self.lock = threading.RLock()
@@ -141,18 +152,47 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             self.pybullet_client.stepSimulation()
         self.sim_steps += n
 
+    def _arm_positions(self) -> np.ndarray:
+        return np.array([self.pybullet_client.getJointState(self.dummy_robot, i)[0]
+                         for i in range(1, 6)])
+
+    def _apply_arm_command(self, kind: str, values) -> None:
+        c = self.pybullet_client
+        for i in range(1, 6):
+            if kind == "position":
+                c.setJointMotorControl2(self.dummy_robot, i, c.POSITION_CONTROL,
+                                        targetPosition=values[i - 1], force=500)
+            else:
+                c.setJointMotorControl2(self.dummy_robot, i, c.VELOCITY_CONTROL,
+                                        targetVelocity=values[i - 1], force=500)
+
+    def _hold(self) -> None:
+        """Sostiene el brazo donde está (p.ej. al quedar sin comandos en modo velocidad)."""
+        q = self._arm_positions()
+        self._apply_arm_command("position", q)
+        self.joint_ctrl.reset(q, self.sim_steps * SIM_DT)
+        self._holding = True
+
     def command_joint_state(self, joint_state: np.ndarray) -> None:
         assert len(joint_state) == self.num_dofs()
         with self.lock:
-            for i in range(1, 6):
-                self.pybullet_client.setJointMotorControl2(
-                    self.dummy_robot, i, self.pybullet_client.POSITION_CONTROL,
-                    targetPosition=joint_state[i - 1], force=500)
+            now = self.sim_steps * SIM_DT
+            if self._holding:            # retoma desde la posición actual, sin saltos
+                self.joint_ctrl.reset(self._arm_positions(), now)
+                self._holding = False
+            self.joint_ctrl.set_target(joint_state[:5], now)
             if self.use_gripper:
                 self.gripper.command(joint_state[-1])
-            # cada comando avanza exactamente 1/control_hz s simulados,
-            # así los frames grabados quedan con un dt fijo
-            self._step(self.steps_per_command)
+            # cada comando avanza exactamente 1/control_hz s simulados (frames con dt fijo),
+            # en ticks del lazo articular de steps_per_tick pasos
+            remaining = self.steps_per_command
+            while remaining > 0:
+                n = min(self.steps_per_tick, remaining)
+                kind, values = self.joint_ctrl.step(
+                    self._arm_positions(), self.sim_steps * SIM_DT, n * SIM_DT)
+                self._apply_arm_command(kind, values)
+                self._step(n)
+                remaining -= n
             self._last_command_time = time.monotonic()
             self.recorder.on_command()
 
@@ -192,6 +232,7 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             obs = super().get_observations()
             obs["joint_positions"] = self.get_joint_state()
             obs["sim_time"] = self.sim_steps * SIM_DT
+            obs["control_mode"] = self.joint_ctrl.mode
             self._last_images = {k: obs[k] for k in self.camera_names if obs.get(k) is not None}
             self._last_images_time = time.monotonic()
             self.recorder.on_observation(obs)
@@ -217,6 +258,7 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
                                         targetPosition=target, force=500)
             self.close_gripper()
             self._step(settle_steps)
+            self._holding = True         # el próximo comando parte de esta pose
 
     def start_recording(self, max_seconds: float | None = None, metadata: dict | None = None,
                         root: str | None = None) -> str | None:
@@ -243,6 +285,8 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             # en reposo se sigue simulando para poder mover el robot desde la GUI
             idle = time.monotonic() - self._last_command_time > IDLE_STEP_AFTER
             if idle and not self.recorder.active:
+                if not self._holding:
+                    self._hold()
                 self._step()
         time.sleep(1 / LOOP_HZ)
         self.apple_window.show()

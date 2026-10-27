@@ -6,6 +6,7 @@ from typing import Dict, Optional
 import numpy as np
 from pyquaternion import Quaternion
 
+from splatsim.robots.joint_controller import ControllerGains, JointController
 from splatsim.robots.robot import Robot
 
 
@@ -104,6 +105,8 @@ class XArmRobot(Robot):
     GRIPPER_CLOSE = 0
 
     DEFAULT_MAX_DELTA = 0.05
+    # modo velocidad: si el hilo de control se atrasa, el xArm detiene el brazo tras este tiempo
+    VELOCITY_WATCHDOG_PERIODS = 3
 
     # ------------------------------------------------------------------ #
     # Interface                                                            #
@@ -141,7 +144,12 @@ class XArmRobot(Robot):
 
     def stop(self):
         self.running = False
+        if self.command_thread is not None:
+            self.command_thread.join()
+            self.command_thread = None
         if self.robot is not None:
+            if self.ctrl.mode == "velocity":
+                self.robot.vc_set_joint_velocity([0.0] * 5, is_radian=True)
             self.robot.disconnect()
         if self.command_thread is not None:
             self.command_thread.join()
@@ -156,10 +164,16 @@ class XArmRobot(Robot):
         real: bool = True,
         control_frequency: float = 30.0,
         max_delta: float = DEFAULT_MAX_DELTA,
+        control_mode: str = "position",
+        command_hz: float = 30.0,
     ):
-        print(f"[XArmRobot] Connecting to xArm5 at {ip}")
+        """control_mode: position / interp / velocity (splatsim/robots/joint_controller.py),
+        la misma ley que usa el simulador. command_hz: frecuencia con que llegan los objetivos
+        (el --hz del cliente: run_env_sim con GELLO o con la política)."""
+        print(f"[XArmRobot] Connecting to xArm5 at {ip} (control_mode={control_mode})")
         self.real = real
         self.max_delta = max_delta
+        self.ctrl = JointController(control_mode, 1 / command_hz, ControllerGains(max_delta=max_delta))
 
         # Gripper cache: se actualiza cada GRIPPER_CACHE_STEPS pasos
         # para no saturar el bus de comunicación (igual que en Gello)
@@ -184,6 +198,7 @@ class XArmRobot(Robot):
             "joints": self.last_state.joints(),
             "gripper": 0,
         }
+        self.ctrl.reset(self.last_state.joints(), time.monotonic())
 
         self.running = True
         self.command_thread = None
@@ -207,6 +222,7 @@ class XArmRobot(Robot):
                 "joints": joints,
                 "gripper": gripper,
             }
+            self.ctrl.set_target(joints, time.monotonic())
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
@@ -219,7 +235,8 @@ class XArmRobot(Robot):
         self.robot.clean_warn()
         self.robot.motion_enable(True)
         time.sleep(1)
-        self.robot.set_mode(1)
+        # modo 1: servo por posición (set_servo_angle_j); modo 4: velocidad articular
+        self.robot.set_mode(4 if self.ctrl.mode == "velocity" else 1)
         time.sleep(1)
         self.robot.set_collision_sensitivity(0)
         time.sleep(1)
@@ -268,15 +285,14 @@ class XArmRobot(Robot):
             self.last_state = self._update_last_state()
 
             with self.target_command_lock:
-                joint_delta = np.array(
-                    self.target_command["joints"] - self.last_state.joints()
-                )
                 gripper_command = self.target_command["gripper"]
+                kind, values = self.ctrl.step(
+                    self.last_state.joints(), time.monotonic(), 1 / self._control_frequency)
 
-            norm = np.linalg.norm(joint_delta)
-            delta = joint_delta / norm * self.max_delta if norm > self.max_delta else joint_delta
-
-            self._set_position(self.last_state.joints() + delta)
+            if kind == "position":
+                self._set_position(values)
+            else:
+                self._set_velocity(values)
 
             if gripper_command is not None:
                 # Solo envía si cambió más del 2 % (evita spam al gripper)
@@ -339,6 +355,16 @@ class XArmRobot(Robot):
                 aa,
             )
 
+    def _set_velocity(self, speeds: np.ndarray) -> None:
+        if self.robot is None:
+            return
+        # is_sync=False: cada articulación sigue su propia velocidad (no se escalan juntas)
+        ret = self.robot.vc_set_joint_velocity(
+            [float(v) for v in speeds], is_radian=True, is_sync=False,
+            duration=self.VELOCITY_WATCHDOG_PERIODS / self._control_frequency)
+        if ret in [1, 9]:
+            self._clear_error_states()
+
     def _set_position(self, joints: np.ndarray) -> None:
         if self.robot is None:
             return
@@ -388,6 +414,7 @@ class XArmRobot(Robot):
             "ee_pos_quat": pos_quat,           # (7,) : xyz + xyzw
             "gripper_position": np.array(state.gripper_pos()),
             "state": cart_state,              # (7,) : x, y, z, roll, pitch, yaw, gripper
+            "control_mode": self.ctrl.mode,
         }
 
 

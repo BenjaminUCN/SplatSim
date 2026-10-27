@@ -172,6 +172,7 @@ python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5
 
 - `--robot_name`: the scene from `objects.yaml` (`xarm5_lite_plant_v3` is the latest).
 - `--gui`: `viser` (default) opens a web control panel at http://localhost:8080 (`--panel_port`); `pybullet` keeps the old PyBullet sliders and buttons instead.
+- `--control_mode`: how joint targets (from the policy or GELLO) are followed: `position` (default), `interp` or `velocity`; see [Control modes](#control-modes).
 - `--move_apple`: only with `--gui pybullet`, adds the tomato sliders and buttons (the viser panel always has them).
 - `--hz`: the rate at which the client sends commands. **It must match `--hz` of the client** (`run_env_sim.py`, default 30). Each command advances the simulation by exactly `1/hz` seconds, so recorded frames are evenly spaced in simulated time.
 
@@ -201,6 +202,18 @@ If `configs/apple_grid.yaml` has positions, the tomato starts at the first one.
 | `3cam` | `base_left_rgb`, `base_right_rgb`, `wrist_rgb` |
 
 Record with all cameras (the default) so every arrangement is trained on the same demonstrations; then pick the arrangement with `arrangement:` in the training config. Adjust the poses in the panel (*Scene* tab, one tab per base camera, or `--gui pybullet` sliders) and press Save Camera Poses, which rewrites the poses and keeps the arrangements; edit the arrangements by hand. In the *Cameras* window, the Arrangement list turns on the previews of an arrangement.
+
+### Control modes
+
+The policy and GELLO always send joint positions; `--control_mode` only changes how the low-level loop (30 Hz) follows them. The same law, in `splatsim/robots/joint_controller.py`, runs in the simulator and in the real xArm5 driver (`--robot xarm5_lite`), so both behave alike:
+
+| Mode | Real xArm | Behavior |
+|---|---|---|
+| `position` | mode 1, `set_servo_angle_j` | Step toward the latest target, at most `max_delta` (0.05 rad) per tick. Reaches each target and waits for the next one (stop-and-go). |
+| `interp` | mode 1, `set_servo_angle_j` | Minimum-jerk interpolation from the previous command to the new target over one command period. Continuous motion, one period of delay. |
+| `velocity` | mode 4, `vc_set_joint_velocity` | `v = feedforward + kp·error`, with velocity and acceleration limits. The feedforward is the velocity implied by consecutive targets, so the arm keeps moving between them. Each command carries a `duration` watchdog: if the control thread stalls, the arm stops. |
+
+Start the real robot with the same `--hz` the client uses (e.g. `--hz 10` for the policy), since `interp` and `velocity` use it as the expected time between targets. Gains (`kp`, `v_max`, `a_max`, ...) are in `ControllerGains`. Each observation includes `control_mode`. Try `velocity` on the real arm with low `v_max` first and the emergency stop at hand.
 
 ### Record demonstrations
 

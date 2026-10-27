@@ -6,6 +6,7 @@ SIM_DT = 1 / 240          # paso de PyBullet (lo fija la base con setTimeStep)
 CONTROL_HZ = 30           # frecuencia de comandos por defecto; launch_nodes --hz la sobrescribe
 LOOP_HZ = 240             # frecuencia del serve_loop (UI y física en reposo)
 IDLE_STEP_AFTER = 0.2     # s reales sin comandos tras los que el serve_loop vuelve a avanzar la física
+LOW_LEVEL_HZ = 30         # lazo de control articular (igual que el hilo del driver real del xArm5)
 
 # ── Grabación ────────────────────────────────────────────────────────────────
 MAX_RECORD_SECONDS = 2    # duración máxima de una trayectoria, en tiempo simulado
