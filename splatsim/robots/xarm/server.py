@@ -49,6 +49,8 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         (sliders y botones de PyBullet; --move_apple agrega los de la manzana)."""
         # traj_save_path se acepta por compatibilidad pero no se usa (igual que antes)
         self._num_dofs = NUM_DOFS
+        self.control_hz = control_hz
+        self.zmq_port = kwargs.get("port", 5556)  # para lanzar clientes desde el panel
         # cada comando avanza exactamente 1/control_hz s simulados
         self.steps_per_command = round((1 / control_hz) / SIM_DT)
         print(f"[xArm5] control_hz={control_hz} → {self.steps_per_command} pasos por comando")

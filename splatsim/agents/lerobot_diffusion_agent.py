@@ -13,6 +13,7 @@ from lerobot.policies.utils import build_inference_frame
 from torchvision import transforms
 
 from splatsim.image_classifier import SimpleCNN
+from splatsim.utils.registry import dataset_for_checkpoint
 
 # Constants from config.json
 _IMAGE_KEY   = "observation.images.base_rgb"
@@ -24,6 +25,10 @@ _N_OBS_STEPS = 2   # temporal window size
 _N_ACT_STEPS = 32  # action chunk size
 
 
+DEFAULT_CHECKPOINT = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_1021_1640"
+DEFAULT_DATASET_ROOT = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010"
+
+
 class LeRobotDiffusionAgent:
     """
     SplatSim agent wrapping a LeRobot DiffusionPolicy checkpoint.
@@ -33,43 +38,35 @@ class LeRobotDiffusionAgent:
 
     Args:
         checkpoint: HuggingFace repo id or local pretrained_model folder.
+        dataset_root: local LeRobot dataset the policy was trained on.
         device: "cuda" or "cpu".
         n_action_steps: overrides the default chunk size of 32.
     """
 
     def __init__(
         self,
-        # checkpoint: str = "LuEduSoHu/robot_learning_tutorial_diffusion_0528_1804",
-        checkpoint: str = "LuEduSoHu/robot_learning_tutorial_diffusion_0726_1024",
+        checkpoint: str | None = None,
+        dataset_root: str | None = None,
         device: str = "cuda",
         n_action_steps: int | None = None,
     ):
+        """checkpoint: carpeta del modelo (None -> DEFAULT_CHECKPOINT).
+        dataset_root: dataset con que se entrenó; None -> se busca en configs/registry.yaml
+        (scripts/build_registry.py) y, si el modelo no está, DEFAULT_DATASET_ROOT."""
         self.device = device
         self._n_act_steps = n_action_steps or _N_ACT_STEPS
         self._obs_buffer: deque[dict[str, torch.Tensor]] = deque(maxlen=_N_OBS_STEPS)
         self._action_queue: list[np.ndarray] = []
-        
-        # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion"
-        # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0610_0210"
-        # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0605_1802" # 2 camaras
-        # checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0726_1024"
-        checkpoint = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_1021_1640"
-        
-        
-        
-        # dataset_id = "LuEduSoHu/25051601"
-        # dataset_root = "/home/magister/lerobot/splatsim_test_data/0529_1607"
-        # dataset_id = "LuEduSoHu/splatsim_xarm5_lite_10fps_260610_0210"
-        # dataset_root = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260610_0210"
-        # dataset_id = "LuEduSoHu/splatsim_lerobot_splatsim_10fps_260605_1724"
-        # dataset_root = "/home/magister/lerobot/splatsim_test_data/0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724"
-        # dataset_id = "LuEduSoHu/splatsim_xarm5_lite_10fps_260726_1024"
-        # dataset_root = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260726_1024"
-        dataset_id = "LuEduSoHu/splatsim_xarm5_lite_10fps_261020_2010"
-        dataset_root = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010"
-        
-        
-        
+
+        checkpoint = os.path.expanduser(checkpoint or DEFAULT_CHECKPOINT)
+        if dataset_root is None:
+            dataset = dataset_for_checkpoint(checkpoint)
+            dataset_root = dataset["path"] if dataset else DEFAULT_DATASET_ROOT
+        dataset_root = os.path.expanduser(dataset_root)
+        # con root local, el repo_id solo se usa como nombre
+        dataset_id = f"local/{os.path.basename(dataset_root.rstrip('/'))}"
+        print(f"[LeRobotDiffusionAgent] Dataset: {dataset_root}")
+
         self._load_ik_dummy_robot()
         self._load_diffusion_policy_model(checkpoint, dataset_id, dataset_root)
         

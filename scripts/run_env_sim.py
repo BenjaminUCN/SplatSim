@@ -59,6 +59,11 @@ class Args:
     # Camera flags
     no_wrist_camera: bool = False
 
+    # lerobot_diffusion: carpeta del modelo y dataset con que se entrenó
+    # (None -> los por defecto del agente; el dataset se busca en configs/registry.yaml)
+    checkpoint: Optional[str] = None
+    dataset_root: Optional[str] = None
+
 
 def main(args):
     if args.mock:
@@ -187,7 +192,8 @@ def main(args):
         elif args.agent == "lerobot_diffusion":
             from splatsim.agents.lerobot_diffusion_agent import LeRobotDiffusionAgent
             agent = LeRobotDiffusionAgent(
-                checkpoint="LuEduSoHu/robot_learning_tutorial_diffusion",
+                checkpoint=args.checkpoint,
+                dataset_root=args.dataset_root,
                 device="cuda",
             )
             startup_steps = 2

@@ -4,11 +4,17 @@ Abre http://localhost:<puerto> en el navegador. Los callbacks de viser corren en
 propios hilos, así que solo encolan acciones; update() las ejecuta desde el serve_loop
 con el lock de la simulación tomado (mismo patrón que las peticiones del recorder).
 """
+import atexit
 import queue
+import signal
+import subprocess
+import sys
 import time
 
 import numpy as np
 import viser
+
+from splatsim.utils.registry import load_registry, loadable_models, model_label
 
 from .apple import load_grid
 from .debug_ui import save_camera_poses
@@ -16,6 +22,7 @@ from .config import APPLE_GRID_PATH, BASE_CAM_FOV, IMAGE_H, IMAGE_W
 
 STATUS_PERIOD = 0.2    # s entre refrescos de estado, pose del efector y de la manzana
 PREVIEW_PERIOD = 0.5   # s entre renders de la vista previa (cuesta un render del splat)
+STOP_TIMEOUT = 5.0     # s que se espera a que la política termine tras Ctrl+C antes de matarla
 
 
 def _xyzw_to_wxyz(q):
@@ -40,6 +47,7 @@ class ControlPanel:
         self._ee = self.v.scene.add_frame("/ee", axes_length=0.06, axes_radius=0.004)
 
         self._build_robot_gui()
+        self._build_policy_gui()
         self._build_recording_gui()
         self._build_camera_gui()
         self._build_apple_gui()
@@ -65,6 +73,113 @@ class ControlPanel:
     def _build_robot_gui(self):
         with self.v.gui.add_folder("Robot"):
             self._on_click(self.v.gui.add_button("Reset Robot Joints"), self.s.reset_robot)
+
+    # ── política ─────────────────────────────────────────────────────────────
+    def _build_policy_gui(self):
+        """Corre un modelo de configs/registry.yaml con run_env_sim.py en otro proceso."""
+        self._models = {}            # etiqueta del dropdown -> (carpeta, entrada del registro)
+        self._policy_proc = None
+        self._policy_label = None
+        self._stop_deadline = None
+        with self.v.gui.add_folder("Policy"):
+            self._model_select = self.v.gui.add_dropdown("Model", ["-"])
+            self._model_info = self.v.gui.add_markdown("")
+            self._reset_first = self.v.gui.add_checkbox("Reset robot first", True)
+            run = self.v.gui.add_button("Run", color="green")
+            stop = self.v.gui.add_button("Stop")
+            reload = self.v.gui.add_button("Reload Registry")
+            self._policy_status = self.v.gui.add_markdown("No policy running")
+        self._model_select.on_update(lambda _: self._show_model_info())
+        self._on_click(run, self._run_policy)
+        self._on_click(stop, self._stop_policy)
+        reload.on_click(lambda _: self._load_models())
+        self._load_models()
+        atexit.register(self._kill_policy)
+
+    def _load_models(self):
+        registry = load_registry()
+        self._datasets = registry.get("datasets") or {}
+        models = sorted(loadable_models(registry).items(),
+                        key=lambda kv: kv[1].get("started") or "", reverse=True)  # recientes primero
+        self._models = {}
+        for key, model in models:
+            label = model_label(key, model)
+            if label in self._models:      # nombres repetidos: se agrega la carpeta
+                label = f"{label} ({key.split('/')[-1]})"
+            self._models[label] = (key, model)
+        self._model_select.options = list(self._models) or ["-"]
+        self._show_model_info()
+
+    def _missing_cameras(self, model) -> list:
+        return [c for c in model.get("cameras", []) if c not in self.s.camera_names]
+
+    def _show_model_info(self):
+        if self._model_select.value not in self._models:
+            self._model_info.content = "No models: run `python scripts/build_registry.py`"
+            return
+        key, m = self._models[self._model_select.value]
+        ds = self._datasets.get(m.get("dataset")) or {}
+        lines = [
+            f"*{m['description']}*" if m.get("description") else "",
+            f"`{key}`",
+            f"cameras: {', '.join(m.get('cameras', []))}",
+            f"dataset: `{m.get('dataset')}` ({ds.get('episodes', '?')} ep)",
+            f"horizon {m.get('horizon')}, n_action_steps {m.get('n_action_steps')}, "
+            f"n_obs_steps {m.get('n_obs_steps')}",
+            m.get("notes") or "",
+        ]
+        missing = self._missing_cameras(m)
+        if missing:
+            lines.append(f"**⚠ the server does not render {', '.join(missing)}** (launch_nodes --cameras)")
+        self._model_info.content = "  \n".join(line for line in lines if line)
+
+    def _run_policy(self):
+        if self._policy_proc is not None:
+            self._policy_status.content = f"**Already running** {self._policy_label}: press Stop first"
+            return
+        if self._model_select.value not in self._models:
+            return
+        label = self._model_select.value
+        _, model = self._models[label]
+        missing = self._missing_cameras(model)
+        if missing:
+            self._policy_status.content = f"**Cannot run**: the server does not render {', '.join(missing)}"
+            return
+        if self._reset_first.value:
+            self.s.reset_robot()
+        cmd = [sys.executable, "scripts/run_env_sim.py", "--agent", "lerobot_diffusion",
+               "--hz", str(self.s.control_hz), "--robot_port", str(self.s.zmq_port),
+               "--checkpoint", model["path"]]
+        print(f"[Panel] {' '.join(cmd)}")
+        self._policy_proc = subprocess.Popen(cmd)   # su salida va a esta misma terminal
+        self._policy_label = label
+        self._stop_deadline = None
+        self._policy_status.content = f"**▶ Running** {label} (pid {self._policy_proc.pid}); loading takes ~10 s"
+
+    def _stop_policy(self):
+        if self._policy_proc is None:
+            return
+        self._policy_proc.send_signal(signal.SIGINT)   # como Ctrl+C: run_env_sim cierra limpio
+        self._stop_deadline = time.monotonic() + STOP_TIMEOUT
+        self._policy_status.content = f"Stopping {self._policy_label}..."
+
+    def _poll_policy(self):
+        proc = self._policy_proc
+        if proc is None:
+            return
+        code = proc.poll()
+        if code is None:
+            if self._stop_deadline is not None and time.monotonic() > self._stop_deadline:
+                proc.kill()
+            return
+        stopped = self._stop_deadline is not None
+        self._policy_status.content = (f"Stopped {self._policy_label}" if stopped
+                                       else f"**{self._policy_label} exited** (code {code}); see the terminal")
+        self._policy_proc = None
+
+    def _kill_policy(self):
+        if self._policy_proc is not None and self._policy_proc.poll() is None:
+            self._policy_proc.kill()
 
     # ── grabación ────────────────────────────────────────────────────────────
     def _build_recording_gui(self):
@@ -225,6 +340,7 @@ class ControlPanel:
             self._update_preview()
 
     def _update_status(self):
+        self._poll_policy()
         rec = self.s.recorder
         self._rec_status.content = (
             f"**● Recording** — {rec._length} frames in `{rec._folder}`" if rec.active

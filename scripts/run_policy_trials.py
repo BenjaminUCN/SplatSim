@@ -39,6 +39,9 @@ class Args:
     output_dir: str = "~/data/policy_trials"
     robot_port: int = 6001
     hostname: str = "127.0.0.1"
+    # modelo a evaluar (None -> el por defecto del agente); dataset: de configs/registry.yaml
+    checkpoint: str | None = None
+    dataset_root: str | None = None
 
 
 def call(robot: ZMQClientRobot, method: str, **args):
@@ -87,14 +90,15 @@ def main(args: Args) -> None:
                          "'Save Apple Position to Grid' (launch_nodes.py --move_apple).")
     print(f"[Trials] {len(apple_grid)} posiciones cargadas de {args.grid_path}")
 
-    from splatsim.agents.lerobot_diffusion_agent import LeRobotDiffusionAgent
+    from splatsim.agents.lerobot_diffusion_agent import DEFAULT_CHECKPOINT, LeRobotDiffusionAgent
 
     root = os.path.join(os.path.expanduser(args.output_dir),
                         datetime.datetime.now().strftime("%y%m%d_%H%M%S"))
     os.makedirs(root, exist_ok=True)
 
     robot = ZMQClientRobot(port=args.robot_port, host=args.hostname)
-    agent = LeRobotDiffusionAgent(device="cuda")
+    agent = LeRobotDiffusionAgent(checkpoint=args.checkpoint, dataset_root=args.dataset_root,
+                                  device="cuda")
 
     positions = args.positions if args.positions is not None else range(len(apple_grid))
     total = len(positions) * args.trials_per_position
@@ -111,7 +115,8 @@ def main(args: Args) -> None:
                     n += 1
                     print(f"\n[Trials] {n}/{total} — posición {pos_idx} {apple_pos}, ensayo {trial}")
                     metadata = {"pos_idx": pos_idx, "trial": trial, "apple_position": apple_pos,
-                                "trial_seconds": args.trial_seconds}
+                                "trial_seconds": args.trial_seconds,
+                                "checkpoint": args.checkpoint or DEFAULT_CHECKPOINT}
                     result = run_trial(robot, agent, apple_pos, args.trial_seconds, metadata, root)
                     row = {"pos_idx": pos_idx, "trial": trial,
                            "x": apple_pos[0], "y": apple_pos[1], "z": apple_pos[2], **result}

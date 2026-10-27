@@ -179,6 +179,7 @@ The server renders `base_rgb`, `base2_rgb` and `wrist_rgb` from the gaussian spl
 
 **Control panel (viser).** Open http://localhost:8080 in a browser. It shows the world frame, the end effector, the base camera frustums, the tomato and the saved grid positions in 3D, and has these folders:
 - *Robot*: Reset Robot Joints.
+- *Policy*: pick a model from `configs/registry.yaml` (by `name`, or `suggested_name`), see its description, cameras and dataset, and Run / Stop it. Run starts `run_env_sim.py --agent lerobot_diffusion --checkpoint <model>` in another process with the server's `--hz` and port (optionally resetting the robot first); its output goes to the server terminal. Reload Registry picks up a regenerated registry.
 - *Recording*: Start / Stop (same as `r`/`s` + Enter in the terminal) and the frame count.
 - *Base cameras*: one tab per camera with its xyz / rpy; drag the gizmo in the 3D view or type the values. Save Camera Poses.
 - *Tomato*: xyz, gizmo, Random Position, Save Position to Grid, and a list to load a saved grid position (or click its orange sphere in the 3D view).
@@ -233,8 +234,9 @@ Models are matched to datasets exactly through the normalization statistics stor
 
 Start the server as above, then run the policy with the same `--hz` it was trained at (10 for the current datasets):
 ```bash
-python scripts/run_env_sim.py --agent lerobot_diffusion --hz 10
+python scripts/run_env_sim.py --agent lerobot_diffusion --hz 10 [--checkpoint <model folder>]
 ```
+Without `--checkpoint` it uses `DEFAULT_CHECKPOINT` in `splatsim/agents/lerobot_diffusion_agent.py`. The dataset the model was trained on is looked up in `configs/registry.yaml` (override with `--dataset_root`). `run_policy_trials.py` takes the same two options. You can also run a model from the panel's *Policy* folder.
 
 ### Automated policy trials
 
