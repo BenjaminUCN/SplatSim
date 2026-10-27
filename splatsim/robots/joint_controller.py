@@ -88,7 +88,9 @@ class JointController:
             return "position", self._q_cmd
 
         if self.mode == "interp":
-            s = _min_jerk((now - self._t_target) / self._period)
+            # dónde debe estar al final de este tick (al inicio daría el punto anterior y, con un
+            # tick por comando, el brazo nunca avanzaría)
+            s = _min_jerk((now + dt - self._t_target) / self._period)
             desired = self._start + s * (self._target - self._start)
             # mismo tope de seguridad que position, respecto a la posición medida
             self._q_cmd = q + _clip_norm(desired - q, self.g.max_delta)
