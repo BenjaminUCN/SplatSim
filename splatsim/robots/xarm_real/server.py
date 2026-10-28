@@ -21,6 +21,7 @@ from splatsim.robots.station.zmq_server import ZMQRobotServer, ZMQServerThread
 LOOP_HZ = 100            # vueltas por segundo del lazo del servidor (panel, teclado)
 RESET_TOLERANCE = 0.02   # rad: Reset Robot termina cuando todas las articulaciones están a esto
 RESET_EXTRA_TIME = 3.0   # s de margen sobre la duración prevista del reset antes de rendirse
+MAX_CONTROL_HZ = 30      # el lazo de control del driver corre a 30 Hz: comandar más rápido no sirve
 
 
 def _min_jerk(tau: float) -> float:
@@ -150,6 +151,19 @@ class XArm5RealServer(OperatorMixin):
     def set_control_mode(self, mode: str) -> None:
         with self.lock:
             self.robot.set_control_mode(mode)
+
+    def set_control_hz(self, hz: int) -> str | None:
+        """Cambia la frecuencia de comandos esperada (pacing de Reset Robot y de los ensayos,
+        periodo nominal de interp/velocity); devuelve el motivo si no se puede."""
+        if not 1 <= hz <= MAX_CONTROL_HZ:
+            return f"use 1-{MAX_CONTROL_HZ} Hz (the driver's control loop runs at {MAX_CONTROL_HZ} Hz)"
+        with self.lock:
+            if self.recorder.active:
+                return "stop the recording first"
+            self.control_hz = hz
+            self.robot.ctrl.nominal_period = 1 / hz
+        print(f"[xArm5 real] control_hz={hz}")
+        return None
 
     def get_current_ee_pose(self):
         quat = np.asarray(self.robot.get_observations()["ee_pos_quat"], dtype=float)

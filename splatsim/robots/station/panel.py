@@ -206,8 +206,26 @@ class StationPanel:
             # se puede cambiar con una política corriendo: retoma desde la posición actual
             mode = self.v.gui.add_dropdown("Control mode", list(MODES),
                                            initial_value=self.s.control_mode)
+            # frecuencia de comandos (el --hz del servidor): la usan Run y los ensayos
+            hz = self.v.gui.add_number(
+                "Control Hz", self.s.control_hz, min=1, max=60, step=1,
+                hint="Commands per second (the server's --hz): Run and the trials use it. Match the "
+                     "fps of the model's dataset. Not while a policy runs or a recording is active")
+            self._hz_info = self.v.gui.add_markdown("")
             self._build_robot_extra()
         self._on_user(mode, lambda h: self.s.set_control_mode(h.value))
+        self._on_user(hz, self._set_control_hz)
+
+    def _set_control_hz(self, handle):
+        hz = int(round(handle.value))
+        if self._policy_proc is not None:
+            error = f"stop {self._policy_label} first: it was started at {self.s.control_hz} Hz"
+        else:
+            error = self.s.set_control_hz(hz)
+        if error:
+            handle.value = self.s.control_hz      # vuelve al valor vigente
+        self._hz_info.content = f"**Not changed**: {error}" if error else ""
+        self._show_model_info()                   # el aviso de fps depende de la frecuencia
 
     def _build_robot_extra(self):
         """Controles del robot propios de cada backend (dentro de la carpeta Robot)."""
@@ -334,6 +352,10 @@ class StationPanel:
         missing = self._missing_cameras(m)
         if missing:
             lines.append(f"**⚠ the server does not render {', '.join(missing)}** (launch_nodes --cameras)")
+        fps = m.get("dataset_fps") or ds.get("fps")
+        if fps and fps != self.s.control_hz:
+            lines.append(f"**⚠ its dataset is {fps} fps; the server runs at {self.s.control_hz} Hz** "
+                         "(Robot → Control Hz)")
         self._model_info.content = "  \n".join(line for line in lines if line)
 
     def _selected_model(self):

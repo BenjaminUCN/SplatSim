@@ -251,6 +251,24 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             after = max(after, 3 * self.joint_ctrl.nominal_period)
         return time.monotonic() - self._last_command_time > after
 
+    def set_control_hz(self, hz: int) -> str | None:
+        """Cambia la frecuencia de comandos (el --hz con que se lanzó); devuelve el motivo si no se
+        puede. Debe dividir la frecuencia de la física para que cada comando sea un número entero
+        de pasos (dt exacto por frame)."""
+        steps = (1 / hz) / SIM_DT if hz > 0 else 0
+        if hz <= 0 or abs(steps - round(steps)) > 1e-6:
+            divisors = [d for d in range(1, 61) if round(1 / SIM_DT) % d == 0]
+            return (f"{hz} Hz does not divide the physics rate ({round(1 / SIM_DT)} Hz); "
+                    f"use one of {', '.join(map(str, divisors))}")
+        with self.lock:
+            if self.recorder.active:
+                return "stop the recording first (its frames would mix two time steps)"
+            self.control_hz = hz
+            self.steps_per_command = round(steps)
+            self.joint_ctrl.nominal_period = 1 / hz
+        print(f"[xArm5] control_hz={hz} → {self.steps_per_command} pasos por comando")
+        return None
+
     def set_sim_clock(self, clock: str) -> None:
         if clock not in SIM_CLOCKS:
             raise ValueError(f"sim_clock debe ser uno de {SIM_CLOCKS}, no {clock!r}")
