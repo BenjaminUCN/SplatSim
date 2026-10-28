@@ -105,8 +105,8 @@ class Args:
     # piden las vistas al servidor. Las vistas siguen en la ventana Cameras del panel
     no_camera_windows: bool = False
 
-    # lerobot_diffusion: carpeta del modelo y dataset con que se entrenó
-    # (None -> los por defecto del agente; el dataset se busca en configs/registry.yaml)
+    # lerobot_diffusion: modelo y dataset con que se entrenó, carpeta o repo del Hugging Face Hub
+    # (user/repo o URL); None -> los por defecto del agente; el dataset se busca en configs/registry.yaml
     checkpoint: Optional[str] = None
     dataset_root: Optional[str] = None
 

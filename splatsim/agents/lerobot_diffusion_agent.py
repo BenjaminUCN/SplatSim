@@ -13,7 +13,7 @@ from lerobot.policies.utils import build_inference_frame
 from torchvision import transforms
 
 from splatsim.image_classifier import SimpleCNN
-from splatsim.utils.registry import dataset_for_checkpoint
+from splatsim.utils.registry import dataset_source_for_checkpoint, hub_repo_id
 
 # Constants from config.json
 _IMAGE_KEY   = "observation.images.base_rgb"
@@ -37,8 +37,9 @@ class LeRobotDiffusionAgent:
     time. Re-runs inference only when the queue is empty.
 
     Args:
-        checkpoint: HuggingFace repo id or local pretrained_model folder.
-        dataset_root: local LeRobot dataset the policy was trained on.
+        checkpoint: local model folder, or Hugging Face repo id / URL.
+        dataset_root: LeRobot dataset the policy was trained on: local folder, or Hugging Face
+            repo id / URL (only meta/ is downloaded).
         device: "cuda" or "cpu".
         n_action_steps: overrides the default chunk size of 32.
     """
@@ -50,29 +51,35 @@ class LeRobotDiffusionAgent:
         device: str = "cuda",
         n_action_steps: int | None = None,
     ):
-        """checkpoint: carpeta del modelo (None -> DEFAULT_CHECKPOINT).
-        dataset_root: dataset con que se entrenó; None -> se busca en configs/registry.yaml
-        (scripts/xarm5/build_registry.py) y, si el modelo no está, DEFAULT_DATASET_ROOT."""
+        """checkpoint: carpeta del modelo o repo del Hub (None -> DEFAULT_CHECKPOINT).
+        dataset_root: dataset con que se entrenó, carpeta o repo del Hub; None -> se busca en
+        configs/registry.yaml (scripts/xarm5/build_registry.py): su carpeta si existe en esta
+        máquina, si no (modelo del Hub) su repo; si el modelo no está, DEFAULT_DATASET_ROOT."""
         self.device = device
         self._n_act_steps = n_action_steps or _N_ACT_STEPS
         self._obs_buffer: deque[dict[str, torch.Tensor]] = deque(maxlen=_N_OBS_STEPS)
         self._action_queue: list[np.ndarray] = []
 
-        checkpoint = os.path.expanduser(checkpoint or DEFAULT_CHECKPOINT)
+        checkpoint = checkpoint or DEFAULT_CHECKPOINT
+        checkpoint = hub_repo_id(checkpoint) or os.path.expanduser(checkpoint)
         if dataset_root is None:
-            dataset = dataset_for_checkpoint(checkpoint)
-            dataset_root = dataset["path"] if dataset else DEFAULT_DATASET_ROOT
-        dataset_root = os.path.expanduser(dataset_root)
-        # con root local, el repo_id solo se usa como nombre
-        dataset_id = f"local/{os.path.basename(dataset_root.rstrip('/'))}"
-        print(f"[LeRobotDiffusionAgent] Dataset: {dataset_root}")
+            dataset_root = dataset_source_for_checkpoint(checkpoint) or DEFAULT_DATASET_ROOT
+        dataset_repo = hub_repo_id(dataset_root)
+        if dataset_repo:
+            # sin root, LeRobotDatasetMetadata baja meta/ del Hub a ~/.cache/huggingface/lerobot
+            dataset_id, dataset_root = dataset_repo, None
+        else:
+            dataset_root = os.path.expanduser(dataset_root)
+            # con root local, el repo_id solo se usa como nombre
+            dataset_id = f"local/{os.path.basename(dataset_root.rstrip('/'))}"
+        print(f"[LeRobotDiffusionAgent] Dataset: {dataset_repo or dataset_root}")
 
         self._load_ik_dummy_robot()
         self._load_diffusion_policy_model(checkpoint, dataset_id, dataset_root)
         
         self.make_new_prediction = True
     
-    def _load_diffusion_policy_model(self, checkpoint: str, dataset_id: str, dataset_root: str): 
+    def _load_diffusion_policy_model(self, checkpoint: str, dataset_id: str, dataset_root: str | None): 
         from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
        
         print(f"[LeRobotDiffusionAgent] Loading: {checkpoint}")

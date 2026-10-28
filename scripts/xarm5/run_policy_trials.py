@@ -49,7 +49,8 @@ class Args:
     output_dir: str = "~/data/policy_trials"
     robot_port: int = 6001
     hostname: str = "127.0.0.1"
-    # modelo a evaluar (None -> el por defecto del agente); dataset: de configs/registry.yaml
+    # modelo a evaluar, carpeta o repo del Hub (None -> el por defecto del agente);
+    # dataset: carpeta o repo del Hub, None -> de configs/registry.yaml
     checkpoint: str | None = None
     dataset_root: str | None = None
     # subcarpeta de output_dir; None -> nombre del modelo en el registro (o su carpeta)

@@ -36,7 +36,7 @@ from splatsim.robots.joint_controller import MODES
 from splatsim.utils.apple_grid import load_grid
 from splatsim.utils.camera_setup import load_camera_setup
 from splatsim.utils.registry import (
-    dataset_for_checkpoint,
+    dataset_source_for_checkpoint,
     describe_dataset,
     describe_model,
     load_local_models,
@@ -547,13 +547,16 @@ class StationPanel:
                 run_trials = self.v.gui.add_button("Run Trials", color="blue")
                 self._trial_progress = self.v.gui.add_progress_bar(0.0, visible=False)
                 self._trial_status = self.v.gui.add_markdown("")
-            # un modelo y su dataset por ruta, p.ej. en otra máquina donde el registro no sirve
+            # un modelo y su dataset por ruta o repo del Hub, p.ej. en otra máquina donde el
+            # registro no tiene las carpetas
             with self.v.gui.add_folder("Load model", expand_by_default=False):
                 self._load_model_path = self.v.gui.add_text(
-                    "Model folder", "", hint="Final folder of a trained model (config.json + model.safetensors)")
+                    "Model", "", hint="Final folder of a trained model (config.json + model.safetensors), "
+                                      "or its Hugging Face repo: user/repo or huggingface.co URL")
                 self._load_dataset_path = self.v.gui.add_text(
-                    "Dataset folder", "", hint="LeRobot dataset it was trained on (meta/info.json); "
-                                               "empty = the one in configs/registry.yaml")
+                    "Dataset", "", hint="LeRobot dataset it was trained on: folder (meta/info.json) or "
+                                        "Hugging Face repo; empty = the one in configs/registry.yaml "
+                                        "(its Hub repo if the folder is not on this machine)")
                 load_model = self.v.gui.add_button("Load")
                 self._load_status = self.v.gui.add_markdown(
                     "Loaded models are kept in `configs/local_models.yaml` (this machine only)")
@@ -588,11 +591,10 @@ class StationPanel:
             model = describe_model(self._load_model_path.value)
             ds_path = self._load_dataset_path.value.strip()
             if not ds_path:
-                found = dataset_for_checkpoint(model["path"])
-                if found is None or not os.path.isdir(found["path"]):
+                ds_path = dataset_source_for_checkpoint(model["path"])
+                if ds_path is None:
                     raise ValueError("this model's dataset is not in configs/registry.yaml on this "
-                                     "machine: set Dataset folder")
-                ds_path = found["path"]
+                                     "machine: set Dataset")
             ds = describe_dataset(ds_path)
             missing = [c for c in model["cameras"] if c not in ds["cameras"]]
             if missing:
