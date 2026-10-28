@@ -58,7 +58,7 @@ class XArm5RealServer(OperatorMixin):
         self.controls = []
         if panel_port is not None:
             from splatsim.robots.station.panel import StationPanel  # viser solo con panel
-            self.controls.append(StationPanel(self, port=panel_port, label="xArm5 (real)"))
+            self.controls.append(StationPanel(self, port=panel_port, label="xArm5 real"))
         self.recorder.start_keyboard_listener()
 
     # ── protocolo de ZMQClientRobot ──────────────────────────────────────────

@@ -17,10 +17,12 @@ import os
 import queue
 import re
 import signal
+import socket
 import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 import viser
@@ -39,6 +41,8 @@ from splatsim.utils.registry import (
     save_local_model,
 )
 
+from splatsim.utils.viser_page import link_html, set_page_title
+
 LOCAL_SUFFIX = " · local"   # modelos cargados con "Load model" (configs/local_models.yaml)
 
 STATUS_PERIOD = 0.2    # s entre refrescos de estado y pose del efector
@@ -48,6 +52,16 @@ PREVIEW_H, PREVIEW_W = 240, 320              # tamaño de las vistas (la mitad d
 PREVIEW_PANEL_WIDTH = 360
 MAIN_PANEL_WIDTH = 380
 STOP_TIMEOUT = 5.0     # s que se espera a que la política termine tras Ctrl+C antes de matarla
+TOOLS_PERIOD = 1.0     # s entre revisiones del estado de las herramientas
+REPO_ROOT = Path(__file__).resolve().parents[3]
+TOOLS_LOG_DIR = Path("~/.cache/splatsim/tools").expanduser()
+# herramientas con su propio panel viser que se pueden lanzar desde la pestaña Tools
+TOOLS = (
+    ("Recordings review", "scripts/review_recordings.py", 8081,
+     "GELLO recordings: trails, episode selection and stop labels"),
+    ("Training queue", "scripts/train_server.py", 8082,
+     "Queue trainings; stopping this panel does not stop a training in progress"),
+)
 
 
 def parse_indices(text: str, n: int) -> list[int] | None:
@@ -94,6 +108,9 @@ class StationPanel:
             self._build_policy_gui()
             self._build_recording_gui()
         self._build_tabs(tabs)
+        with tabs.add_tab("Tools", viser.Icon.TOOL):
+            self._build_tools_gui()
+        set_page_title(self.v, label)
         self.v.gui.main_panel.dock_right()
         self.v.gui.main_panel.set_width(MAIN_PANEL_WIDTH)
         self._build_preview_gui()
@@ -101,6 +118,70 @@ class StationPanel:
 
     def _build_tabs(self, tabs):
         """Pestañas propias de cada backend, después de Run."""
+
+    # ── herramientas (revisor de grabaciones, cola de entrenamiento) ─────────
+    def _build_tools_gui(self):
+        self._tools = {}
+        self._last_tools = 0.0
+        for name, script, port, about in TOOLS:
+            with self.v.gui.add_folder(name):
+                self.v.gui.add_markdown(f"*{about}*")
+                status = self.v.gui.add_html("")
+                start = self.v.gui.add_button("Start", color="green")
+                stop = self.v.gui.add_button("Stop")
+            self._tools[name] = {"script": script, "port": port, "proc": None, "status": status}
+            self._on_click(start, lambda n=name: self._start_tool(n))
+            self._on_click(stop, lambda n=name: self._stop_tool(n))
+        self._update_tools()
+
+    @staticmethod
+    def _port_open(port: int) -> bool:
+        with socket.socket() as sock:
+            sock.settimeout(0.05)
+            return sock.connect_ex(("127.0.0.1", port)) == 0
+
+    def _start_tool(self, name: str):
+        tool = self._tools[name]
+        if self._port_open(tool["port"]):
+            self._update_tools()            # ya corre (de aquí o de otra terminal): solo el enlace
+            return
+        TOOLS_LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log = open(TOOLS_LOG_DIR / f"{Path(tool['script']).stem}.log", "w")
+        cmd = [sys.executable, "-u", tool["script"], "--port", str(tool["port"])]
+        print(f"[Panel] {' '.join(cmd)} (salida en {log.name})")
+        # sesión propia: sigue corriendo si se detiene el servidor del robot (Ctrl+C)
+        tool["proc"] = subprocess.Popen(cmd, cwd=REPO_ROOT, stdout=log, stderr=subprocess.STDOUT,
+                                        start_new_session=True)
+        tool["log"] = log.name
+        self._update_tools()
+
+    def _stop_tool(self, name: str):
+        tool = self._tools[name]
+        proc = tool["proc"]
+        if proc is None or proc.poll() is not None:
+            return                        # no lo lanzó este panel (el estado lo dice)
+        os.killpg(proc.pid, signal.SIGINT)    # como Ctrl+C
+        try:
+            proc.wait(timeout=STOP_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+        tool["proc"] = None
+        self._update_tools()
+
+    def _update_tools(self):
+        for name, tool in self._tools.items():
+            proc, port = tool["proc"], tool["port"]
+            ours = proc is not None and proc.poll() is None
+            if self._port_open(port):
+                who = f"pid {proc.pid}" if ours else "started elsewhere: stop it from its terminal"
+                text = f"● Running ({who}) — {link_html(port, f'open :{port}')}"
+            elif ours:
+                text = "Starting..."
+            elif proc is not None:
+                text = f"Exited (code {proc.returncode}); see <code>{tool.get('log')}</code>"
+            else:
+                text = "Not running"
+            tool["status"].content = text
 
     # ── utilidades ───────────────────────────────────────────────────────────
     def _do(self, fn, *args):
@@ -465,7 +546,9 @@ class StationPanel:
         if now - self._last_preview > PREVIEW_PERIOD:
             self._last_preview = now
             self._update_preview()
-
+        if now - self._last_tools > TOOLS_PERIOD:
+            self._last_tools = now
+            self._update_tools()
 
     def _update_operator(self):
         """Muestra la pregunta pendiente al operador con un botón por opción (o la oculta)."""

@@ -42,6 +42,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from splatsim.utils.episode_selection import load_discarded, save_discarded  # noqa: E402
+from splatsim.utils.viser_page import set_page_title  # noqa: E402
 from splatsim.utils.grasp_point import GRASP_POINT_PATH, grasp_error, load_grasp_point  # noqa: E402
 from splatsim.utils.stop_labels import (  # noqa: E402
     VALID_RADIUS,
@@ -215,6 +216,7 @@ class Reviewer:
         self._need_background = False
 
         self.v = viser.ViserServer(port=port, label="Recordings review", verbose=False)
+        set_page_title(self.v, "Recordings review")
         self.v.scene.add_frame("/world", axes_length=0.15, axes_radius=0.005)
         self.v.scene.add_grid("/ground", width=2.0, height=2.0, cell_size=0.1, section_size=0.5)
         self._build_gui()

@@ -14,7 +14,7 @@ from .debug_ui import save_camera_poses
 class SimPanel(StationPanel):
     def __init__(self, server, base_cams, port: int = 8080):
         self.base_cams = base_cams
-        super().__init__(server, port=port, label="SplatSim xArm5")
+        super().__init__(server, port=port, label="xArm5 sim")
 
     def _build_robot_extra(self):
         # fixed: cada comando avanza 1/hz simulado; realtime: la física sigue al reloj (GELLO)

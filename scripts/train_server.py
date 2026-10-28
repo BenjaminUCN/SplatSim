@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "scripts"))
 from splatsim.utils.camera_setup import load_camera_setup  # noqa: E402
 from splatsim.utils.registry import load_registry  # noqa: E402
+from splatsim.utils.viser_page import set_page_title  # noqa: E402
 from train_queue import _train_fields, build_runs  # noqa: E402
 
 POLL_PERIOD = 2.0                 # s entre revisiones del trabajo en curso
@@ -222,6 +223,7 @@ class TrainPanel:
         self.s, self.w = store, worker
         self.allowed = _train_fields()
         self.v = viser.ViserServer(port=port, label="Training queue", verbose=False)
+        set_page_title(self.v, "Training queue")
         tabs = self.v.gui.add_tab_group()
         with tabs.add_tab("Queue", viser.Icon.LIST):
             self._build_queue_tab()

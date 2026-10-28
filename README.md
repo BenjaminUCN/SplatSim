@@ -190,6 +190,8 @@ The server renders `base_rgb`, `base_left_rgb`, `base_right_rgb` and `wrist_rgb`
 - *Tomato*: xyz, gizmo, Random Position, Save Position to Grid, and a list to load a saved grid position (or click its orange sphere in the 3D view).
 - *Base cameras*: one tab per camera with its xyz / rpy; drag the gizmo in the 3D view or type the values. Save Camera Poses.
 
+*Tools* tab: **Start** / **Stop** the recordings reviewer (`review_recordings.py`, port 8081) and the training queue (`train_server.py`, port 8082) without another terminal, each with a link that opens it in a new browser tab (using the host this panel was opened with, so it also works from another computer). They run in their own session, so stopping the robot server does not stop them (nor does stopping the queue stop a training in progress); their output goes to `~/.cache/splatsim/tools/<script>.log`. If one is already running on its port (started from a terminal), the panel shows its link instead of starting another. Each panel has its own browser tab title: *xArm5 sim*, *xArm5 real*, *Recordings review*, *Training queue*.
+
 *Cameras* window: one checkbox per camera (`base_rgb` and `wrist_rgb` on by default), refreshed about twice per second. While a client (e.g. a running policy) is requesting observations, the window reuses those images; otherwise each active camera costs one render.
 
 If `configs/apple_grid.yaml` has positions, the tomato starts at the first one.
