@@ -137,7 +137,7 @@ def _find_shared_episodes(recordings: dict) -> None:
 
 
 def _recording_images(episode: Path) -> dict:
-    """Cámaras y numeración de imágenes del episodio (misma lógica que lerobot_transform_v2)."""
+    """Cámaras y numeración de imágenes del episodio (misma lógica que lerobot_conversion)."""
     for name in ("image_1", "images"):
         image_dir = episode / name
         if image_dir.is_dir():

@@ -483,7 +483,7 @@ def main(args):
         print_color("\nDeteniendo...", color="red", attrs=("bold",))
     finally:
         if args.convert_to_lerobot:
-            from splatsim.utils.lerobot_transform import run_conversion, ConversionConfig
+            from splatsim.utils.lerobot_conversion import run_conversion, ConversionConfig
             print_color("\n[LeRobot] Iniciando conversión de .pkl a LeRobot v3...", color="yellow", attrs=("bold",))
             input_dir = (
                 Path(args.lerobot_input_dir).expanduser()
@@ -491,11 +491,11 @@ def main(args):
                 else Path(args.data_dir).expanduser() / args.agent
             )
             config = ConversionConfig(
-                input_dir=input_dir,
+                input_dirs=[input_dir],
                 output_dir=Path(args.lerobot_output_dir).expanduser(),
                 fps=args.lerobot_fps,
             )
-            run_conversion(config)
+            run_conversion(config, repo_suffix=datetime.datetime.now().strftime("%y%m%d_%H%M"))
 
 
 if __name__ == "__main__":

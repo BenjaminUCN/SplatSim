@@ -12,7 +12,7 @@ mismo con que se evalúa la política (sim_clock=fixed, --hz igual a --fps), y s
 renderizar con otras cámaras sin grabar de nuevo.
 
 La salida (por defecto <carpeta>_<fps>hz) sirve para review_recordings.py y el convertidor
-(lerobot_transform_v2.py --fps igual al de aquí). Los episodios ya renderizados se saltan
+(lerobot_conversion.py --fps igual al de aquí). Los episodios ya renderizados se saltan
 (--overwrite para rehacerlos); selection.yaml se copia. render_info.yaml anota la carpeta de
 origen, el fps y las cámaras: con eso review_recordings.py superpone la trayectoria original
 (~30 Hz) a la remuestreada.

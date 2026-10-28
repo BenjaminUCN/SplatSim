@@ -11,7 +11,7 @@ trayectorias se guardan en caché (~/.cache/splatsim/trails/) y un hilo carga el
 carpeta en segundo plano para poder mostrar todas a la vez.
 
 La selección se guarda en <carpeta>/selection.yaml (splatsim/utils/episode_selection.py);
-lerobot_transform_v2.py omite los episodios descartados.
+lerobot_conversion.py omite los episodios descartados.
 
 Etiquetas de parada para el clasificador visual (splatsim/utils/stop_labels.py): en sim se
 proponen solas con el error de agarre (configs/grasp_point.yaml); en la carpeta Stop labels se

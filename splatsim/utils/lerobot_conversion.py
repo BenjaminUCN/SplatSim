@@ -1,9 +1,7 @@
 """
-lerobot_transform.py
-=========================
-
-Convierte episodios de demostración a un dataset LeRobot v3 VÁLIDO,
-usando la API oficial de LeRobot.
+Convierte episodios de demostración (grabaciones .pkl + imágenes) a un dataset LeRobot v3,
+usando la API oficial de LeRobot. Se usa como script o desde run_env_sim.py
+(--convert_to_lerobot).
 
 Soporta DOS esquemas de entrada, detectados automáticamente por episodio:
 
@@ -42,9 +40,9 @@ pip install imageio imageio-ffmpeg
 
 Usage
 -----
-python lerobot_transform.py \
-    --input_dir ~/data/bc_data_real/gello \
-    --output_dir ~/datasets/splatsim_real_v3
+python splatsim/utils/lerobot_conversion.py \
+    --input_dir ~/data/bc_data/gello_3plants \
+    --output_dir ~/lerobot/splatsim_test_data [--fps 10] [--cameras base_rgb wrist_rgb]
 """
 
 from __future__ import annotations
@@ -89,6 +87,7 @@ class ConversionConfig:
     ignore_selection: bool = False    # incluir también los episodios descartados en selection.yaml
     wrist_offset: int | None = None
     use_videos: bool = True
+    push_to_hub: bool = True          # False: solo el dataset local (p.ej. para probar)
 
 
 # ============================================================
@@ -814,7 +813,10 @@ def run_conversion(config: ConversionConfig, repo_suffix: str):
         f"{config.output_dir.resolve()}"
     )
 
-    push_lerobot_to_hub(dataset)
+    if config.push_to_hub:
+        push_lerobot_to_hub(dataset)
+    else:
+        print(f"[LeRobot] Sin subir al Hub: dataset local en {dataset.root}")
 
 
 # ============================================================
@@ -848,6 +850,7 @@ def build_parser():
         "(por defecto todas las que tenga el primer episodio).",
     )
     p.add_argument("--use_images", action="store_true")
+    p.add_argument("--no_push", action="store_true", help="No subir el dataset al Hugging Face Hub.")
     p.add_argument(
         "--ignore_selection",
         action="store_true",
@@ -883,6 +886,7 @@ def main():
         cameras=args.cameras,
         ignore_selection=args.ignore_selection,
         use_videos=not args.use_images,
+        push_to_hub=not args.no_push,
     )
 
     repo_suffix = args.repo_suffix or datetime.now().strftime("%y%m%d_%H%M")

@@ -1,7 +1,7 @@
 """Episodios descartados de una carpeta de grabaciones (<carpeta>/selection.yaml).
 
 Por defecto todos los episodios se usan; selection.yaml lista los descartados. Lo escribe
-scripts/xarm5/review_recordings.py y lo respeta splatsim/utils/lerobot_transform_v2.py.
+scripts/xarm5/review_recordings.py y lo respeta splatsim/utils/lerobot_conversion.py.
 """
 from pathlib import Path
 
@@ -11,7 +11,7 @@ SELECTION_FILE = "selection.yaml"
 
 _HEADER = """\
 # Episodes of this folder excluded from datasets (written by scripts/xarm5/review_recordings.py;
-# splatsim/utils/lerobot_transform_v2.py skips them unless --ignore_selection).
+# splatsim/utils/lerobot_conversion.py skips them unless --ignore_selection).
 """
 
 

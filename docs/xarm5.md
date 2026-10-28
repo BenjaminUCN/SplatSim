@@ -146,10 +146,11 @@ It shows the end-effector trail of the selected episode with a color gradient fr
 
 **Stop labels for the visual classifier.** The classifier decides when the arm is in grasp position, so the policy can stop. In the reviewer's *Stop labels* folder each episode gets a frame `valid_from`: from there to the end the arm is in position (positive), frames before it are negatives, and the few frames right before it are left out as ambiguous. For sim recordings it is proposed automatically from the grasp error (see [Grasp point](#grasp-point-and-success)): **Accept auto**, **Valid from this frame** (at the playback frame), **No valid frames**, **Exclude** or **Reset**. Real recordings have no tomato position and are labeled by hand. The plot shows the grasp error over the episode, *Trail color → stop label* paints the trail by label (green in position, blue not yet, gray unused), and *Show → stop: unlabeled* walks through the episodes still to review. Labels are saved in `<folder>/stop_labels.yaml` (`splatsim/utils/stop_labels.py`).
 
-Convert recordings to a LeRobot dataset (it detects the image numbering of each episode, both the current per-frame one and the interleaved one of older recordings; note that it pushes the dataset to the Hugging Face Hub at the end):
+Convert recordings to a LeRobot dataset (it detects the image numbering of each episode, both the current per-frame one and the interleaved one of older recordings; by default it pushes the dataset to the Hugging Face Hub at the end):
 ```bash
-python splatsim/utils/lerobot_transform_v2.py --input_dir <traj_folder> --output_dir <dataset_dir> --fps 10 [--cameras base_rgb base_left_rgb base_right_rgb wrist_rgb]
+python splatsim/utils/lerobot_conversion.py --input_dir <traj_folder> --output_dir <dataset_dir> --fps 10 [--cameras base_rgb base_left_rgb base_right_rgb wrist_rgb] [--no_push]
 ```
+`--input_dir` takes several folders to merge them into one dataset; `--no_push` keeps the dataset local instead of pushing it to the Hugging Face Hub.
 
 ## Train the diffusion policy
 
