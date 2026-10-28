@@ -216,6 +216,19 @@ The policy and GELLO always send joint positions; `--control_mode` only changes 
 
 Start the real robot with the same `--hz` the client uses (e.g. `--hz 10` for the policy), since `interp` and `velocity` use it as the expected time between targets. Gains (`kp`, `v_max`, `a_max`, ...) are in `ControllerGains`. Each observation includes `control_mode`. Try `velocity` on the real arm with low `v_max` first and the emergency stop at hand.
 
+### Real xArm5 station
+
+The real arm runs behind the same ZMQ protocol, recorder and control panel as the simulator (`splatsim/robots/station/`), so `run_env_sim.py` (GELLO or the policy), `run_policy_trials.py` and the panel work against both. Settings are in `configs/xarm5_real.yaml`: IP, `home_joints` (the pose **Reset Robot** moves to, slowly; `null` = Reset Robot does nothing), `reset_speed`, the cameras and the recordings folder.
+```bash
+python scripts/launch_camera_nodes.py --config configs/xarm5_real.yaml   # one ZMQ node per RealSense
+python scripts/launch_nodes.py --robot xarm5_lite --hz 10 [--control_mode interp] [--gui none]
+```
+- Cameras: each entry of `cameras` maps the name the policy sees (`base_rgb`, `wrist_rgb`, as in the sim) to a RealSense serial and a port. With `serial: null` the nodes take the detected cameras in order, which is not stable across reboots; set the serials (`launch_camera_nodes.py` prints them) once the cameras are mounted. Images are 640×480 RGB uint8, the sim's size.
+- The panel (http://localhost:8080) has the *Run* tab: Reset Robot, control mode, Policy (Run / Stop), Recording and the camera views. There is no Scene tab: the tomato is placed by hand.
+- Recording (`r`/`s` + Enter or the panel) saves one frame per command with the camera images, in `recordings`; frames carry the server clock in `time` (there is no simulated time, so the step is whatever the client loop achieves).
+- If a camera node is not running, observations fail with a message naming its port, and the server keeps serving.
+- `--robot_ip` overrides the IP in the file. Test new settings with low speeds and the emergency stop at hand.
+
 ### Teleoperate and record with GELLO
 
 Rendering one observation takes ~0.25 s (mostly deforming the robot splat to the current pose), so a loop that renders every step can't follow a hand in real time, and recording a frame per rendered step gives an irregular, mislabeled time step. With `--sim_clock realtime` teleoperation and rendering are decoupled:

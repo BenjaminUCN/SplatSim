@@ -1,0 +1,12 @@
+# Real xArm5 station (scripts/launch_nodes.py --robot xarm5_lite, scripts/launch_camera_nodes.py).
+ip: 192.168.123.52
+# Joint pose (rad, 5 joints) that Reset Robot moves to, slowly. null = Reset Robot does nothing.
+home_joints: null
+reset_speed: 0.3          # rad/s of the slowest-finishing joint during Reset Robot
+# Cameras: name the policy sees (same as in the sim) -> RealSense serial and ZMQ port of its
+# camera node. serial: null = the detection order of launch_camera_nodes.py (not stable).
+cameras:
+  wrist_rgb: {serial: null, port: 5000}
+  base_rgb: {serial: null, port: 5001}
+recordings: ~/data/bc_data/real   # default folder for recordings (r/s + Enter, panel)
+max_record_seconds: 120

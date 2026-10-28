@@ -216,6 +216,22 @@ class XArmRobot(Robot):
         with self.last_state_lock:
             return self.last_state
 
+    def set_control_mode(self, mode: str) -> None:
+        """Cambia la ley de control (y el modo del xArm: 1 posición, 4 velocidad); el brazo
+        queda sostenido en la posición actual hasta el próximo objetivo."""
+        with self.target_command_lock:
+            old = self.ctrl.mode
+            self.ctrl = JointController(mode, self.ctrl.nominal_period, self.ctrl.g)
+            joints = self.get_state().joints()
+            self.ctrl.reset(joints, time.monotonic())
+            self.target_command = {"joints": joints, "gripper": self.target_command["gripper"]}
+            if self.robot is not None and (old == "velocity") != (mode == "velocity"):
+                if old == "velocity":
+                    self.robot.vc_set_joint_velocity([0.0] * 5, is_radian=True)
+                self.robot.set_mode(4 if mode == "velocity" else 1)
+                self.robot.set_state(state=0)
+        print(f"[XArmRobot] control_mode={mode}")
+
     def set_command(self, joints: np.ndarray, gripper: Optional[float] = None) -> None:
         with self.target_command_lock:
             self.target_command = {

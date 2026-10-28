@@ -1,7 +1,11 @@
 """Servidor ZMQ de un robot: los métodos de ZMQClientRobot más los REMOTE_METHODS que el robot
-expone (grabación, reset, vista previa...). Lo usan el servidor del sim y el del xArm5 real."""
+expone (grabación, reset, vista previa...). Lo usan el servidor del sim y el del xArm5 real.
+
+Si un método falla, se responde {"error": ...} y se sigue sirviendo (antes el hilo moría y el
+cliente quedaba esperando para siempre)."""
 import pickle
 import threading
+import traceback
 from typing import Any
 
 import zmq
@@ -44,32 +48,33 @@ class ZMQRobotServer:
                 method = request.get("method")
                 args = request.get("args", {})
                 result: Any
-                # print(f"Received request: {method}, {args}")
-                if method == "num_dofs":
-                    result = self._robot.num_dofs()
-                elif method == "get_joint_state":
-                    result = self._robot.get_joint_state()
-                elif method == "command_joint_state":
-                    result = self._robot.command_joint_state(**args)
-                elif method == "set_object_pose":
-                    result = self._robot.set_object_pose(**args)
-                elif method == "get_observations":
-                    result = self._robot.get_observations()
-                elif method in getattr(self._robot, "REMOTE_METHODS", ()):
-                    # métodos extra que el robot expone explícitamente por ZMQ
-                    result = getattr(self._robot, method)(**args)
-                else:
-                    result = {"error": "Invalid method"}
-                    print(result)
-                    raise NotImplementedError(
-                        f"Invalid method: {method}, {args, result}"
-                    )
+                try:
+                    result = self._dispatch(method, args)
+                except Exception as e:  # noqa: BLE001  se responde el error y se sigue sirviendo
+                    traceback.print_exc()
+                    result = {"error": f"{method}: {type(e).__name__}: {e}"}
 
                 self._socket.send(pickle.dumps(result))
             except zmq.error.Again:
                 pass
                 # print("Timeout in ZMQLeaderServer serve")
                 # Timeout occurred, check if the stop event is set
+
+    def _dispatch(self, method: str, args: dict):
+        if method == "num_dofs":
+            return self._robot.num_dofs()
+        if method == "get_joint_state":
+            return self._robot.get_joint_state()
+        if method == "command_joint_state":
+            return self._robot.command_joint_state(**args)
+        if method == "set_object_pose":
+            return self._robot.set_object_pose(**args)
+        if method == "get_observations":
+            return self._robot.get_observations()
+        if method in getattr(self._robot, "REMOTE_METHODS", ()):
+            # métodos extra que el robot expone explícitamente por ZMQ
+            return getattr(self._robot, method)(**args)
+        raise NotImplementedError(f"Invalid method: {method}")
 
     def stop(self) -> None:
         self._stop_event.set()

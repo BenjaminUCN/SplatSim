@@ -1,3 +1,4 @@
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -23,8 +24,12 @@ class Args:
     # arrangement (p.ej. 2cam, ver configs/camera_poses.yaml) reemplaza a cameras
     cameras: tuple[str, ...] = ("base_rgb", "base_left_rgb", "base_right_rgb", "wrist_rgb")
     arrangement: str | None = None
-    # controles del xArm5: "viser" (panel web) o "pybullet" (sliders de PyBullet)
+    # controles del xArm5: "viser" (panel web) o "pybullet" (sliders de PyBullet, solo sim);
+    # en el real: "viser" o "none"
     gui: str = "viser"
+    # xArm5 real (--robot xarm5_lite): IP, home, cámaras y carpeta de grabaciones; --robot_ip
+    # explícito reemplaza a la IP del archivo
+    real_config: str = "configs/xarm5_real.yaml"
     panel_port: int = 8080
     # xArm5 (sim y real): cómo se siguen los objetivos articulares: position / interp / velocity
     control_mode: str = "position"
@@ -222,15 +227,31 @@ def launch_robot_server(args: Args):
             sim_clock=args.sim_clock,
         )
 
+    elif args.robot == "xarm5_lite":
+        # xArm5 real: driver + cámaras RealSense detrás del mismo protocolo, recorder y panel
+        # que el sim (configs/xarm5_real.yaml)
+        from splatsim.robots.xarm5_lite_robot_plant import XArmRobot
+        from splatsim.robots.xarm_real.cameras import ZMQCamera
+        from splatsim.robots.xarm_real.config import load_real_config
+        from splatsim.robots.xarm_real.server import XArm5RealServer
+
+        cfg = load_real_config(args.real_config)
+        explicit_ip = any(a.startswith(("--robot_ip", "--robot-ip")) for a in sys.argv[1:])
+        ip = args.robot_ip if explicit_ip else cfg["ip"]
+        cameras = {name: ZMQCamera(cam["port"], host=args.hostname)
+                   for name, cam in (cfg.get("cameras") or {}).items()}
+        robot = XArmRobot(ip=ip, control_mode=args.control_mode, command_hz=args.hz)
+        server = XArm5RealServer(
+            robot, cameras, port=port, host=args.hostname, control_hz=args.hz,
+            panel_port=None if args.gui == "none" else args.panel_port,
+            home_joints=cfg.get("home_joints"), reset_speed=cfg.get("reset_speed", 0.3),
+            path=cfg.get("recordings", "~/data/bc_data/real"),
+            max_record_seconds=cfg.get("max_record_seconds", 120))
+
     else:
         if args.robot == "xarm":
             from splatsim.robots.xarm_robot import XArmRobot
 
-        elif args.robot == "xarm5_lite":
-            from splatsim.robots.xarm5_lite_robot_plant import XArmRobot
-
-            robot = XArmRobot(ip=args.robot_ip, control_mode=args.control_mode,
-                              command_hz=args.hz)
         elif args.robot == "ur":
             from splatsim.robots.ur import URRobot
 
