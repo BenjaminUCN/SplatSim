@@ -47,6 +47,9 @@ class Args:
     dataset_root: str | None = None
     # subcarpeta de output_dir; None -> nombre del modelo en el registro (o su carpeta)
     run_name: str | None = None
+    # ensayos en la posición actual del tomate, sin moverlo (en vez de recorrer la grilla): lo usa
+    # "Record as trial" del panel; pos_idx es el índice de la grilla si coincide (a 1 cm), si no -1
+    here: bool = False
 
 
 def run_name_for(checkpoint: str) -> str:
@@ -61,10 +64,20 @@ def reset_policy(agent) -> None:
     agent.make_new_prediction = True
 
 
+def grid_index(apple_grid, pos, tol: float = 0.01) -> int:
+    """Índice de la grilla más cercano a pos si está a menos de tol (m), si no -1."""
+    if not apple_grid:
+        return -1
+    d = np.linalg.norm(np.asarray(apple_grid) - np.asarray(pos), axis=1)
+    return int(d.argmin()) if d.min() < tol else -1
+
+
 def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_point) -> dict:
+    """apple_pos None: el tomate se deja donde está."""
     call(robot, "stop_recording")
     call(robot, "reset_robot")
-    robot.set_object_pose(APPLE_NAME, np.array(apple_pos), np.array(APPLE_QUAT), use_gravity=False)
+    if apple_pos is not None:
+        robot.set_object_pose(APPLE_NAME, np.array(apple_pos), np.array(APPLE_QUAT), use_gravity=False)
     reset_policy(agent)
 
     obs = robot.get_observations()
@@ -91,7 +104,7 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
 def main(args: Args) -> None:
     with open(args.grid_path) as f:
         apple_grid = [tuple(p) for p in (yaml.safe_load(f) or {}).get("positions") or []]
-    if not apple_grid:
+    if not apple_grid and not args.here:
         raise SystemExit(f"{args.grid_path} no tiene posiciones: guárdalas con el botón "
                          "'Save Apple Position to Grid' (launch_nodes.py --move_apple).")
     print(f"[Trials] {len(apple_grid)} posiciones cargadas de {args.grid_path}")
@@ -109,7 +122,11 @@ def main(args: Args) -> None:
     agent = LeRobotDiffusionAgent(checkpoint=args.checkpoint, dataset_root=args.dataset_root,
                                   device="cuda")
 
-    positions = args.positions if args.positions is not None else range(len(apple_grid))
+    if args.here:
+        here = tuple(float(v) for v in robot.get_observations()[f"{APPLE_NAME}_position"])
+        positions = [grid_index(apple_grid, here)]
+    else:
+        positions = args.positions if args.positions is not None else range(len(apple_grid))
     total = len(positions) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
               "final_grasp_err", "min_grasp_err"]
@@ -121,15 +138,16 @@ def main(args: Args) -> None:
         n = 0
         try:
             for pos_idx in positions:
-                apple_pos = apple_grid[pos_idx]
+                apple_pos = here if args.here else apple_grid[pos_idx]
                 for trial in range(args.trials_per_position):
                     n += 1
-                    print(f"\n[Trials] {n}/{total} — posición {pos_idx} {apple_pos}, ensayo {trial}")
+                    where = "actual" if args.here else ""
+                    print(f"\n[Trials] {n}/{total} — posición {where} {pos_idx} {apple_pos}, ensayo {trial}")
                     metadata = {"pos_idx": pos_idx, "trial": trial, "apple_position": apple_pos,
                                 "trial_seconds": args.trial_seconds,
                                 "checkpoint": checkpoint, "run_name": run_name}
-                    result = run_trial(robot, agent, apple_pos, args.trial_seconds, metadata, root,
-                                       grasp_point)
+                    result = run_trial(robot, agent, None if args.here else apple_pos,
+                                       args.trial_seconds, metadata, root, grasp_point)
                     row = {"pos_idx": pos_idx, "trial": trial,
                            "x": apple_pos[0], "y": apple_pos[1], "z": apple_pos[2], **result}
                     writer.writerow(row)

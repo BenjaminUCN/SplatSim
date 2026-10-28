@@ -127,6 +127,11 @@ class ControlPanel:
             self._model_select = self.v.gui.add_dropdown("Model", ["-"])
             self._model_info = self.v.gui.add_markdown("")
             self._reset_first = self.v.gui.add_checkbox("Reset robot first", True)
+            self._as_trial = self.v.gui.add_checkbox(
+                "Record as trial", False,
+                hint="Run one trial at the current tomato position (not moved): recording starts "
+                     "when the policy starts acting and lasts Trial seconds (Trials folder); "
+                     "saved with the model's trials")
             run = self.v.gui.add_button("Run", color="green")
             stop = self.v.gui.add_button("Stop")
             reload = self.v.gui.add_button("Reload Registry")
@@ -205,6 +210,9 @@ class ControlPanel:
         if selected is None:
             return
         label, model = selected
+        if self._as_trial.value:         # los ensayos siempre parten del reset
+            self._start_trials(label, model, ["--here", "--trials_per_position", "1"], 1)
+            return
         if self._reset_first.value:
             self.s.reset_robot()
         self._start_client(
@@ -227,13 +235,16 @@ class ControlPanel:
         if not grid:
             self._trial_status.content = "**The grid is empty**: save positions in the Scene tab"
             return
+        extra = ["--trials_per_position", str(int(self._trials_per_pos.value))]
+        if positions is not None:
+            extra += ["--positions", *map(str, positions)]
+        n = len(positions if positions is not None else grid) * int(self._trials_per_pos.value)
+        self._start_trials(label, model, extra, n)
+
+    def _start_trials(self, label, model, extra: list, n: int):
         cmd = ["scripts/run_policy_trials.py", "--checkpoint", model["path"], "--run_name", label,
                "--robot_port", str(self.s.zmq_port),
-               "--trials_per_position", str(int(self._trials_per_pos.value)),
-               "--trial_seconds", str(float(self._trial_seconds.value))]
-        if positions is not None:
-            cmd += ["--positions", *map(str, positions)]
-        n = len(positions if positions is not None else grid) * int(self._trials_per_pos.value)
+               "--trial_seconds", str(float(self._trial_seconds.value)), *extra]
         self._trial_info = {"done": 0, "total": n, "last": "", "root": None}
         self._trial_progress.value, self._trial_progress.visible = 0.0, True
         self._trial_status.content = f"0/{n} trials; loading the model..."
