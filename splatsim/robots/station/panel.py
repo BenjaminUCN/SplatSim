@@ -676,13 +676,64 @@ class StationPanel:
     # ── grabación ────────────────────────────────────────────────────────────
     def _build_recording_gui(self):
         rec = self.s.recorder
+        # las carpetas de grabación son hermanas de la por defecto (p.ej. ~/data/bc_data/*)
+        default = Path(os.path.expanduser(self.s.path))
+        self._rec_base = default.parent
         with self.v.gui.add_folder("Recording"):
             self._rec_status = self.v.gui.add_markdown("")
             start = self.v.gui.add_button("Start", color="red")
             stop = self.v.gui.add_button("Stop")
+            self._rec_folder = self.v.gui.add_dropdown(
+                "Folder", [default.name], initial_value=default.name,
+                hint=f"Where new recordings go (folders of {self._rec_base})")
+            self._rec_new = self.v.gui.add_text("New folder", "", hint="Name of a folder to create")
+            create = self.v.gui.add_button("Create Folder")
+            self._rec_folder_info = self.v.gui.add_markdown("")
         # mismo camino que el teclado: tick() atiende la petición
         start.on_click(lambda _: setattr(rec, "_request", "start"))
         stop.on_click(lambda _: setattr(rec, "_request", "stop"))
+        self._on_user(self._rec_folder, lambda h: self._set_rec_folder(h.value))
+        self._on_click(create, self._create_rec_folder)
+        self._refresh_rec_folders(default.name)
+
+    def _refresh_rec_folders(self, select: str):
+        names = sorted(d.name for d in self._rec_base.iterdir() if d.is_dir()) if self._rec_base.is_dir() else []
+        self._rec_folder.options = sorted(set(names) | {select})
+        self._rec_folder.value = select
+        self._set_rec_folder(select)
+
+    def _set_rec_folder(self, name: str):
+        rec = self.s.recorder
+        current = Path(os.path.expanduser(rec.default_root or self.s.path)).name
+        if rec.active and name != current:
+            self._rec_folder.value = current
+            self._rec_folder_info.content = "**Stop the recording first**"
+            return
+        folder = self._rec_base / name
+        rec.default_root = str(folder)
+        episodes = sorted((d for d in folder.iterdir() if d.is_dir() and d.name.isdigit()),
+                          key=lambda d: int(d.name)) if folder.is_dir() else []
+        lines = [f"`{folder}`: {len(episodes)} episodes"]
+        if episodes:
+            # grabaciones con imágenes o solo estado (sim_clock=realtime): no conviene mezclarlas
+            with_images = (episodes[-1] / "image_1").is_dir()
+            lines[0] += f", last one {'with images' if with_images else 'state only'}"
+            if getattr(self.s, "record_state_only", False) == with_images:
+                now = "state only (realtime)" if self.s.record_state_only else "with images"
+                lines.append(f"⚠ the server now records {now}: better another folder")
+        self._rec_folder_info.content = "  \n".join(lines)
+
+    def _create_rec_folder(self):
+        name = self._rec_new.value.strip()
+        if not re.fullmatch(r"[\w.-]+", name):
+            self._rec_folder_info.content = "**New folder**: letters, digits, `_`, `-` or `.`"
+            return
+        if self.s.recorder.active:
+            self._rec_folder_info.content = "**Stop the recording first**"
+            return
+        (self._rec_base / name).mkdir(parents=True, exist_ok=True)
+        self._rec_new.value = ""
+        self._refresh_rec_folders(name)
 
     # ── vista previa ─────────────────────────────────────────────────────────
     def _build_preview_gui(self):

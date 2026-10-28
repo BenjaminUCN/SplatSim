@@ -54,6 +54,7 @@ class TrajectoryRecorder:
         self._length = 0             # frames guardados (numera .pkl y .png)
         self._count = 0              # índice de carpeta de la trayectoria
         self._root = None            # carpeta base de la grabación en curso
+        self.default_root = None     # carpeta elegida en el panel (None -> server.path)
 
     # ── teclado ──────────────────────────────────────────────────────────────
     def start_keyboard_listener(self) -> None:
@@ -75,11 +76,11 @@ class TrajectoryRecorder:
     def start(self, max_seconds: float | None = None, metadata: dict | None = None,
               root: str | None = None) -> str | None:
         """Empieza una grabación; devuelve su carpeta (None si ya había una activa).
-        `root` reemplaza la carpeta base (por defecto server.path)."""
+        `root` reemplaza la carpeta base (por defecto la elegida en el panel, o server.path)."""
         if self.active:
             print("[Recording] Ya se está grabando. Pulsa 's' primero.")
             return None
-        self._root = os.path.expanduser(root or self.s.path)
+        self._root = os.path.expanduser(root or self.default_root or self.s.path)
         os.makedirs(self._root, exist_ok=True)
         # siguiente índice tras las carpetas numeradas existentes (ignora otros archivos)
         existing = [int(d) for d in os.listdir(self._root) if d.isdigit()]
