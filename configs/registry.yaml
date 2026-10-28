@@ -3,7 +3,7 @@
 # Edita a mano solo name / description / notes: se conservan al regenerar.
 #   name: nombre corto para elegir el modelo (vacío -> se usa suggested_name)
 #   description: qué se intentó mejorar (p.ej. "1 cámara, más pasos")
-generated: 2026-10-27 14:43
+generated: 2026-10-28 17:42
 roots: {recordings: /home/magister/data/bc_data, datasets: /home/magister/lerobot/splatsim_test_data, models: /home/magister/lerobot/examples/tutorial/diffusion/outputs}
 recordings:
   gello:
@@ -71,10 +71,10 @@ recordings:
     last_episode: 2026-06-15 19:16
     shared_episodes: {gello_v3_: 201-301}
     datasets: ['0603_1654', '0604_1633', '0605_1723', 0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724, '060_1723', 060_1723/splatsim_lerobot_splatsim_10fps_260605_1724,
-      splatsim_lerobot_splatsim_10fps_260609_0303, splatsim_xarm5_lite_10fps_260610_0210, splatsim_xarm5_lite_10fps_260612_1930,
-      splatsim_xarm5_lite_10fps_260612_1931, splatsim_xarm5_lite_10fps_260616_0234, splatsim_xarm5_lite_10fps_260618_1445,
-      splatsim_xarm5_lite_10fps_260619_1723, splatsim_xarm5_lite_10fps_260622_1924, splatsim_xarm5_lite_10fps_260623_0204,
-      splatsim_xarm5_lite_10fps_260704_1203]
+      splatsim_lerobot_splatsim_10fps_260609_0146, splatsim_lerobot_splatsim_10fps_260609_0303, splatsim_xarm5_lite_10fps_260610_0210,
+      splatsim_xarm5_lite_10fps_260612_1930, splatsim_xarm5_lite_10fps_260612_1931, splatsim_xarm5_lite_10fps_260616_0234,
+      splatsim_xarm5_lite_10fps_260618_1445, splatsim_xarm5_lite_10fps_260619_1723, splatsim_xarm5_lite_10fps_260622_1924,
+      splatsim_xarm5_lite_10fps_260623_0204, splatsim_xarm5_lite_10fps_260704_1203]
   gello_v3_:
     name: ''
     description: ''
@@ -88,10 +88,10 @@ recordings:
     last_episode: 2026-06-19 16:18
     shared_episodes: {gello_v2_dual: 201-301}
     datasets: ['0603_1654', '0604_1633', '0605_1723', 0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724, '060_1723', 060_1723/splatsim_lerobot_splatsim_10fps_260605_1724,
-      splatsim_lerobot_splatsim_10fps_260609_0303, splatsim_xarm5_lite_10fps_260610_0210, splatsim_xarm5_lite_10fps_260616_0234,
-      splatsim_xarm5_lite_10fps_260617_0248, splatsim_xarm5_lite_10fps_260617_1732, splatsim_xarm5_lite_10fps_260618_1445,
-      splatsim_xarm5_lite_10fps_260619_1723, splatsim_xarm5_lite_10fps_260622_1924, splatsim_xarm5_lite_10fps_260623_0204,
-      splatsim_xarm5_lite_10fps_260704_1203]
+      splatsim_lerobot_splatsim_10fps_260609_0146, splatsim_lerobot_splatsim_10fps_260609_0303, splatsim_xarm5_lite_10fps_260610_0210,
+      splatsim_xarm5_lite_10fps_260616_0234, splatsim_xarm5_lite_10fps_260617_0248, splatsim_xarm5_lite_10fps_260617_1732,
+      splatsim_xarm5_lite_10fps_260618_1445, splatsim_xarm5_lite_10fps_260619_1723, splatsim_xarm5_lite_10fps_260622_1924,
+      splatsim_xarm5_lite_10fps_260623_0204, splatsim_xarm5_lite_10fps_260704_1203]
 datasets:
   '0512_1621':
     name: ''
@@ -315,6 +315,23 @@ datasets:
     - {recording: gello_v2_dual, recording_episodes: 0-400, dataset_episodes: 0-400, matched_episodes: 400/401, frames_dropped: 7}
     - {recording: gello_v3_, recording_episodes: 201-301, dataset_episodes: 201-301, matched_episodes: 100/101, frames_dropped: 1}
     models: []
+  splatsim_lerobot_splatsim_10fps_260609_0146:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/splatsim_test_data/splatsim_lerobot_splatsim_10fps_260609_0146
+    created: 2026-06-09 01:46
+    episodes: 401
+    frames: 27109
+    fps: 10
+    robot_type: lerobot_splatsim
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_v2_dual, recording_episodes: 0-400, dataset_episodes: 0-400, matched_episodes: 401/401, frames_dropped: 7}
+    - {recording: gello_v3_, recording_episodes: 201-301, dataset_episodes: 201-301, matched_episodes: 101/101, frames_dropped: 1}
+    models: []
   splatsim_lerobot_splatsim_10fps_260609_0303:
     name: ''
     description: ''
@@ -472,7 +489,7 @@ datasets:
     sources:
     - {recording: gello_v2_dual, recording_episodes: 0-400, dataset_episodes: 0-400, matched_episodes: 401/401, frames_dropped: 314}
     - {recording: gello_v3_, recording_episodes: 201-304, dataset_episodes: 201-304, matched_episodes: 102/104, frames_dropped: 77}
-    models: []
+    models: [robot_learning_tutorial/diffusion_0616_0234]
   splatsim_xarm5_lite_10fps_260616_1804:
     name: ''
     description: ''
@@ -835,6 +852,28 @@ models:
     dataset_match: stats
     same_stats_datasets: [splatsim_xarm5_lite_10fps_260616_0234]
     suggested_name: 1cam-v2_dual+v3-401ep-h64-0610
+  robot_learning_tutorial/diffusion_0616_0234:
+    name: ''
+    description: ''
+    notes: ''
+    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0616_0234
+    started: 2026-06-16 02:34
+    saved: 2026-06-16 05:34
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: null
+    dataset: splatsim_xarm5_lite_10fps_260616_0234
+    dataset_match: stats
+    same_stats_datasets: [splatsim_xarm5_lite_10fps_260610_0210]
+    suggested_name: 1cam-v2_dual+v3-401ep-h64-0616
   robot_learning_tutorial/diffusion_0617_0248:
     name: ''
     description: ''
