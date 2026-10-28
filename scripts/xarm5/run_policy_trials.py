@@ -3,7 +3,7 @@
 Primero lanzar el servidor (con el mismo --hz con que se entrenó la política):
     python scripts/launch_nodes.py --robot sim_xarm5_splat_camera_2 --robot_name xarm5_lite_plant_v3 --hz 10
 Luego:
-    python scripts/run_policy_trials.py --trials-per-position 3 --trial-seconds 15
+    python scripts/xarm5/run_policy_trials.py --trials-per-position 3 --trial-seconds 15
 
 Las posiciones del tomate se leen de configs/apple_grid.yaml (se agregan con el botón
 "Save Apple Position to Grid" del servidor con --move_apple, o editando el archivo).

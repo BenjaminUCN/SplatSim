@@ -1,8 +1,8 @@
 """Revisa grabaciones de GELLO: trayectoria 3D del efector con gradiente inicio→fin, imágenes
 por frame y selección de episodios (los descartados no entran a los datasets).
 
-    python scripts/review_recordings.py                      # carpetas de ~/data/bc_data
-    python scripts/review_recordings.py --root ~/data/bc_data --port 8081
+    python scripts/xarm5/review_recordings.py                      # carpetas de ~/data/bc_data
+    python scripts/xarm5/review_recordings.py --root ~/data/bc_data --port 8081
 
 Abre http://localhost:8081. No necesita el simulador.
 
@@ -18,7 +18,7 @@ proponen solas con el error de agarre (configs/grasp_point.yaml); en la carpeta 
 aceptan, se corrigen ("válido desde este frame") o se excluyen, y quedan en
 <carpeta>/stop_labels.yaml. Las grabaciones reales (sin posición del tomate) se etiquetan a mano.
 
-Carpetas renderizadas con scripts/render_recordings.py (traen render_info.yaml): se superpone la
+Carpetas renderizadas con scripts/xarm5/render_recordings.py (traen render_info.yaml): se superpone la
 trayectoria original de teleoperación (~30 Hz, naranja) a la remuestreada (puntos azules, un
 punto por frame) y la carpeta Resampling compara ambas en el tiempo.
 """
@@ -40,7 +40,7 @@ import yaml
 from matplotlib import colormaps
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.utils.episode_selection import load_discarded, save_discarded  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
 from splatsim.utils.grasp_point import GRASP_POINT_PATH, grasp_error, load_grasp_point  # noqa: E402
@@ -59,7 +59,7 @@ PLAYBACK_FPS = 10
 _IMG = re.compile(r"^(.+_rgb)_(\d+)\.png$")
 # colores de la trayectoria por etiqueta de parada (paleta de referencia)
 LABEL_COLORS = {1: (0, 131, 0), 0: (42, 120, 214), -1: (175, 175, 170)}
-RENDER_INFO_FILE = "render_info.yaml"   # lo escribe scripts/render_recordings.py
+RENDER_INFO_FILE = "render_info.yaml"   # lo escribe scripts/xarm5/render_recordings.py
 # comparación original / remuestreada (paleta de referencia: serie 1 azul, serie 2 naranja)
 RESAMPLED_HEX, SOURCE_HEX = "#2a78d6", "#eb6834"
 RESAMPLED_RGB, SOURCE_RGB = (42, 120, 214), (235, 104, 52)
@@ -90,7 +90,7 @@ class RecordingFolder:
             self.grasp_point = load_grasp_point()
         except FileNotFoundError:
             self.grasp_point = None
-            print(f"[Review] Falta {GRASP_POINT_PATH} (scripts/estimate_grasp_point.py): "
+            print(f"[Review] Falta {GRASP_POINT_PATH} (scripts/xarm5/estimate_grasp_point.py): "
                   "sin etiquetas automáticas")
         key = hashlib.md5(str(path.resolve()).encode()).hexdigest()[:8]
         self._cache_path = CACHE_DIR / f"{path.name}-{key}.pkl"

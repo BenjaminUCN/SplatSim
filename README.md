@@ -152,6 +152,8 @@ Congrats! Your static splat is now being simulated! 🚀
 
 ## xArm5 Lite tomato harvesting
 
+The scripts added by this fork are in `scripts/xarm5/` (recording review and rendering, training and its queue, the registry, policy trials and their comparison, dataset tools). `scripts/` keeps SplatSim's own scripts; three of them are also the entry points of the xArm5 workflow and were extended for it: `launch_nodes.py` (simulation or real-robot server), `run_env_sim.py` (GELLO or policy client) and `launch_camera_nodes.py` (RealSense cameras). Run everything from the repository root.
+
 ### Paths to configure
 
 Several paths are still hardcoded to the original author's machine (`/home/magister/...`). Update them to your own:
@@ -245,7 +247,7 @@ python scripts/run_env_sim.py --agent gello --gello_port /dev/ttyACM0 --start_jo
 
 Then render the images at a fixed rate:
 ```bash
-python scripts/render_recordings.py ~/data/bc_data/<folder> --fps 10 [--arrangement 2cam | --cameras ...]   # → <folder>_10hz
+python scripts/xarm5/render_recordings.py ~/data/bc_data/<folder> --fps 10 [--arrangement 2cam | --cameras ...]   # → <folder>_10hz
 ```
 Each episode is resampled by `sim_time` to exactly `1/fps` (joints interpolated to each instant, state recomputed from that pose, gripper command from the nearest frame) and rendered in the same format as below, so the reviewer and the converter work unchanged. Convert it with the same `--fps`, and run the policy with `--sim_clock fixed --hz <fps>`: the dataset step and the policy step are then the same simulated time. The same recordings can be rendered again with other cameras or rates. Review and label the rendered folder (stop labels are per frame); `selection.yaml` is copied over. The output folder gets a `render_info.yaml` (source folder, fps, cameras); when the reviewer opens it, *Show source recording* overlays the original teleoperation trail (orange, ~30 Hz samples) on the resampled frames (blue dots), and the *Resampling* folder shows the source and resampled rates and how far the resampled poses are from the original path, plus a figure of x/y/z and gripper over time.
 
@@ -267,12 +269,12 @@ One frame is saved per command received, in `traj_folder`:
 
 Check that recordings have a constant time step:
 ```bash
-python scripts/check_recording_timing.py [traj_folder]
+python scripts/xarm5/check_recording_timing.py [traj_folder]
 ```
 
 Review recordings before converting them:
 ```bash
-python scripts/review_recordings.py   # http://localhost:8081, folders of ~/data/bc_data (--root, --port)
+python scripts/xarm5/review_recordings.py   # http://localhost:8081, folders of ~/data/bc_data (--root, --port)
 ```
 It shows the end-effector trail of the selected episode with a color gradient from start (violet) to end (yellow), the tomato, the other trails of the folder (gray = kept, red = discarded), frame-by-frame playback with the recorded camera images, and the frames, duration and end-effector–tomato distance of each episode. Tick **Discard episode** to exclude it: the selection is saved in `<folder>/selection.yaml` and the converter skips those episodes (`--ignore_selection` to include them). The first time a folder is opened its trails are read in the background (the `.pkl` files include the images, ~1-2 s per episode); after that they come from a cache in `~/.cache/splatsim/trails/`.
 
@@ -287,8 +289,8 @@ python splatsim/utils/lerobot_transform_v2.py --input_dir <traj_folder> --output
 
 Parameters (dataset, cameras, `n_obs_steps`, `horizon`, `n_action_steps`, steps, batch size, Hub upload…) live in `configs/train/diffusion.yaml`. Copy it per experiment, or override any field from the CLI:
 ```bash
-python scripts/train_diffusion.py --config configs/train/diffusion.yaml
-python scripts/train_diffusion.py --config configs/train/diffusion.yaml --horizon 32 --cameras base_rgb --no-push-to-hub
+python scripts/xarm5/train_diffusion.py --config configs/train/diffusion.yaml
+python scripts/xarm5/train_diffusion.py --config configs/train/diffusion.yaml --horizon 32 --cameras base_rgb --no-push-to-hub
 ```
 The output folder `<output_root>/<model_name>/` gets the final policy, checkpoints every `save_freq` steps and the resolved `train_config.yaml`.
 
@@ -296,8 +298,8 @@ The output folder `<output_root>/<model_name>/` gets the final policy, checkpoin
 
 Train several models one after another, e.g. to compare camera arrangements or horizons:
 ```bash
-python scripts/train_queue.py configs/train/queue_example.yaml --dry_run   # list the runs
-python scripts/train_queue.py configs/train/queue_example.yaml             # train them
+python scripts/xarm5/train_queue.py configs/train/queue_example.yaml --dry_run   # list the runs
+python scripts/xarm5/train_queue.py configs/train/queue_example.yaml             # train them
 ```
 A queue file has a `base` config, `common` overrides, explicit `runs` (each with `name`, `description` and any training field) and an optional `sweep` (one run per combination of values, named like `h32-a16-2cam`). Each run's final config, log and status go to `~/data/train_queues/<queue>/`; relaunching skips finished runs (`--rerun` to repeat them, `--only <name>` to pick some). When the queue ends, `configs/registry.yaml` is regenerated so the new models show up in the panel with their name and description.
 
@@ -305,7 +307,7 @@ A queue file has a `base` config, `common` overrides, explicit `runs` (each with
 
 To keep adding trainings while one is running (e.g. queue the next one before leaving an 8-hour run overnight):
 ```bash
-python scripts/train_server.py   # http://localhost:8082
+python scripts/xarm5/train_server.py   # http://localhost:8082
 ```
 - *New job*: name, description, base config, dataset (from the registry), camera arrangement or cameras, horizons, steps, batch size and any other training field as YAML. It checks that `horizon` is a multiple of 8, that `n_action_steps` fits in the horizon and that the dataset has the arrangement's cameras.
 - *Queue*: the current job's step, loss, speed, ETA and log tail; the job list (reorder, retry, duplicate, remove); **Pause queue** (finish the current job, don't start the next); **Stop current job** (stops it and pauses the queue); and *Import queue file* to add the runs of a `train_queue.py` file.
@@ -316,7 +318,7 @@ The queue is saved in `~/data/train_queues/live/jobs.yaml` with each job's confi
 
 `configs/registry.yaml` links each model to the dataset it was trained on, and each dataset to the GELLO recordings it was converted from. Regenerate it after recording, converting or training:
 ```bash
-python scripts/build_registry.py   # defaults: ~/data/bc_data, ~/lerobot/splatsim_test_data, ~/lerobot/examples/tutorial/diffusion/outputs
+python scripts/xarm5/build_registry.py   # defaults: ~/data/bc_data, ~/lerobot/splatsim_test_data, ~/lerobot/examples/tutorial/diffusion/outputs
 ```
 Models are matched to datasets exactly through the normalization statistics stored in the model, and datasets to recordings through their sequence of episode lengths. Fill in `name`, `description` and `notes` by hand (or set `name` / `description` in the training config): regenerating keeps them. Each model also gets a `suggested_name` built from its metadata.
 
@@ -330,7 +332,7 @@ Without `--checkpoint` it uses `DEFAULT_CHECKPOINT` in `splatsim/agents/lerobot_
 
 ### Automated policy trials
 
-`scripts/run_policy_trials.py` evaluates the policy over a grid of tomato positions without manual timing. It loads the policy once, then for each position and trial it resets the arm, places the tomato, resets the policy, records the rollout and stops after a fixed simulated duration.
+`scripts/xarm5/run_policy_trials.py` evaluates the policy over a grid of tomato positions without manual timing. It loads the policy once, then for each position and trial it resets the arm, places the tomato, resets the policy, records the rollout and stops after a fixed simulated duration.
 
 1. Define the tomato positions `(x, y, z)` to test in `configs/apple_grid.yaml`. The easiest way is to place the tomato from the control panel (*Tomato* folder) and press **Save Position to Grid** for each position you want; you can also edit the file by hand.
 2. Start the server:
@@ -339,8 +341,8 @@ Without `--checkpoint` it uses `DEFAULT_CHECKPOINT` in `splatsim/agents/lerobot_
    ```
 3. Run the trials:
    ```bash
-   python scripts/run_policy_trials.py --trials-per-position 3 --trial-seconds 15
-   python scripts/run_policy_trials.py --positions 0 4 8 --trials-per-position 1   # only some positions
+   python scripts/xarm5/run_policy_trials.py --trials-per-position 3 --trial-seconds 15
+   python scripts/xarm5/run_policy_trials.py --positions 0 4 8 --trials-per-position 1   # only some positions
    ```
 
 Results are saved in `~/data/policy_trials/<model name>/<date>/` (change the base with `--output-dir` and the model folder with `--run-name`; by default it is the model's `name` or `suggested_name` in `configs/registry.yaml`):
@@ -532,7 +534,7 @@ For the xArm5 LeRobot diffusion policy, see [Run the diffusion policy](#run-the-
 
 `obs["state"]` is the pose of the arm's last link, not the gripper tip, so the raw end-effector–tomato distance never drops below ~13 cm, even in a perfect demo. What is consistent is where the tomato sits **in the end-effector frame** at the end of the demos (≈ 17 cm along the tool axis):
 ```bash
-python scripts/estimate_grasp_point.py --recordings ~/data/bc_data/gello_3plants   # writes configs/grasp_point.yaml
+python scripts/xarm5/estimate_grasp_point.py --recordings ~/data/bc_data/gello_3plants   # writes configs/grasp_point.yaml
 ```
 The **grasp error** of a frame is the distance between the tomato (in the end-effector frame) and that point (`splatsim/utils/grasp_point.py`). In the demos' last frames it is 1.9 cm (p50) and 3.4 cm (p90). `run_policy_trials.py` records the final and minimum grasp error of each trial, and a trial succeeds when it gets within 4 cm.
 
@@ -540,7 +542,7 @@ The **grasp error** of a frame is the distance between the tomato (in the end-ef
 
 After running trials for several models (panel *Trials* or `run_policy_trials.py`), compare them:
 ```bash
-python scripts/compare_trials.py ~/data/policy_trials/2cam-h64 ~/data/policy_trials/1cam-h64 ~/data/policy_trials/3cam-h64
+python scripts/xarm5/compare_trials.py ~/data/policy_trials/2cam-h64 ~/data/policy_trials/1cam-h64 ~/data/policy_trials/3cam-h64
 ```
 Each argument is a model folder (all its runs are pooled) or a single run, optionally as `label=path`. Success is a minimum grasp error ≤ 4 cm by default (`--metric final_grasp_err`, or the raw `min_dist` / `final_dist`; `--success_dist` changes the threshold); trials recorded before the grasp error existed get it computed from their saved frames. It reports each model's success rate with a 95% Wilson interval, a Fisher exact test (2 models) or a chi-square test plus Holm-corrected pairwise Fisher tests (3 or more), and writes `summary.md`, CSV tables and three figures (success rate, success per tomato position, distance per trial) to `~/data/policy_trials/comparisons/<date>/`. With 9 positions, plan on ~10 trials per position per model for these tests to detect moderate differences.
 

@@ -208,7 +208,7 @@ def discover_episodes(input_dirs: list[Path], use_selection: bool = True) -> lis
         if not found:
             warnings.warn(f"No se encontraron episodios (.pkl) en {input_dir}")
 
-        # episodios descartados con scripts/review_recordings.py (selection.yaml)
+        # episodios descartados con scripts/xarm5/review_recordings.py (selection.yaml)
         discarded = load_discarded(input_dir) if use_selection else set()
         skipped = [d for d in found if d.name in discarded]
         found = [d for d in found if d.name not in discarded]
@@ -852,7 +852,7 @@ def build_parser():
         "--ignore_selection",
         action="store_true",
         help="Incluir también los episodios descartados en <input_dir>/selection.yaml "
-        "(scripts/review_recordings.py).",
+        "(scripts/xarm5/review_recordings.py).",
     )
     p.add_argument(
         "--repo_suffix",

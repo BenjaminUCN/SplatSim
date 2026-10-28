@@ -35,7 +35,7 @@ def teleop_loop(robot, agent, args) -> None:
     """GELLO con sim_clock=realtime: manda comandos a --hz sin pedir observaciones (renderizar
     cuesta ~0.2 s). Las cámaras que verá la política llegan aparte, por la vista previa del
     servidor, a lo que dé el render. Para grabar: 'r'/'s' + Enter en el servidor o el panel;
-    se graba solo el estado y las imágenes se renderizan después (scripts/render_recordings.py)."""
+    se graba solo el estado y las imágenes se renderizan después (scripts/xarm5/render_recordings.py)."""
     names = ["base_rgb"] if args.no_wrist_camera else ["wrist_rgb", "base_rgb"]
     dofs = robot.num_dofs()
     print_color("\nTeleoperación en tiempo real (sim_clock=realtime) 🚀", color="green", attrs=("bold",))

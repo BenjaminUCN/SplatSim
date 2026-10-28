@@ -1,6 +1,6 @@
 """Estima el punto de agarre (tomate en el marco del efector) con el último frame de las demos.
 
-    python scripts/estimate_grasp_point.py --recordings ~/data/bc_data/gello_3plants
+    python scripts/xarm5/estimate_grasp_point.py --recordings ~/data/bc_data/gello_3plants
 
 Usa el último .pkl legible de cada episodio (sin los descartados en selection.yaml), toma la
 mediana y escribe configs/grasp_point.yaml, que usan run_policy_trials.py, compare_trials.py
@@ -16,7 +16,7 @@ import numpy as np
 import tyro
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.utils.episode_selection import load_discarded  # noqa: E402
 from splatsim.utils.grasp_point import GRASP_POINT_PATH, tomato_in_ee  # noqa: E402
 
@@ -69,7 +69,7 @@ def main(args: Args):
     }
     with open(args.out, "w") as f:
         f.write("# Tomato position in the end-effector frame at the end of the demos (m), and how far\n"
-                "# each demo's last frame is from it. Written by scripts/estimate_grasp_point.py.\n")
+                "# each demo's last frame is from it. Written by scripts/xarm5/estimate_grasp_point.py.\n")
         yaml.safe_dump(data, f, sort_keys=False, default_flow_style=None)
     print(f"punto de agarre {data['point']} m; error del último frame p50 {data['final_error_p50']} m, "
           f"p90 {data['final_error_p90']} m → {args.out}")

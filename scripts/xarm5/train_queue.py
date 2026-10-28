@@ -1,8 +1,8 @@
 """Entrena una cola de modelos uno tras otro (p.ej. barrer horizon, n_obs_steps o cámaras).
 
-    python scripts/train_queue.py configs/train/queue_example.yaml --dry_run   # muestra las corridas
-    python scripts/train_queue.py configs/train/queue_example.yaml             # entrena
-    python scripts/train_queue.py configs/train/queue_example.yaml --only 2cam-h32
+    python scripts/xarm5/train_queue.py configs/train/queue_example.yaml --dry_run   # muestra las corridas
+    python scripts/xarm5/train_queue.py configs/train/queue_example.yaml             # entrena
+    python scripts/xarm5/train_queue.py configs/train/queue_example.yaml --only 2cam-h32
 
 Archivo de cola:
     base: configs/train/diffusion.yaml   # config de partida
@@ -32,7 +32,8 @@ from pathlib import Path
 import tyro
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]       # raíz del repo
+SCRIPTS = Path(__file__).resolve().parent      # scripts/xarm5
 PRINT_EVERY = 1000
 
 
@@ -48,7 +49,7 @@ class Args:
 
 
 def _train_fields() -> set[str]:
-    sys.path.insert(0, str(ROOT / "scripts"))
+    sys.path.insert(0, str(SCRIPTS))
     from train_diffusion import TrainConfig
     return {f.name for f in fields(TrainConfig)}
 
@@ -153,7 +154,7 @@ def main(args: Args) -> None:
         with open(log_path, "w") as log:
             # la salida va al log y a la terminal; sin buffer para ver el avance al momento
             proc = subprocess.Popen(
-                [sys.executable, str(ROOT / "scripts" / "train_diffusion.py"), "--config", str(cfg_path)],
+                [sys.executable, str(SCRIPTS / "train_diffusion.py"), "--config", str(cfg_path)],
                 cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 env={**os.environ, "PYTHONUNBUFFERED": "1"})
             try:
@@ -184,7 +185,7 @@ def main(args: Args) -> None:
     print(f"\n[Queue] terminadas: {len(done)}  fallidas: {failed or 'ninguna'}")
     if args.update_registry:
         print("[Queue] Actualizando configs/registry.yaml")
-        subprocess.run([sys.executable, str(ROOT / "scripts" / "build_registry.py")], cwd=ROOT,
+        subprocess.run([sys.executable, str(SCRIPTS / "build_registry.py")], cwd=ROOT,
                        stdout=subprocess.DEVNULL)
 
 

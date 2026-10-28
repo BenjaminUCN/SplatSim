@@ -57,9 +57,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 TOOLS_LOG_DIR = Path("~/.cache/splatsim/tools").expanduser()
 # herramientas con su propio panel viser que se pueden lanzar desde la pestaña Tools
 TOOLS = (
-    ("Recordings review", "scripts/review_recordings.py", 8081,
+    ("Recordings review", "scripts/xarm5/review_recordings.py", 8081,
      "GELLO recordings: trails, episode selection and stop labels"),
-    ("Training queue", "scripts/train_server.py", 8082,
+    ("Training queue", "scripts/xarm5/train_server.py", 8082,
      "Queue trainings; stopping this panel does not stop a training in progress"),
 )
 
@@ -317,7 +317,7 @@ class StationPanel:
 
     def _show_model_info(self):
         if self._model_select.value not in self._models:
-            self._model_info.content = "No models: run `python scripts/build_registry.py`"
+            self._model_info.content = "No models: run `python scripts/xarm5/build_registry.py`"
             return
         key, m = self._models[self._model_select.value]
         ds = self._datasets.get(m.get("dataset")) or {}
@@ -393,7 +393,7 @@ class StationPanel:
         self._start_trials(label, model, extra, n)
 
     def _start_trials(self, label, model, extra: list, n: int):
-        cmd = ["scripts/run_policy_trials.py", "--checkpoint", model["path"], *self._dataset_args(model),
+        cmd = ["scripts/xarm5/run_policy_trials.py", "--checkpoint", model["path"], *self._dataset_args(model),
                "--run_name", label.removesuffix(LOCAL_SUFFIX),
                "--robot_port", str(self.s.zmq_port),
                "--trial_seconds", str(float(self._trial_seconds.value)), *extra]

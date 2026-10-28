@@ -1,8 +1,8 @@
 """Compara modelos a partir de sus ensayos (trials.csv de run_policy_trials.py): tasa de éxito
 con intervalo de confianza, test estadístico, desglose por posición del tomate y gráficos.
 
-    python scripts/compare_trials.py ~/data/policy_trials/2cam-h64 ~/data/policy_trials/1cam-h64
-    python scripts/compare_trials.py base=~/data/policy_trials/A/261027_150541 new=~/data/policy_trials/B
+    python scripts/xarm5/compare_trials.py ~/data/policy_trials/2cam-h64 ~/data/policy_trials/1cam-h64
+    python scripts/xarm5/compare_trials.py base=~/data/policy_trials/A/261027_150541 new=~/data/policy_trials/B
 
 Cada entrada es una carpeta de modelo (se juntan todas sus corridas <fecha>/trials.csv) o una
 corrida; "etiqueta=ruta" cambia el nombre que aparece en tablas y gráficos.
@@ -35,7 +35,7 @@ import tyro  # noqa: E402
 from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 from scipy import stats  # noqa: E402
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.utils.grasp_point import SUCCESS_RADIUS, grasp_error, load_grasp_point  # noqa: E402
 
 # paleta de referencia (modo claro): una serie = un color; magnitud = rampa azul de un tono

@@ -1,4 +1,4 @@
-"""Lectura de configs/registry.yaml (lo genera scripts/build_registry.py)."""
+"""Lectura de configs/registry.yaml (lo genera scripts/xarm5/build_registry.py)."""
 import json
 import os
 

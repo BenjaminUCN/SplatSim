@@ -52,7 +52,7 @@ class LeRobotDiffusionAgent:
     ):
         """checkpoint: carpeta del modelo (None -> DEFAULT_CHECKPOINT).
         dataset_root: dataset con que se entrenó; None -> se busca en configs/registry.yaml
-        (scripts/build_registry.py) y, si el modelo no está, DEFAULT_DATASET_ROOT."""
+        (scripts/xarm5/build_registry.py) y, si el modelo no está, DEFAULT_DATASET_ROOT."""
         self.device = device
         self._n_act_steps = n_action_steps or _N_ACT_STEPS
         self._obs_buffer: deque[dict[str, torch.Tensor]] = deque(maxlen=_N_OBS_STEPS)

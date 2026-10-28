@@ -65,7 +65,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         "realtime": el serve_loop la avanza continuamente al ritmo del reloj y los comandos solo
         cambian el objetivo (teleoperación con GELLO); las grabaciones guardan solo el estado,
         un frame por comando, y las imágenes se renderizan después con
-        scripts/render_recordings.py."""
+        scripts/xarm5/render_recordings.py."""
         if sim_clock not in SIM_CLOCKS:
             raise ValueError(f"sim_clock debe ser uno de {SIM_CLOCKS}, no {sim_clock!r}")
         self.sim_clock = sim_clock
@@ -372,7 +372,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
 
     def restore_state(self, obs: dict) -> None:
         """Pone la escena en el estado de una observación grabada (sim_joint_positions y objetos);
-        lo usa scripts/render_recordings.py."""
+        lo usa scripts/xarm5/render_recordings.py."""
         c = self.pybullet_client
         with self.lock:
             for i, q in enumerate(obs["sim_joint_positions"]):

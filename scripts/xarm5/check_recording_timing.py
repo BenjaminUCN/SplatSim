@@ -1,6 +1,6 @@
 """Verifica que las trayectorias grabadas tengan un dt simulado fijo entre frames.
 
-Uso: python scripts/check_recording_timing.py [traj_folder]
+Uso: python scripts/xarm5/check_recording_timing.py [traj_folder]
      (por defecto traj_folder de configs/folder_configs.yaml)
 """
 import glob

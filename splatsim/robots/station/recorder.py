@@ -27,7 +27,7 @@ class TrajectoryRecorder:
     - record_state_only (sim con sim_clock=realtime, teleoperación): guarda en el momento del
       comando solo el estado (server.state_observation(), con sim_time y sim_joint_positions),
       sin renderizar; las imágenes se generan después a un fps fijo con
-      scripts/render_recordings.py.
+      scripts/xarm5/render_recordings.py.
 
     El hilo del teclado solo deja una petición; start/stop se ejecutan en tick(),
     desde el serve_loop y con el lock de la simulación tomado.
@@ -96,7 +96,7 @@ class TrajectoryRecorder:
         self._pending = False
         self._start_time = self.s.clock()
         self.active = True
-        kind = "solo estado; render después con scripts/render_recordings.py" if self._state_only else "con imágenes"
+        kind = "solo estado; render después con scripts/xarm5/render_recordings.py" if self._state_only else "con imágenes"
         print(f"[Recording] ▶ Grabando en {self._folder} (un frame cada {self.every} comandos, {kind})")
         return self._folder
 

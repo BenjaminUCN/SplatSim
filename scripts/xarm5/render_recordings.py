@@ -1,6 +1,6 @@
 """Renderiza las imágenes de grabaciones hechas con sim_clock=realtime (solo estado).
 
-    python scripts/render_recordings.py ~/data/bc_data/gello_teleop --fps 10 [--arrangement 2cam]
+    python scripts/xarm5/render_recordings.py ~/data/bc_data/gello_teleop --fps 10 [--arrangement 2cam]
 
 Al teleoperar con sim_clock=realtime el servidor graba un frame por comando (~30 Hz) con el
 estado, sim_time y las posiciones de todas las articulaciones, sin imágenes. Este script
@@ -31,7 +31,7 @@ import numpy as np
 import tyro
 import yaml
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.robots.station.recorder import save_frame  # noqa: E402
 from splatsim.utils.camera_setup import arrangement_cameras  # noqa: E402
 from splatsim.utils.episode_selection import SELECTION_FILE  # noqa: E402

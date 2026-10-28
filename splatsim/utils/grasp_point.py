@@ -6,7 +6,7 @@ Lo que importa es la posición del tomate en el marco del efector: en el último
 demos es muy consistente (≈ 17 cm sobre el eje de la herramienta). El error de agarre de un
 frame es la distancia entre esa posición y el punto de agarre medio.
 
-configs/grasp_point.yaml lo escribe scripts/estimate_grasp_point.py.
+configs/grasp_point.yaml lo escribe scripts/xarm5/estimate_grasp_point.py.
 """
 import numpy as np
 import yaml

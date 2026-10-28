@@ -1,7 +1,7 @@
 """Relaciona grabaciones (bc_data), datasets LeRobot y modelos entrenados en un registro YAML.
 
-    python scripts/build_registry.py
-    python scripts/build_registry.py --recordings ~/data/bc_data --datasets ~/lerobot/splatsim_test_data \\
+    python scripts/xarm5/build_registry.py
+    python scripts/xarm5/build_registry.py --recordings ~/data/bc_data --datasets ~/lerobot/splatsim_test_data \\
         --models ~/lerobot/examples/tutorial/diffusion/outputs --out configs/registry.yaml
 
 Cómo se relacionan:
@@ -40,7 +40,7 @@ MAX_DROPPED_FRAMES = 2       # algunas conversiones descartan 0-2 frames por epi
 
 _HEADER = """\
 # Registro de grabaciones (bc_data), datasets LeRobot y modelos. Generado por
-# scripts/build_registry.py; vuelve a correrlo tras grabar, convertir o entrenar.
+# scripts/xarm5/build_registry.py; vuelve a correrlo tras grabar, convertir o entrenar.
 # Edita a mano solo name / description / notes: se conservan al regenerar.
 #   name: nombre corto para elegir el modelo (vacío -> se usa suggested_name)
 #   description: qué se intentó mejorar (p.ej. "1 cámara, más pasos")

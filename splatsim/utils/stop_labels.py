@@ -9,7 +9,7 @@ antes de valid_from, ambigua, que no se usa (-1).
   frame no está en posición, el episodio no tiene positivos y solo son negativos los frames con
   error >= INVALID_RADIUS. Antes de valid_from, los frames que ya estaban cerca del punto de
   agarre (el brazo pasó por ahí) se ignoran en vez de usarse como negativos.
-- Manual (<carpeta>/stop_labels.yaml, lo escribe scripts/review_recordings.py): valid_from
+- Manual (<carpeta>/stop_labels.yaml, lo escribe scripts/xarm5/review_recordings.py): valid_from
   elegido a mano, o exclude para no usar el episodio. Las grabaciones reales no tienen la
   posición del tomate, así que solo se etiquetan a mano.
 """
@@ -24,7 +24,7 @@ INVALID_RADIUS = 0.06   # m: sobre esto, seguro que no está en posición
 IGNORE_FRAMES = 3       # frames ambiguos justo antes de valid_from
 
 _HEADER = """\
-# Stop labels for the visual classifier (written by scripts/review_recordings.py).
+# Stop labels for the visual classifier (written by scripts/xarm5/review_recordings.py).
 # valid_from: first frame where the arm is in grasp position (until the end of the episode);
 # exclude: true to leave the episode out. Episodes not listed use the automatic labels.
 """

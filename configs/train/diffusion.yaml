@@ -1,6 +1,6 @@
-# Training config for scripts/train_diffusion.py.
+# Training config for scripts/xarm5/train_diffusion.py.
 # Copy this file for each experiment, or override any field from the CLI:
-#   python scripts/train_diffusion.py --config configs/train/diffusion.yaml --horizon 32 --cameras base_rgb
+#   python scripts/xarm5/train_diffusion.py --config configs/train/diffusion.yaml --horizon 32 --cameras base_rgb
 
 # ── Run ──────────────────────────────────────────────────────────────────────
 model_name: null          # null -> diffusion_<MMDD_HHMM> (output folder)

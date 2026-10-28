@@ -1,8 +1,8 @@
 """Entrena una Diffusion Policy de LeRobot sobre un dataset de SplatSim.
 
 Los parámetros se leen de un YAML y cualquiera se puede sobrescribir por CLI:
-    python scripts/train_diffusion.py --config configs/train/diffusion.yaml
-    python scripts/train_diffusion.py --config configs/train/diffusion.yaml --horizon 32 --cameras base_rgb
+    python scripts/xarm5/train_diffusion.py --config configs/train/diffusion.yaml
+    python scripts/xarm5/train_diffusion.py --config configs/train/diffusion.yaml --horizon 32 --cameras base_rgb
 
 La configuración final se guarda en <output_root>/<model_name>/train_config.yaml.
 """

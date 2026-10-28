@@ -1,5 +1,5 @@
-# Example training queue for scripts/train_queue.py.
-#   python scripts/train_queue.py configs/train/queue_example.yaml --dry_run
+# Example training queue for scripts/xarm5/train_queue.py.
+#   python scripts/xarm5/train_queue.py configs/train/queue_example.yaml --dry_run
 # Every run = base + common + its own fields (any field of configs/train/diffusion.yaml).
 base: configs/train/diffusion.yaml
 

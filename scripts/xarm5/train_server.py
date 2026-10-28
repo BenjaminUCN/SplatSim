@@ -1,7 +1,7 @@
 """Cola de entrenamiento con panel web: agrega trabajos en cualquier momento y se entrenan uno tras
 otro (p.ej. dejar uno de 8 h corriendo y encolar el siguiente sin esperar a que termine).
 
-    python scripts/train_server.py            # http://localhost:8082
+    python scripts/xarm5/train_server.py            # http://localhost:8082
 
 La cola vive en ~/data/train_queues/live/jobs.yaml (configs y logs al lado), así que sobrevive a
 reinicios. Cada entrenamiento corre en su propia sesión y escribe directo a su log: si se cierra
@@ -25,9 +25,10 @@ import tyro
 import viser
 import yaml
 
-ROOT = Path(__file__).resolve().parent.parent
+ROOT = Path(__file__).resolve().parents[2]       # raíz del repo
+SCRIPTS = Path(__file__).resolve().parent      # scripts/xarm5
 sys.path.insert(0, str(ROOT))
-sys.path.insert(0, str(ROOT / "scripts"))
+sys.path.insert(0, str(SCRIPTS))
 from splatsim.utils.camera_setup import load_camera_setup  # noqa: E402
 from splatsim.utils.registry import load_registry  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
@@ -162,7 +163,7 @@ class Worker:
         log = open(log_path, "w")
         # sesión propia y salida directa al log: el entrenamiento no depende de este proceso
         proc = subprocess.Popen(
-            [sys.executable, str(ROOT / "scripts" / "train_diffusion.py"), "--config", str(cfg_path)],
+            [sys.executable, str(SCRIPTS / "train_diffusion.py"), "--config", str(cfg_path)],
             cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
             env={**os.environ, "PYTHONUNBUFFERED": "1"})
         log.close()
@@ -212,7 +213,7 @@ class Worker:
 
     @staticmethod
     def _update_registry():
-        subprocess.run([sys.executable, str(ROOT / "scripts" / "build_registry.py")], cwd=ROOT,
+        subprocess.run([sys.executable, str(SCRIPTS / "build_registry.py")], cwd=ROOT,
                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         print("[Train] configs/registry.yaml actualizado")
 

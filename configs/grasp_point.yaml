@@ -1,5 +1,5 @@
 # Tomato position in the end-effector frame at the end of the demos (m), and how far
-# each demo's last frame is from it. Written by scripts/estimate_grasp_point.py.
+# each demo's last frame is from it. Written by scripts/xarm5/estimate_grasp_point.py.
 point: [-0.0191, 0.0034, 0.168]
 spread_std: [0.0122, 0.013, 0.0166]
 final_error_p50: 0.0193
