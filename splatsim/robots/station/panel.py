@@ -294,7 +294,8 @@ class StationPanel:
                 status = self.v.gui.add_html("")
                 start = self.v.gui.add_button("Start", color="green")
                 stop = self.v.gui.add_button("Stop")
-            self._tools[name] = {"script": script, "port": port, "proc": None, "status": status}
+            self._tools[name] = {"script": script, "port": port, "proc": None, "status": status,
+                                 "pidfile": TOOLS_LOG_DIR / f"{Path(script).stem}.pid"}
             self._on_click(start, lambda n=name: self._start_tool(n))
             self._on_click(stop, lambda n=name: self._stop_tool(n))
         self._update_tools()
@@ -305,10 +306,66 @@ class StationPanel:
             sock.settimeout(0.05)
             return sock.connect_ex(("127.0.0.1", port)) == 0
 
+    @staticmethod
+    def _cmdline(pid: int) -> list[str]:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                return [a.decode(errors="replace") for a in f.read().split(b"\0") if a]
+        except OSError:
+            return []
+
+    @staticmethod
+    def _listening_pids(port: int) -> list[int]:
+        """PIDs que escuchan en el puerto (solo se ven los procesos de este usuario)."""
+        try:
+            out = subprocess.run(["ss", "-ltnpH", f"sport = :{port}"], capture_output=True,
+                                 text=True, timeout=2).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+        return [int(p) for p in re.findall(r"pid=(\d+)", out)]
+
+    def _tool_pid(self, tool) -> int | None:
+        """Proceso de la herramienta aunque no lo haya lanzado este panel: el propio, el de su
+        pidfile (lo dejó un panel anterior) o el que escucha en su puerto. Solo si su línea de
+        comandos es la de la herramienta, así nunca se toca otro programa en ese puerto."""
+        proc = tool["proc"]
+        if proc is not None and proc.poll() is None:
+            return proc.pid
+        candidates = self._listening_pids(tool["port"])
+        try:
+            candidates.insert(0, int(tool["pidfile"].read_text()))
+        except (OSError, ValueError):
+            pass
+        name = Path(tool["script"]).name
+        for pid in candidates:
+            if any(Path(arg).name == name for arg in self._cmdline(pid)):
+                return pid
+        return None
+
+    def _outdated(self, pid: int, tool) -> str | None:
+        """Por qué el proceso corre una versión vieja de la herramienta, o None."""
+        args = self._cmdline(pid)
+        script = next((a for a in args if Path(a).name == Path(tool["script"]).name), None)
+        try:
+            cwd = Path(os.readlink(f"/proc/{pid}/cwd"))
+            path = (cwd / script).resolve()
+            if path != (REPO_ROOT / tool["script"]).resolve():
+                return f"it runs <code>{script}</code>, not <code>{tool['script']}</code>"
+            with open("/proc/stat") as f:
+                btime = next(int(line.split()[1]) for line in f if line.startswith("btime"))
+            with open(f"/proc/{pid}/stat") as f:
+                start_ticks = int(f.read().rsplit(")", 1)[1].split()[19])
+            started = btime + start_ticks / os.sysconf("SC_CLK_TCK")
+            if path.stat().st_mtime > started:
+                return "the script changed after it started"
+        except (OSError, StopIteration, ValueError, IndexError):
+            return None
+        return None
+
     def _start_tool(self, name: str):
         tool = self._tools[name]
-        if self._port_open(tool["port"]):
-            self._update_tools()            # ya corre (de aquí o de otra terminal): solo el enlace
+        if self._tool_pid(tool) is not None or self._port_open(tool["port"]):
+            self._update_tools()            # ya corre (de aquí, de otro panel o de una terminal)
             return
         TOOLS_LOG_DIR.mkdir(parents=True, exist_ok=True)
         log = open(TOOLS_LOG_DIR / f"{Path(tool['script']).stem}.log", "w")
@@ -317,32 +374,61 @@ class StationPanel:
         # sesión propia: sigue corriendo si se detiene el servidor del robot (Ctrl+C)
         tool["proc"] = subprocess.Popen(cmd, cwd=REPO_ROOT, stdout=log, stderr=subprocess.STDOUT,
                                         start_new_session=True)
+        tool["pidfile"].write_text(str(tool["proc"].pid))   # para encontrarlo tras reiniciar el panel
         tool["log"] = log.name
         self._update_tools()
 
     def _stop_tool(self, name: str):
         tool = self._tools[name]
-        proc = tool["proc"]
-        if proc is None or proc.poll() is not None:
-            return                        # no lo lanzó este panel (el estado lo dice)
-        os.killpg(proc.pid, signal.SIGINT)    # como Ctrl+C
-        try:
-            proc.wait(timeout=STOP_TIMEOUT)
-        except subprocess.TimeoutExpired:
-            os.killpg(proc.pid, signal.SIGKILL)
-        tool["proc"] = None
+        pid = self._tool_pid(tool)
+        if pid is None or tool.get("stopping"):
+            return
+        tool["stopping"] = True
+
+        def stop():
+            # a todo su grupo si tiene sesión propia (lanzado por un panel), si no solo a él
+            try:
+                group = os.getpgid(pid) == pid
+            except ProcessLookupError:
+                group = False
+            send = (lambda sig: os.killpg(pid, sig)) if group else (lambda sig: os.kill(pid, sig))
+            try:
+                send(signal.SIGINT)        # como Ctrl+C
+                deadline = time.monotonic() + STOP_TIMEOUT
+                while os.path.exists(f"/proc/{pid}") and time.monotonic() < deadline:
+                    if tool["proc"] is not None and tool["proc"].poll() is not None:
+                        break              # hijo de este panel: ya terminó (poll recoge al zombi)
+                    time.sleep(0.2)
+                else:
+                    if os.path.exists(f"/proc/{pid}"):
+                        send(signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            if tool["proc"] is not None:
+                tool["proc"].poll()
+            tool["pidfile"].unlink(missing_ok=True)
+            tool["stopping"] = False
+            self._do(self._update_tools)
+
+        threading.Thread(target=stop, daemon=True).start()
         self._update_tools()
 
     def _update_tools(self):
         for name, tool in self._tools.items():
             proc, port = tool["proc"], tool["port"]
-            ours = proc is not None and proc.poll() is None
-            if self._port_open(port):
-                who = f"pid {proc.pid}" if ours else "started elsewhere: stop it from its terminal"
-                text = f"● Running ({who}) — {link_html(port, f'open :{port}')}"
-            elif ours:
+            pid = self._tool_pid(tool)
+            if tool.get("stopping"):
+                text = "Stopping..."
+            elif pid is not None and self._port_open(port):
+                who = "started from this panel" if proc is not None and proc.pid == pid else "started earlier"
+                text = f"● Running (pid {pid}, {who}) — {link_html(port, f'open :{port}')}"
+                if reason := self._outdated(pid, tool):
+                    text += f"<br>⚠ <b>Older version</b> ({reason}): Stop and Start to update"
+            elif pid is not None:
                 text = "Starting..."
-            elif proc is not None:
+            elif self._port_open(port):
+                text = f"Port {port} is used by another program"
+            elif proc is not None and proc.poll() is not None:
                 text = f"Exited (code {proc.returncode}); see <code>{tool.get('log')}</code>"
             else:
                 text = "Not running"
