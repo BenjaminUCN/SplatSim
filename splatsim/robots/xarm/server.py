@@ -312,7 +312,12 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
 
     def preview_images(self, names, max_age: float) -> dict:
         """uint8 HxWx3 por cámara: las de la última observación o la vista previa en curso si
-        tienen menos de max_age s; las que falten se renderizan."""
+        tienen menos de max_age s; las que falten se renderizan. Con sim_clock=realtime se
+        piden al hilo de vista previa (que renderiza fuera del lock), así el panel no frena la
+        física: pueden faltar las del primer pedido."""
+        if self.sim_clock == "realtime":
+            frame = self.get_preview(list(names))
+            return dict(frame["images"]) if frame else {}
         images = self.recent_images(max_age)
         missing = [n for n in names if n not in images]
         if missing:

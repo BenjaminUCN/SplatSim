@@ -5,3 +5,5 @@ start_joints: [-3.1415, 0.4712, -1.8151, 0.4188, 1.5708, 0]
 # client rate with sim_clock=realtime (physics follows the clock, so a fast loop is smoother);
 # otherwise the client uses the server's Control Hz
 realtime_hz: 30
+# cv2 windows with the cameras on the client's screen (the panel's Cameras window shows them anyway)
+camera_windows: true

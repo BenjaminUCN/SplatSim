@@ -52,7 +52,7 @@ def teleop_loop(robot, agent, args) -> None:
         action = agent.act({})
         robot.command_joint_state(action[:dofs])
 
-        frame = call(robot, "get_preview", names=names, since=since)
+        frame = None if args.no_camera_windows else call(robot, "get_preview", names=names, since=since)
         if frame is not None:
             since = frame["id"]
             now = time.time()
@@ -101,6 +101,9 @@ class Args:
 
     # Camera flags
     no_wrist_camera: bool = False
+    # sin las ventanas de cv2 con las cámaras (base/wrist); en teleoperación realtime tampoco se
+    # piden las vistas al servidor. Las vistas siguen en la ventana Cameras del panel
+    no_camera_windows: bool = False
 
     # lerobot_diffusion: carpeta del modelo y dataset con que se entrenó
     # (None -> los por defecto del agente; el dataset se busca en configs/registry.yaml)
@@ -455,7 +458,8 @@ def main(args):
             action = action[:-1]
         obs = env.step(action)
 
-        active_cameras = ["base_rgb"] if args.no_wrist_camera else ["wrist_rgb", "base_rgb"]
+        active_cameras = [] if args.no_camera_windows else (
+            ["base_rgb"] if args.no_wrist_camera else ["wrist_rgb", "base_rgb"])
         for img_obs_name in active_cameras:
             if img_obs_name not in obs or obs[img_obs_name] is None:
                 continue

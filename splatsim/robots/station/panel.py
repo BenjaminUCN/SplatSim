@@ -143,6 +143,10 @@ class StationPanel:
             self._gello_joints = self.v.gui.add_text(
                 "Start joints", " ".join(str(j) for j in joints),
                 hint="GELLO joints at the start pose, rad (configs/gello.yaml)")
+            self._gello_windows = self.v.gui.add_checkbox(
+                "Camera windows", bool(self._gello_cfg.get("camera_windows", True)),
+                hint="cv2 windows with base_rgb / wrist_rgb on the client's screen; the Cameras "
+                     "window of this panel shows them anyway")
             start = self.v.gui.add_button("Start GELLO", color="green")
             stop = self.v.gui.add_button("Stop")
             refresh = self.v.gui.add_button("Refresh ports")
@@ -194,6 +198,8 @@ class StationPanel:
                "--hz", str(hz), "--robot_port", str(self.s.zmq_port)]
         if joints:
             cmd += ["--start_joints", *map(str, joints)]
+        if not self._gello_windows.value:
+            cmd.append("--no_camera_windows")
         self._gello_note = ""
         self._gello_run = {"port": port, "hz": hz}
         self._start_client(cmd, "GELLO", trials=False)
