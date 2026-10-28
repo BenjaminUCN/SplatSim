@@ -8,7 +8,7 @@ server.render_cameras(), que solo toma el lock de la física para copiar el esta
 import threading
 import time
 
-import numpy as np
+from splatsim.robots.station.recorder import to_uint8_image
 
 from .config import SIM_DT
 
@@ -48,6 +48,5 @@ class PreviewStream:
             self._frame = {
                 "id": self._id,
                 "sim_time": sim_time,
-                "images": {name: (np.clip(img.detach().permute(1, 2, 0).cpu().numpy(), 0, 1) * 255)
-                           .astype(np.uint8) for name, img in images.items()},
+                "images": {name: to_uint8_image(img) for name, img in images.items()},
             }

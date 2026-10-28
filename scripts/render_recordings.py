@@ -32,7 +32,7 @@ import tyro
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from splatsim.robots.xarm.recorder import save_frame  # noqa: E402
+from splatsim.robots.station.recorder import save_frame  # noqa: E402
 from splatsim.utils.camera_setup import arrangement_cameras  # noqa: E402
 from splatsim.utils.episode_selection import SELECTION_FILE  # noqa: E402
 

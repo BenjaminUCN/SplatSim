@@ -1,4 +1,11 @@
-"""Grabación de trayectorias (.pkl + .png) con control por teclado."""
+"""Grabación de trayectorias (.pkl + .png) con control por teclado, para el sim y el xArm5 real.
+
+Lo que necesita del servidor (backend):
+  path                 carpeta de grabaciones por defecto
+  clock()              tiempo de la grabación en s (simulado en el sim, del reloj en el real)
+  record_state_only    True: guardar solo el estado en cada comando (sim con sim_clock=realtime)
+  state_observation()  la observación sin imágenes que se guarda en ese caso
+"""
 import json
 import os
 import pickle
@@ -14,11 +21,13 @@ class TrajectoryRecorder:
     """
     Graba un frame por cada comando recibido (cada RECORD_EVERY comandos).
 
-    - sim_clock=fixed: usa la observación que el cliente pide justo después del comando, con
-      imágenes; el dt simulado entre frames es fijo: every / control_hz.
-    - sim_clock=realtime (teleoperación): guarda en el momento del comando solo el estado
-      (server.state_observation(), con sim_time y sim_joint_positions), sin renderizar; las
-      imágenes se generan después a un fps fijo con scripts/render_recordings.py.
+    - Normal (sim con sim_clock=fixed, robot real): usa la observación que el cliente pide
+      justo después del comando, con imágenes. En el sim el dt simulado entre frames es fijo
+      (every / control_hz); en el real es el del lazo del cliente.
+    - record_state_only (sim con sim_clock=realtime, teleoperación): guarda en el momento del
+      comando solo el estado (server.state_observation(), con sim_time y sim_joint_positions),
+      sin renderizar; las imágenes se generan después a un fps fijo con
+      scripts/render_recordings.py.
 
     El hilo del teclado solo deja una petición; start/stop se ejecutan en tick(),
     desde el serve_loop y con el lock de la simulación tomado.
@@ -28,17 +37,18 @@ class TrajectoryRecorder:
       <server.path>/000/image_1/<cam>_00001.png, ...
     """
 
-    def __init__(self, server, max_steps: int, every: int = 1, teleop_max_steps: int | None = None):
+    def __init__(self, server, max_seconds: float, every: int = 1,
+                 state_only_max_seconds: float | None = None):
         self.s = server
-        self.max_steps = max_steps   # duración máxima por defecto, en pasos de simulación
-        self.teleop_max_steps = teleop_max_steps or max_steps  # ídem con sim_clock=realtime
-        self._state_only = False     # la grabación en curso guarda solo el estado
-        self._max_steps = max_steps  # duración máxima de la grabación en curso
+        self.max_seconds = max_seconds   # duración máxima por defecto, en el tiempo de server.clock()
+        self.state_only_max_seconds = state_only_max_seconds or max_seconds  # ídem solo estado
+        self._state_only = False         # la grabación en curso guarda solo el estado
+        self._max_seconds = max_seconds  # duración máxima de la grabación en curso
         self.every = every
 
         self.active = False
         self._request = None         # "start" / "stop", lo escribe el hilo del teclado
-        self._start_step = 0
+        self._start_time = 0.0
         self._commands = 0           # comandos recibidos durante la grabación
         self._pending = False        # hubo un comando y aún no se vio su observación
         self._length = 0             # frames guardados (numera .pkl y .png)
@@ -62,7 +72,7 @@ class TrajectoryRecorder:
     def _folder(self) -> str:
         return os.path.join(self._root, str(self._count).zfill(3))
 
-    def start(self, max_steps: int | None = None, metadata: dict | None = None,
+    def start(self, max_seconds: float | None = None, metadata: dict | None = None,
               root: str | None = None) -> str | None:
         """Empieza una grabación; devuelve su carpeta (None si ya había una activa).
         `root` reemplaza la carpeta base (por defecto server.path)."""
@@ -78,12 +88,13 @@ class TrajectoryRecorder:
         if metadata is not None:
             with open(os.path.join(self._folder, "meta.json"), "w") as f:
                 json.dump(metadata, f, indent=2)
-        self._state_only = self.s.sim_clock == "realtime"
-        self._max_steps = max_steps or (self.teleop_max_steps if self._state_only else self.max_steps)
+        self._state_only = self.s.record_state_only
+        self._max_seconds = max_seconds or (self.state_only_max_seconds if self._state_only
+                                            else self.max_seconds)
         self._length = 0
         self._commands = 0
         self._pending = False
-        self._start_step = self.s.sim_steps
+        self._start_time = self.s.clock()
         self.active = True
         kind = "solo estado; render después con scripts/render_recordings.py" if self._state_only else "con imágenes"
         print(f"[Recording] ▶ Grabando en {self._folder} (un frame cada {self.every} comandos, {kind})")
@@ -128,13 +139,24 @@ class TrajectoryRecorder:
         self._check_length()
 
     def _check_length(self) -> None:
-        if self.s.sim_steps - self._start_step >= self._max_steps:
+        if self.s.clock() - self._start_time >= self._max_seconds - 1e-9:
             self.stop()
 
     # ── guardado ─────────────────────────────────────────────────────────────
     def _save_frame(self, obs) -> None:
         self._length += 1
         save_frame(self._folder, self._length, obs)
+
+
+def to_uint8_image(img) -> np.ndarray:
+    """Imagen RGB HxWx3 uint8 desde un tensor CxHxW en [0, 1] (render del splat) o un array
+    HxWx3 (uint8, o float en [0, 1]) de una cámara real."""
+    if hasattr(img, "detach"):
+        img = np.transpose(img.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
+    img = np.asarray(img)
+    if img.dtype != np.uint8:
+        img = (np.clip(img, 0, 1) * 255).astype(np.uint8)
+    return img
 
 
 def save_frame(folder: str, index: int, obs: dict) -> None:
@@ -144,8 +166,7 @@ def save_frame(folder: str, index: int, obs: dict) -> None:
         image_dir = os.path.join(folder, "image_1")
         os.makedirs(image_dir, exist_ok=True)
     for name, img in images.items():
-        frame = np.transpose(img.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
-        frame = (np.clip(frame, 0, 1) * 255).astype(np.uint8)
+        frame = to_uint8_image(img)
         # el índice coincide con el del .pkl
         path = os.path.join(image_dir, f"{name}_{index:05d}.png")
         cv2.imwrite(path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))

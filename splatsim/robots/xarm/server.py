@@ -41,7 +41,7 @@ from .debug_ui import (
 )
 from .gripper import XArm5Gripper
 from .preview import PreviewStream
-from .recorder import TrajectoryRecorder
+from splatsim.robots.station.recorder import TrajectoryRecorder, to_uint8_image
 from .trail import EETrail
 
 
@@ -97,8 +97,7 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self._last_command_time = 0.0    # time.monotonic() del último comando
         # el recorder no toca la base en su constructor, así que es seguro crearlo antes
         self.recorder = TrajectoryRecorder(
-            self, round(MAX_RECORD_SECONDS / SIM_DT), RECORD_EVERY,
-            teleop_max_steps=round(TELEOP_MAX_RECORD_SECONDS / SIM_DT))
+            self, MAX_RECORD_SECONDS, RECORD_EVERY, state_only_max_seconds=TELEOP_MAX_RECORD_SECONDS)
         self.gripper = None  # se crea en setup_gripper(), que la base llama en su __init__
         super().__init__(**kwargs)
 
@@ -119,10 +118,10 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
 
         # controles: cada uno tiene update(), que el serve_loop llama con el lock tomado
         if gui == "viser":
-            from .panel import ControlPanel  # viser solo hace falta con este modo
+            from .panel import SimPanel  # viser solo hace falta con este modo
             c = self.pybullet_client
             c.configureDebugVisualizer(c.COV_ENABLE_GUI, 0)  # oculta el panel lateral de PyBullet
-            self.controls = [ControlPanel(self, base_cams, port=panel_port)]
+            self.controls = [SimPanel(self, base_cams, port=panel_port)]
         elif gui == "pybullet":
             self.controls = [*(BaseCameraTuner(self, cam) for cam in base_cams),
                              SaveCameraPosesButton(self, base_cams),
@@ -272,6 +271,33 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             return None
         return render(camera, self.robot_gaussian, self.pipeline, self.background)["render"]
 
+    # ── interfaz de backend (splatsim/robots/station: panel y recorder) ──────
+    def clock(self) -> float:
+        """Tiempo de las grabaciones: el simulado."""
+        return self.sim_steps * SIM_DT
+
+    @property
+    def record_state_only(self) -> bool:
+        return self.sim_clock == "realtime"
+
+    @property
+    def control_mode(self) -> str:
+        return self.joint_ctrl.mode
+
+    @property
+    def preview_cameras(self) -> list[str]:
+        """Cámaras que se pueden ver en el panel (todas las del splat, no solo las grabadas)."""
+        return list(self.cameras)
+
+    def preview_images(self, names, max_age: float) -> dict:
+        """uint8 HxWx3 por cámara: las de la última observación o la vista previa en curso si
+        tienen menos de max_age s; las que falten se renderizan."""
+        images = self.recent_images(max_age)
+        missing = [n for n in names if n not in images]
+        if missing:
+            images.update(self.render_preview(missing))
+        return {n: to_uint8_image(images[n]) for n in names if images.get(n) is not None}
+
     def render_cameras(self, camera_names) -> dict:
         """Renderiza las cámaras con la escena actual, sin pasar por get_observations (que
         alimenta al recorder). Solo toma self.lock para copiar el estado de PyBullet: si quien
@@ -377,8 +403,7 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
     def start_recording(self, max_seconds: float | None = None, metadata: dict | None = None,
                         root: str | None = None) -> str | None:
         with self.lock:
-            max_steps = round(max_seconds / SIM_DT) if max_seconds else None
-            return self.recorder.start(max_steps, metadata, root)
+            return self.recorder.start(max_seconds, metadata, root)
 
     def stop_recording(self) -> None:
         with self.lock:

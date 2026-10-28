@@ -2,22 +2,15 @@
 import numpy as np
 import yaml
 
-from .config import APPLE_GRID_PATH, APPLE_INIT, APPLE_NAME, APPLE_RANGE
+from splatsim.utils.apple_grid import APPLE_GRID_PATH, load_grid
+
+from .config import APPLE_INIT, APPLE_NAME, APPLE_RANGE
 
 _GRID_HEADER = """\
 # Tomato positions (x, y, z) in PyBullet world coordinates used by scripts/run_policy_trials.py.
 # Add positions with the "Save Apple Position to Grid" button (launch_nodes.py --move_apple)
 # or edit this list by hand.
 """
-
-
-def load_grid() -> list:
-    """Posiciones guardadas en APPLE_GRID_PATH (lista vacía si no hay archivo)."""
-    try:
-        with open(APPLE_GRID_PATH) as f:
-            return (yaml.safe_load(f) or {}).get("positions") or []
-    except FileNotFoundError:
-        return []
 
 
 class AppleController:
