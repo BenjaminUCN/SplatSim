@@ -12,10 +12,13 @@ import numpy as np
 
 class TrajectoryRecorder:
     """
-    Graba un frame por cada comando recibido (cada RECORD_EVERY comandos), usando
-    la observación que el cliente pide justo después del comando. Con sim_clock=fixed el dt
-    simulado entre frames es fijo: every / control_hz; con realtime sigue al lazo del cliente
-    (cada frame guarda sim_time).
+    Graba un frame por cada comando recibido (cada RECORD_EVERY comandos).
+
+    - sim_clock=fixed: usa la observación que el cliente pide justo después del comando, con
+      imágenes; el dt simulado entre frames es fijo: every / control_hz.
+    - sim_clock=realtime (teleoperación): guarda en el momento del comando solo el estado
+      (server.state_observation(), con sim_time y sim_joint_positions), sin renderizar; las
+      imágenes se generan después a un fps fijo con scripts/render_recordings.py.
 
     El hilo del teclado solo deja una petición; start/stop se ejecutan en tick(),
     desde el serve_loop y con el lock de la simulación tomado.
@@ -25,9 +28,11 @@ class TrajectoryRecorder:
       <server.path>/000/image_1/<cam>_00001.png, ...
     """
 
-    def __init__(self, server, max_steps: int, every: int = 1):
+    def __init__(self, server, max_steps: int, every: int = 1, teleop_max_steps: int | None = None):
         self.s = server
         self.max_steps = max_steps   # duración máxima por defecto, en pasos de simulación
+        self.teleop_max_steps = teleop_max_steps or max_steps  # ídem con sim_clock=realtime
+        self._state_only = False     # la grabación en curso guarda solo el estado
         self._max_steps = max_steps  # duración máxima de la grabación en curso
         self.every = every
 
@@ -73,13 +78,15 @@ class TrajectoryRecorder:
         if metadata is not None:
             with open(os.path.join(self._folder, "meta.json"), "w") as f:
                 json.dump(metadata, f, indent=2)
-        self._max_steps = max_steps or self.max_steps
+        self._state_only = self.s.sim_clock == "realtime"
+        self._max_steps = max_steps or (self.teleop_max_steps if self._state_only else self.max_steps)
         self._length = 0
         self._commands = 0
         self._pending = False
         self._start_step = self.s.sim_steps
         self.active = True
-        print(f"[Recording] ▶ Grabando en {self._folder} (un frame cada {self.every} comandos)")
+        kind = "solo estado; render después con scripts/render_recordings.py" if self._state_only else "con imágenes"
+        print(f"[Recording] ▶ Grabando en {self._folder} (un frame cada {self.every} comandos, {kind})")
         return self._folder
 
     def stop(self) -> None:
@@ -107,6 +114,10 @@ class TrajectoryRecorder:
         if self.active:
             self._commands += 1
             self._pending = self._commands % self.every == 0
+            if self._pending and self._state_only:
+                self._pending = False
+                self._save_frame(self.s.state_observation())
+                self._check_length()
 
     def on_observation(self, obs) -> None:
         """Llamar desde get_observations: guarda la observación si sigue a un comando."""
@@ -114,23 +125,30 @@ class TrajectoryRecorder:
             return
         self._pending = False
         self._save_frame(obs)
+        self._check_length()
+
+    def _check_length(self) -> None:
         if self.s.sim_steps - self._start_step >= self._max_steps:
             self.stop()
 
     # ── guardado ─────────────────────────────────────────────────────────────
     def _save_frame(self, obs) -> None:
         self._length += 1
+        save_frame(self._folder, self._length, obs)
 
-        image_dir = os.path.join(self._folder, "image_1")
+
+def save_frame(folder: str, index: int, obs: dict) -> None:
+    """Escribe <folder>/<index>.pkl y, si la observación trae cámaras, image_1/<cam>_<index>.png."""
+    images = {name: img for name, img in obs.items() if name.endswith("_rgb") and img is not None}
+    if images:
+        image_dir = os.path.join(folder, "image_1")
         os.makedirs(image_dir, exist_ok=True)
-        for name, img in obs.items():
-            if not name.endswith("_rgb") or img is None:
-                continue
-            frame = np.transpose(img.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
-            frame = (np.clip(frame, 0, 1) * 255).astype(np.uint8)
-            # el índice coincide con el del .pkl
-            path = os.path.join(image_dir, f"{name}_{self._length:05d}.png")
-            cv2.imwrite(path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
+    for name, img in images.items():
+        frame = np.transpose(img.detach().cpu().numpy(), (1, 2, 0))  # CxHxW -> HxWxC
+        frame = (np.clip(frame, 0, 1) * 255).astype(np.uint8)
+        # el índice coincide con el del .pkl
+        path = os.path.join(image_dir, f"{name}_{index:05d}.png")
+        cv2.imwrite(path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
-        with open(os.path.join(self._folder, f"{self._length:05d}.pkl"), "wb") as f:
-            pickle.dump(obs, f)
+    with open(os.path.join(folder, f"{index:05d}.pkl"), "wb") as f:
+        pickle.dump(obs, f)

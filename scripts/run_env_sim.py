@@ -19,6 +19,7 @@ from gello.env import RobotEnv
 from splatsim.robots.robot import PrintRobot
 from gello.zmq_core.robot_node import ZMQClientRobot
 from gello.zmq_core.camera_node import ZMQClientCamera
+from splatsim.utils.remote_call import call
 
 import yaml
 
@@ -28,6 +29,48 @@ def print_color(*args, color=None, attrs=(), **kwargs):
     if len(args) > 0:
         args = tuple(termcolor.colored(arg, color=color, attrs=attrs) for arg in args)
     print(*args, **kwargs)
+
+
+def teleop_loop(robot, agent, args) -> None:
+    """GELLO con sim_clock=realtime: manda comandos a --hz sin pedir observaciones (renderizar
+    cuesta ~0.2 s). Las cámaras que verá la política llegan aparte, por la vista previa del
+    servidor, a lo que dé el render. Para grabar: 'r'/'s' + Enter en el servidor o el panel;
+    se graba solo el estado y las imágenes se renderizan después (scripts/render_recordings.py)."""
+    names = ["base_rgb"] if args.no_wrist_camera else ["wrist_rgb", "base_rgb"]
+    dofs = robot.num_dofs()
+    print_color("\nTeleoperación en tiempo real (sim_clock=realtime) 🚀", color="green", attrs=("bold",))
+    since, loop_hz, preview_hz, last_preview = -1, None, None, None
+    prev = None
+    start = time.time()
+    while True:
+        loop_start = time.time()
+        if prev is not None:
+            inst = 1 / max(loop_start - prev, 1e-6)
+            loop_hz = inst if loop_hz is None else 0.9 * loop_hz + 0.1 * inst
+        prev = loop_start
+
+        action = agent.act({})
+        robot.command_joint_state(action[:dofs])
+
+        frame = call(robot, "get_preview", names=names, since=since)
+        if frame is not None:
+            since = frame["id"]
+            now = time.time()
+            if last_preview is not None:
+                inst = 1 / max(now - last_preview, 1e-6)
+                preview_hz = inst if preview_hz is None else 0.8 * preview_hz + 0.2 * inst
+            last_preview = now
+            for name, img in frame["images"].items():
+                cv2.imshow(name, cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+        cv2.waitKey(1)
+
+        message = f"\rTime passed: {time.time() - start:.1f}"
+        if loop_hz is not None:
+            message += f"  loop {loop_hz:4.1f}/{args.hz} Hz"
+        if preview_hz is not None:
+            message += f"  cámaras {preview_hz:4.1f} Hz"
+        print_color(message + "          ", color="white", attrs=("bold",), end="", flush=True)
+        time.sleep(max(0, 1 / args.hz - (time.time() - loop_start)))
 
 
 @dataclass
@@ -347,6 +390,15 @@ def main(args):
         kb_interface = KBReset()
 
     print_color("\nStart 🚀🚀🚀", color="green", attrs=("bold",))
+
+    # RobotEnv.get_obs solo copia algunas claves: sim_clock se le pide al servidor
+    if (args.agent == "gello" and not args.mock and not args.use_save_interface
+            and robot_client.get_observations().get("sim_clock") == "realtime"):
+        try:
+            teleop_loop(robot_client, agent, args)
+        except KeyboardInterrupt:
+            print_color("\nDeteniendo...", color="red", attrs=("bold",))
+        return
 
     save_path = None
     start_time = time.time()

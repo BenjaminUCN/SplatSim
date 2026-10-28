@@ -5,13 +5,15 @@ from splatsim.robots.sim_robot_pybullet_base import PybulletRobotServerBase
 SIM_DT = 1 / 240          # paso de PyBullet (lo fija la base con setTimeStep)
 CONTROL_HZ = 30           # frecuencia de comandos por defecto; launch_nodes --hz la sobrescribe
 LOOP_HZ = 240             # frecuencia del serve_loop (UI y física en reposo)
-SIM_CLOCKS = ("fixed", "realtime")  # tiempo simulado por comando: 1/hz fijo o el tiempo real
-MAX_REALTIME_STEP = 0.25  # s: tope del avance por comando con sim_clock=realtime
+SIM_CLOCKS = ("fixed", "realtime")  # física: 1/hz por comando, o continua al ritmo del reloj
+MAX_REALTIME_STEP = 0.25  # s: tope de lo que se pone al día de una vez con sim_clock=realtime
+SIM_MAX_DELTA = 0.15      # rad por tick del lazo articular en sim (≈ 4.5 rad/s); el xArm real usa 0.05
 IDLE_STEP_AFTER = 0.2     # s reales sin comandos tras los que el serve_loop vuelve a avanzar la física
 LOW_LEVEL_HZ = 30         # lazo de control articular (igual que el hilo del driver real del xArm5)
 
 # ── Grabación ────────────────────────────────────────────────────────────────
 MAX_RECORD_SECONDS = 2    # duración máxima de una trayectoria, en tiempo simulado
+TELEOP_MAX_RECORD_SECONDS = 120  # ídem con sim_clock=realtime (demos con GELLO)
 RECORD_EVERY = 1          # guarda un frame cada N comandos
 
 # ── Cámaras (intrínsecos) ────────────────────────────────────────────────────

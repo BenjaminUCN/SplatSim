@@ -15,7 +15,7 @@ from gaussian_renderer import render
 
 from .apple import AppleController
 from .cameras import AppleCamera, BaseCamera, WristCamera
-from splatsim.robots.joint_controller import JointController
+from splatsim.robots.joint_controller import ControllerGains, JointController
 
 from .config import (
     ENV_CONFIG,
@@ -30,6 +30,8 @@ from .config import (
     CONTROL_HZ,
     SIM_CLOCKS,
     SIM_DT,
+    SIM_MAX_DELTA,
+    TELEOP_MAX_RECORD_SECONDS,
 )
 from .debug_ui import (
     AppleWindow,
@@ -38,6 +40,7 @@ from .debug_ui import (
     SaveCameraPosesButton,
 )
 from .gripper import XArm5Gripper
+from .preview import PreviewStream
 from .recorder import TrajectoryRecorder
 from .trail import EETrail
 
@@ -45,7 +48,7 @@ from .trail import EETrail
 class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
     ENV_CONFIG = ENV_CONFIG
     # métodos que el cliente puede llamar por ZMQ además de los de la base
-    REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording")
+    REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording", "get_preview")
 
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
@@ -55,10 +58,12 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         (sliders y botones de PyBullet; --move_apple agrega los de la manzana).
         control_mode: position / interp / velocity (ver splatsim/robots/joint_controller.py),
         la misma ley que usa el driver real del xArm5.
-        sim_clock: cuánto tiempo simulado avanza cada comando. "fixed": exactamente 1/control_hz
-        (dt fijo por frame aunque el cliente vaya más lento; políticas y ensayos). "realtime": el
-        tiempo real desde el comando anterior, así la simulación sigue a GELLO a velocidad real
-        aunque el lazo del cliente no alcance control_hz."""
+        sim_clock: quién avanza la física. "fixed": cada comando avanza exactamente 1/control_hz
+        simulado (dt fijo por frame aunque el cliente vaya más lento; políticas y ensayos).
+        "realtime": el serve_loop la avanza continuamente al ritmo del reloj y los comandos solo
+        cambian el objetivo (teleoperación con GELLO); las grabaciones guardan solo el estado,
+        un frame por comando, y las imágenes se renderizan después con
+        scripts/render_recordings.py."""
         if sim_clock not in SIM_CLOCKS:
             raise ValueError(f"sim_clock debe ser uno de {SIM_CLOCKS}, no {sim_clock!r}")
         self.sim_clock = sim_clock
@@ -70,21 +75,30 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self.steps_per_command = round((1 / control_hz) / SIM_DT)
         # lazo articular a LOW_LEVEL_HZ dentro de cada comando, como el hilo del driver real
         self.steps_per_tick = round((1 / LOW_LEVEL_HZ) / SIM_DT)
-        self.joint_ctrl = JointController(control_mode, 1 / control_hz)
+        # en sim el tope por tick es más holgado que en el xArm real (ver SIM_MAX_DELTA)
+        self.joint_ctrl = JointController(control_mode, 1 / control_hz,
+                                          ControllerGains(max_delta=SIM_MAX_DELTA))
         self._holding = True             # en reposo el brazo se sostiene en su posición
         print(f"[xArm5] control_mode={control_mode}")
         print(f"[xArm5] control_hz={control_hz} → {self.steps_per_command} pasos por comando"
-              + (" (sim_clock=realtime: los pasos siguen al tiempo real)" if sim_clock == "realtime" else ""))
+              + (" (sim_clock=realtime: la física sigue al reloj)" if sim_clock == "realtime" else ""))
         # el hilo ZMQ, el serve_loop y el recorder comparten PyBullet y el renderer
         self.lock = threading.RLock()
+        # el splat deformado (prep_image_rendering) es uno solo: un render a la vez. Se toma
+        # después de self.lock (nunca al revés), así la vista previa renderiza sin frenar la física
+        self.render_lock = threading.Lock()
         self.sim_steps = 0               # pasos de simulación dados vía _step()
+        self._tick_left = 0              # pasos que faltan para el próximo tick del lazo articular
+        self._rt_last = time.monotonic() # realtime: última vuelta del serve_loop
+        self._rt_acc = 0.0               # realtime: pasos pendientes (fracción incluida)
+        self._preview = None             # PreviewStream, se crea con el primer get_preview
         self._last_images = {}           # cámaras de la última observación (vista previa del panel)
         self._last_images_time = 0.0
         self._last_command_time = 0.0    # time.monotonic() del último comando
-        self._steps_at_command = 0       # sim_steps al terminar el último comando
         # el recorder no toca la base en su constructor, así que es seguro crearlo antes
         self.recorder = TrajectoryRecorder(
-            self, round(MAX_RECORD_SECONDS / SIM_DT), RECORD_EVERY)
+            self, round(MAX_RECORD_SECONDS / SIM_DT), RECORD_EVERY,
+            teleop_max_steps=round(TELEOP_MAX_RECORD_SECONDS / SIM_DT))
         self.gripper = None  # se crea en setup_gripper(), que la base llama en su __init__
         super().__init__(**kwargs)
 
@@ -163,6 +177,19 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             self.pybullet_client.stepSimulation()
         self.sim_steps += n
 
+    def _advance(self, n: int) -> None:
+        """Avanza n pasos con el lazo articular: un tick del controlador cada steps_per_tick."""
+        while n > 0:
+            if self._tick_left == 0:
+                kind, values = self.joint_ctrl.step(
+                    self._arm_positions(), self.sim_steps * SIM_DT, self.steps_per_tick * SIM_DT)
+                self._apply_arm_command(kind, values)
+                self._tick_left = self.steps_per_tick
+            k = min(n, self._tick_left)
+            self._step(k)
+            self._tick_left -= k
+            n -= k
+
     def _arm_positions(self) -> np.ndarray:
         return np.array([self.pybullet_client.getJointState(self.dummy_robot, i)[0]
                          for i in range(1, 6)])
@@ -198,40 +225,39 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             if self._holding:            # retoma desde la posición actual, sin saltos
                 self.joint_ctrl.reset(self._arm_positions(), now)
                 self._holding = False
+            elif self.sim_clock == "realtime":
+                # periodo real entre objetivos para interp/velocity (el cliente puede ir bajo
+                # control_hz, p.ej. si pide imágenes en cada vuelta)
+                period = min(time.monotonic() - self._last_command_time, MAX_REALTIME_STEP)
+                self.joint_ctrl.nominal_period = 0.8 * self.joint_ctrl.nominal_period + 0.2 * period
             self.joint_ctrl.set_target(joint_state[:5], now)
             if self.use_gripper:
                 self.gripper.command(joint_state[-1])
-            # cada comando avanza 1/control_hz s simulados (o el tiempo real transcurrido con
-            # sim_clock=realtime), en ticks del lazo articular de steps_per_tick pasos
-            remaining = self._command_steps()
-            while remaining > 0:
-                n = min(self.steps_per_tick, remaining)
-                kind, values = self.joint_ctrl.step(
-                    self._arm_positions(), self.sim_steps * SIM_DT, n * SIM_DT)
-                self._apply_arm_command(kind, values)
-                self._step(n)
-                remaining -= n
+            if self.sim_clock == "fixed":
+                # cada comando avanza exactamente 1/control_hz s simulados (frames con dt fijo),
+                # empezando un tick del lazo articular
+                self._tick_left = 0
+                self._advance(self.steps_per_command)
+            # con realtime la física la avanza el serve_loop
             self._last_command_time = time.monotonic()
-            self._steps_at_command = self.sim_steps
             self.recorder.on_command()
 
-    def _command_steps(self) -> int:
-        """Pasos de simulación que avanza el comando actual."""
-        if self.sim_clock == "fixed" or not self._last_command_time:
-            return self.steps_per_command
-        elapsed = min(time.monotonic() - self._last_command_time, MAX_REALTIME_STEP)
-        # periodo real entre objetivos para interp/velocity (el lazo puede ir bajo control_hz)
-        self.joint_ctrl.nominal_period = 0.8 * self.joint_ctrl.nominal_period + 0.2 * elapsed
-        # lo que el serve_loop ya simuló en reposo desde el comando anterior no se repite
-        done = self.sim_steps - self._steps_at_command
-        return max(1, round(elapsed / SIM_DT) - done)
+    def _idle(self) -> bool:
+        """Sin comandos recientes: el cliente se detuvo (o no hay)."""
+        after = IDLE_STEP_AFTER
+        if self.sim_clock == "realtime":   # un cliente lento no cuenta como detenido
+            after = max(after, 3 * self.joint_ctrl.nominal_period)
+        return time.monotonic() - self._last_command_time > after
 
     def set_sim_clock(self, clock: str) -> None:
         if clock not in SIM_CLOCKS:
             raise ValueError(f"sim_clock debe ser uno de {SIM_CLOCKS}, no {clock!r}")
         with self.lock:
+            if self.recorder.active:
+                self.recorder.stop()     # una grabación no mezcla frames con y sin imágenes
             self.sim_clock = clock
             self.joint_ctrl.nominal_period = 1 / self.control_hz
+            self._rt_last, self._rt_acc = time.monotonic(), 0.0
         print(f"[xArm5] sim_clock={clock}")
 
     def set_object_pose(self, *args, **kwargs) -> None:
@@ -246,9 +272,10 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
             return None
         return render(camera, self.robot_gaussian, self.pipeline, self.background)["render"]
 
-    def render_preview(self, camera_names) -> dict:
-        """Renderiza las cámaras con la escena actual, sin pasar por get_observations
-        (que alimenta al recorder). Lo usa la vista previa del panel."""
+    def render_cameras(self, camera_names) -> dict:
+        """Renderiza las cámaras con la escena actual, sin pasar por get_observations (que
+        alimenta al recorder). Solo toma self.lock para copiar el estado de PyBullet: si quien
+        llama no lo tiene tomado, la física sigue mientras se renderiza."""
         if getattr(self, "gaussians_backup", None) is None:
             return {}                    # sin cámaras en camera_names no se carga el splat
         c = self.pybullet_client
@@ -258,29 +285,75 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
                 data[f"{name}_position"], data[f"{name}_orientation"] = \
                     c.getBasePositionAndOrientation(body)
             cached = get_curr_link_states(self.dummy_robot, self.use_link_centers)
+            cameras = {name: self.cameras[name].get() for name in camera_names}
+        with self.render_lock:
             self.prep_image_rendering(data=data, cached_link_states=cached)
-            return {name: self.render_image(name) for name in camera_names}
+            return {name: render(cam, self.robot_gaussian, self.pipeline, self.background)["render"]
+                    for name, cam in cameras.items() if cam is not None}
+
+    render_preview = render_cameras      # la vista previa del panel
 
     def recent_images(self, max_age: float) -> dict:
-        """Imágenes de la última observación pedida por un cliente, si tiene menos de max_age s."""
+        """Imágenes de la última observación pedida por un cliente (o de la vista previa en
+        curso), si tienen menos de max_age s."""
         if time.monotonic() - self._last_images_time > max_age:
             return {}
         return dict(self._last_images)
 
-    def get_observations(self):
+    def _set_recent_images(self, images: dict) -> None:
+        self._last_images = images
+        self._last_images_time = time.monotonic()
+
+    def get_preview(self, names, since: int = -1):
+        """Vista previa para teleoperar: un hilo renderiza `names` sin parar mientras alguien la
+        pida (deja de hacerlo 2 s después de la última petición). Devuelve
+        {"id", "sim_time", "images": {nombre: uint8 HxWx3}}, o None si no hay un render más
+        nuevo que `since`."""
+        if self._preview is None:
+            self._preview = PreviewStream(self)
+        return self._preview.request(list(names), since)
+
+    def state_observation(self) -> dict:
+        """Observación sin imágenes (para grabar con sim_clock=realtime); incluye las posiciones
+        de todas las articulaciones de PyBullet para poder renderizarla después."""
         with self.lock:
+            obs = super().get_observations(render=False)
+            self._add_extras(obs)
+        return {k: v for k, v in obs.items() if not k.endswith("_rgb")}
+
+    def _add_extras(self, obs: dict) -> None:
+        c = self.pybullet_client
+        obs["joint_positions"] = self.get_joint_state()
+        obs["sim_time"] = self.sim_steps * SIM_DT
+        obs["control_mode"] = self.joint_ctrl.mode
+        obs["sim_clock"] = self.sim_clock
+        obs["sim_joint_positions"] = np.array(
+            [c.getJointState(self.dummy_robot, i)[0] for i in range(c.getNumJoints(self.dummy_robot))])
+
+    def get_observations(self):
+        with self.lock, self.render_lock:
             obs = super().get_observations()
-            obs["joint_positions"] = self.get_joint_state()
-            obs["sim_time"] = self.sim_steps * SIM_DT
-            obs["control_mode"] = self.joint_ctrl.mode
-            obs["sim_clock"] = self.sim_clock
-            self._last_images = {k: obs[k] for k in self.camera_names if obs.get(k) is not None}
-            self._last_images_time = time.monotonic()
+            self._add_extras(obs)
+            self._set_recent_images({k: obs[k] for k in self.camera_names if obs.get(k) is not None})
             self.recorder.on_observation(obs)
             obs["recording"] = self.recorder.active  # tras on_observation: refleja el auto-stop
             obs["reset_joint_command"] = self.reset_joint_command()
         self.apple_window.set(obs.get("apple_rgb"))
         return obs
+
+    def restore_state(self, obs: dict) -> None:
+        """Pone la escena en el estado de una observación grabada (sim_joint_positions y objetos);
+        lo usa scripts/render_recordings.py."""
+        c = self.pybullet_client
+        with self.lock:
+            for i, q in enumerate(obs["sim_joint_positions"]):
+                c.resetJointState(self.dummy_robot, i, q)
+                # getLinkState sin FK (p.ej. get_current_ee_pose) devolvería la pose anterior
+                c.getLinkState(self.dummy_robot, i, computeForwardKinematics=True)
+            for name, body in zip(self.splat_object_name_list, self.urdf_object_list):
+                if f"{name}_position" in obs:
+                    c.resetBasePositionAndOrientation(
+                        body, obs[f"{name}_position"], obs[f"{name}_orientation"])
 
     # ── control remoto (REMOTE_METHODS) ──────────────────────────────────────
     def reset_joint_command(self) -> np.ndarray:
@@ -321,11 +394,20 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
                 control.update()
             self.recorder.tick()
             self.trail.update(active=self.recorder.active)
-            # mientras se graba solo los comandos avanzan la física (dt fijo por frame,
-            # aunque el cliente se pause, p.ej. durante la inferencia de la política);
+            now = time.monotonic()
+            elapsed = min(now - self._rt_last, MAX_REALTIME_STEP)
+            self._rt_last = now
+            idle = self._idle()
+            if self.sim_clock == "realtime" and not idle and not self._holding:
+                # la física sigue al reloj; los comandos solo cambian el objetivo
+                self._rt_acc += elapsed / SIM_DT
+                n = int(self._rt_acc)
+                self._rt_acc -= n
+                self._advance(n)
+            # con fixed, mientras se graba solo los comandos avanzan la física (dt fijo por
+            # frame aunque el cliente se pause, p.ej. durante la inferencia de la política);
             # en reposo se sigue simulando para poder mover el robot desde la GUI
-            idle = time.monotonic() - self._last_command_time > IDLE_STEP_AFTER
-            if idle and not self.recorder.active:
+            elif idle and not (self.recorder.active and self.sim_clock == "fixed"):
                 if not self._holding:
                     self._hold()
                 self._step()
@@ -333,6 +415,14 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self.apple_window.show()
 
     def serve(self) -> None:
+        self.setup_scene()
+        self._zmq_server_thread.start()
+        print("Ready to serve.")
+        while True:
+            self.serve_loop()
+
+    def setup_scene(self) -> None:
+        """Pone el robot en la pose inicial y guarda los estados de referencia del render."""
         c = self.pybullet_client
         for i in range(len(self.initial_joint_state)):
             c.setJointMotorControl2(self.dummy_robot, i, c.VELOCITY_CONTROL, force=0)
@@ -355,8 +445,4 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
                 c.resetJointState(self.dummy_robot, j,
                                   self.initial_joint_state[j - 1] * self.joint_signs[j - 1])
             c.stepSimulation()
-
-        self._zmq_server_thread.start()
-        print("Ready to serve.")
-        while True:
-            self.serve_loop()
+        self.gripper.patch_for_splat()

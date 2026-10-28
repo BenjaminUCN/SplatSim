@@ -18,7 +18,6 @@ y trials.csv con un resumen (distancia final y mínima del efector al tomate).
 import csv
 import datetime
 import os
-import pickle
 import re
 from dataclasses import dataclass
 
@@ -28,6 +27,7 @@ import yaml
 from gello.zmq_core.robot_node import ZMQClientRobot
 
 from splatsim.utils.grasp_point import grasp_error, load_grasp_point
+from splatsim.utils.remote_call import call
 
 APPLE_NAME = "plastic_apple"
 APPLE_QUAT = (0.0, 0.0, 0.0, 1.0)
@@ -47,15 +47,6 @@ class Args:
     dataset_root: str | None = None
     # subcarpeta de output_dir; None -> nombre del modelo en el registro (o su carpeta)
     run_name: str | None = None
-
-
-def call(robot: ZMQClientRobot, method: str, **args):
-    """Llama un método del servidor que no está en ZMQClientRobot (REMOTE_METHODS)."""
-    robot._socket.send(pickle.dumps({"method": method, "args": args}))
-    result = pickle.loads(robot._socket.recv())
-    if isinstance(result, dict) and "error" in result:
-        raise RuntimeError(f"{method}: {result['error']}")
-    return result
 
 
 def run_name_for(checkpoint: str) -> str:

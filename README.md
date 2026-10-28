@@ -175,7 +175,7 @@ python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5
 - `--control_mode`: how joint targets (from the policy or GELLO) are followed: `position` (default), `interp` or `velocity`; see [Control modes](#control-modes).
 - `--move_apple`: only with `--gui pybullet`, adds the tomato sliders and buttons (the viser panel always has them).
 - `--hz`: the rate at which the client sends commands. **It must match `--hz` of the client** (`run_env_sim.py`, default 30). Each command advances the simulation by exactly `1/hz` seconds, so recorded frames are evenly spaced in simulated time.
-- `--sim_clock`: `fixed` (default) is the behavior above, right for the policy and trials. If the client loop can't keep up with `--hz` (rendering the cameras is slow), the simulation runs in slow motion, and with a very low `--hz` each command covers so much time that the arm snaps to the target. For **GELLO teleoperation** use `realtime`: each command advances the real time since the previous one (capped at 0.25 s), so the arm follows the leader at real speed whatever the loop rate; frames are then spaced by the actual loop period, and each one stores its `sim_time`. `run_env_sim.py` prints the actual loop rate next to `--hz`.
+- `--sim_clock`: `fixed` (default) is the behavior above, right for the policy and trials: the dataset step and the policy step are the same simulated time no matter how slow rendering is. If the client loop can't keep up with `--hz`, the simulation runs in slow motion. For **GELLO teleoperation** use `realtime` (see [Teleoperate and record with GELLO](#teleoperate-and-record-with-gello)): physics runs continuously at wall-clock speed and commands only change the target. `run_env_sim.py` prints the actual loop rate next to `--hz`.
 
 The server renders `base_rgb`, `base_left_rgb`, `base_right_rgb` and `wrist_rgb` from the gaussian splat; render only an arrangement with `--arrangement 2cam`, or any subset with `--cameras base_rgb wrist_rgb` (every rendered camera is recorded). Camera FoV, recording length and other constants live in `splatsim/robots/xarm/config.py`.
 
@@ -210,15 +210,34 @@ The policy and GELLO always send joint positions; `--control_mode` only changes 
 
 | Mode | Real xArm | Behavior |
 |---|---|---|
-| `position` | mode 1, `set_servo_angle_j` | Step toward the latest target, at most `max_delta` (0.05 rad) per tick. Reaches each target and waits for the next one (stop-and-go). |
+| `position` | mode 1, `set_servo_angle_j` | Step toward the latest target, at most `max_delta` per tick (0.05 rad on the real arm, `SIM_MAX_DELTA` = 0.15 rad in sim). Reaches each target and waits for the next one (stop-and-go). |
 | `interp` | mode 1, `set_servo_angle_j` | Minimum-jerk interpolation from the previous command to the new target over one command period. Continuous motion, one period of delay. |
 | `velocity` | mode 4, `vc_set_joint_velocity` | `v = feedforward + kp·error`, with velocity and acceleration limits. The feedforward is the velocity implied by consecutive targets, so the arm keeps moving between them. Each command carries a `duration` watchdog: if the control thread stalls, the arm stops. |
 
 Start the real robot with the same `--hz` the client uses (e.g. `--hz 10` for the policy), since `interp` and `velocity` use it as the expected time between targets. Gains (`kp`, `v_max`, `a_max`, ...) are in `ControllerGains`. Each observation includes `control_mode`. Try `velocity` on the real arm with low `v_max` first and the emergency stop at hand.
 
+### Teleoperate and record with GELLO
+
+Rendering one observation takes ~0.25 s (mostly deforming the robot splat to the current pose), so a loop that renders every step can't follow a hand in real time, and recording a frame per rendered step gives an irregular, mislabeled time step. With `--sim_clock realtime` teleoperation and rendering are decoupled:
+```bash
+python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --sim_clock realtime
+python scripts/run_env_sim.py --agent gello --gello_port /dev/ttyACM0 --start_joints -3.1415 0.4712 -1.8151 0.4188 1.5708 0
+```
+- The client sends commands at `--hz` (30) without asking for observations; the server's physics follows the clock and the arm follows the leader smoothly (in sim the joint step limit is `SIM_MAX_DELTA`, 0.15 rad per 30 Hz tick, looser than the real arm's 0.05).
+- `wrist_rgb` and `base_rgb` (only `base_rgb` with `--no_wrist_camera`) keep showing what the policy will see: a server thread renders them continuously, outside the physics lock, at whatever rate rendering allows (~3-4 Hz), and the client shows them in its windows. The status line shows the loop and camera rates.
+- Recording (`r`/`s` + Enter in the server, or the panel) saves **state only**, one frame per command (~30 Hz), with `sim_time` and every PyBullet joint position (`sim_joint_positions`), up to `TELEOP_MAX_RECORD_SECONDS` (120 s).
+
+Then render the images at a fixed rate:
+```bash
+python scripts/render_recordings.py ~/data/bc_data/<folder> --fps 10 [--arrangement 2cam | --cameras ...]   # → <folder>_10hz
+```
+Each episode is resampled by `sim_time` to exactly `1/fps` (joints interpolated to each instant, state recomputed from that pose, gripper command from the nearest frame) and rendered in the same format as below, so the reviewer and the converter work unchanged. Convert it with the same `--fps`, and run the policy with `--sim_clock fixed --hz <fps>`: the dataset step and the policy step are then the same simulated time. The same recordings can be rendered again with other cameras or rates. Review and label the rendered folder (stop labels are per frame); `selection.yaml` is copied over. The output folder gets a `render_info.yaml` (source folder, fps, cameras); when the reviewer opens it, *Show source recording* overlays the original teleoperation trail (orange, ~30 Hz samples) on the resampled frames (blue dots), and the *Resampling* folder shows the source and resampled rates and how far the resampled poses are from the original path, plus a figure of x/y/z and gripper over time.
+
+`render_recordings.py` replaces `--agent replay_trajectory_and_save` for these recordings. That agent replays the joints as commands through the server, so the rendered pose is wherever the controller got to in each step (and the step is the server's `--hz`), and it writes the images into the source episode. `render_recordings.py` restores the exact recorded pose (all joints, gripper included), resamples to an exact rate, writes to a separate folder and needs no running server.
+
 ### Record demonstrations
 
-With the server running and a client sending commands (e.g. `run_env_sim.py --agent gello` or a policy), type in the **server** terminal:
+With `--sim_clock fixed` (the default), a server running and a client sending commands (e.g. a policy), type in the **server** terminal:
 
 - `r` + Enter: start recording
 - `s` + Enter: stop recording (it also stops automatically after `MAX_RECORD_SECONDS` of simulated time, 2 s by default)

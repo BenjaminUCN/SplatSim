@@ -925,7 +925,8 @@ class PybulletRobotServerBase:
         pos, quat = self.pybullet_client.getBasePositionAndOrientation(body_id)
         return pos, quat
 
-    def get_observations(self) -> Dict[str, np.ndarray]:
+    def get_observations(self, render: bool = True) -> Dict[str, np.ndarray]:
+        """render=False: solo el estado, sin renderizar las cámaras."""
         joint_positions = self.get_joint_state()
         joint_positions_dummy = self.get_joint_state_dummy()
         joint_velocities = np.array(
@@ -978,7 +979,7 @@ class PybulletRobotServerBase:
             observations[self.splat_object_name_list[i] + "_position"] = object_pos
             observations[self.splat_object_name_list[i] + "_orientation"] = object_quat
 
-        if len(self.camera_names) > 0:
+        if render and len(self.camera_names) > 0:
             cached_link_states = get_curr_link_states(
                 self.dummy_robot, self.use_link_centers
             )
