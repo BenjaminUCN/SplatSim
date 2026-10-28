@@ -82,7 +82,15 @@ class LeRobotDiffusionAgent:
     def _load_diffusion_policy_model(self, checkpoint: str, dataset_id: str, dataset_root: str | None): 
         from lerobot.policies.diffusion.modeling_diffusion import DiffusionPolicy
        
-        print(f"[LeRobotDiffusionAgent] Loading: {checkpoint}")
+        if hub_repo_id(checkpoint):
+            # se baja aquí todo el repo (~1 GB la primera vez, después queda en el caché) para
+            # avisar que puede tardar; from_pretrained y los processors lo leen del caché
+            from huggingface_hub import snapshot_download, try_to_load_from_cache
+            if not isinstance(try_to_load_from_cache(checkpoint, "model.safetensors"), str):
+                print(f"[LeRobotDiffusionAgent] Downloading {checkpoint} from the Hub "
+                      "(~1 GB, only the first time)...", flush=True)
+            snapshot_download(checkpoint)
+        print(f"[LeRobotDiffusionAgent] Loading: {checkpoint}", flush=True)
         self.policy = DiffusionPolicy.from_pretrained(checkpoint)
         self.policy.to(self.device)
         self.policy.eval()

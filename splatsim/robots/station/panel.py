@@ -701,9 +701,9 @@ class StationPanel:
                "--run_name", label.removesuffix(LOCAL_SUFFIX),
                "--robot_port", str(self.s.zmq_port),
                "--trial_seconds", str(float(self._trial_seconds.value)), *extra]
-        self._trial_info = {"done": 0, "total": n, "last": "", "root": None}
+        self._trial_info = {"done": 0, "total": n, "last": "", "root": None, "loading": "loading the model..."}
         self._trial_progress.value, self._trial_progress.visible = 0.0, True
-        self._trial_status.content = f"0/{n} trials; loading the model..."
+        self._trial_status.content = f"0/{n} trials — loading the model..."
         self._start_client(cmd, label, trials=True)
 
     def _start_client(self, args, label, trials: bool):
@@ -724,14 +724,32 @@ class StationPanel:
         self._stop_deadline = None
         what = "trials of " if trials else ""
         self._policy_status.content = (f"**▶ Running** {what}{label} (pid {self._policy_proc.pid}); "
-                                       "loading takes ~10 s")
+                                       "loading takes ~10 s, plus ~2 min to download a Hub model "
+                                       "the first time")
 
     def _read_trials_output(self, proc):
         """Hilo: reenvía la salida de run_policy_trials.py y extrae el avance."""
         info = self._trial_info
-        for line in proc.stdout:
-            sys.stdout.write(line)
-            if m := re.search(r"\[Trials\] (\d+)/(\d+)", line):
+        in_bar = False
+        for line in proc.stdout:          # en modo texto, los \r de las barras de tqdm cortan líneas
+            progress = re.search(r"(\d+)%\|", line)
+            # las barras se reescriben en la misma línea de la terminal en vez de una por avance
+            sys.stdout.write("\r" + line.rstrip("\n") if progress else ("\n" if in_bar else "") + line)
+            in_bar = bool(progress)
+            if progress and info.get("downloading"):
+                info["loading"] = f"downloading the model from the Hub: {progress.group(1)}%"
+            elif "[LeRobotDiffusionAgent] Downloading" in line:
+                info["downloading"] = True
+                info["loading"] = "downloading the model from the Hub (~1 GB, only the first time)..."
+            elif "[LeRobotDiffusionAgent] Loading:" in line:
+                info["downloading"] = False
+                info["loading"] = "loading the weights..."
+            elif "[LeRobotDiffusionAgent] Loading dataset metadata" in line:
+                info["loading"] = "loading the dataset metadata..."
+            elif "[LeRobotDiffusionAgent] Making pre-post processors" in line:
+                info["loading"] = "preparing the normalization..."
+            elif m := re.search(r"\[Trials\] (\d+)/(\d+)", line):
+                info["loading"] = None
                 info["done"] = int(m.group(1)) - 1     # el ensayo m.group(1) recién empieza
                 info["last"] = line.split("— ", 1)[-1].strip()
             elif m := re.search(r"\[Trials\] (\d+) frames, error de agarre final ([\d.]+) m, mín ([\d.]+) m", line):
@@ -778,7 +796,8 @@ class StationPanel:
         info = self._trial_info
         done, total = info["done"], info["total"]
         self._trial_progress.value = 100.0 * done / max(total, 1)
-        lines = [f"{done}/{total} trials" + (f" — now {info['last']}" if info["last"] and done < total else "")]
+        lines = [f"{done}/{total} trials" + (f" — now {info['last']}" if info["last"] and done < total else
+                                              f" — {info['loading']}" if info.get("loading") else "")]
         if info.get("result"):
             lines.append(info["result"])
         if info["root"]:

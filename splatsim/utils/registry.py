@@ -81,7 +81,8 @@ def dataset_for_checkpoint(checkpoint: str, registry: dict | None = None) -> dic
 
 def dataset_source_for_checkpoint(checkpoint: str, registry: dict | None = None) -> str | None:
     """Carpeta del dataset del modelo si existe en esta máquina; si no, y el modelo es del Hub,
-    el repo del dataset con el mismo usuario. None si el modelo no está en el registro."""
+    el repo del dataset con el mismo usuario (los datasets dentro de la carpeta de su grabación,
+    clave <grabación>/<dataset>, se suben como <dataset>). None si el modelo no está en el registro."""
     registry = registry if registry is not None else load_registry()
     found = model_for_checkpoint(checkpoint, registry)
     dataset = dataset_for_checkpoint(checkpoint, registry)
@@ -90,7 +91,7 @@ def dataset_source_for_checkpoint(checkpoint: str, registry: dict | None = None)
     if os.path.isdir(dataset["path"]):
         return dataset["path"]
     repo = hub_repo_id(checkpoint)
-    return f"{repo.split('/')[0]}/{found[1]['dataset']}" if repo else None
+    return f"{repo.split('/')[0]}/{found[1]['dataset'].split('/')[-1]}" if repo else None
 
 
 # ── modelos cargados a mano en el panel (rutas de esta máquina) ──────────────
@@ -149,7 +150,8 @@ def describe_dataset(path: str) -> dict:
         try:
             info_path = hf.hf_hub_download(repo, "meta/info.json", repo_type="dataset")
         except hf.errors.HfHubHTTPError as e:
-            raise ValueError(f"cannot read Hub dataset `{repo}` (meta/info.json): {e}") from None
+            raise ValueError(f"cannot read Hub dataset `{repo}` (meta/info.json), it may not be on "
+                             f"the Hub: set Dataset ({type(e).__name__})") from None
         path = repo
     else:
         path = os.path.realpath(os.path.expanduser(path.strip()))
