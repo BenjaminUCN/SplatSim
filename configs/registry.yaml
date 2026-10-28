@@ -4,13 +4,13 @@
 #   name: nombre corto para elegir el modelo (vacío -> se usa suggested_name)
 #   description: qué se intentó mejorar (p.ej. "1 cámara, más pasos")
 generated: 2026-10-28 17:42
-roots: {recordings: /home/magister/data/bc_data, datasets: /home/magister/lerobot/splatsim_test_data, models: /home/magister/lerobot/examples/tutorial/diffusion/outputs}
+roots: {recordings: ~/data/bc_data, datasets: ~/lerobot/splatsim_test_data, models: ~/lerobot/examples/tutorial/diffusion/outputs}
 recordings:
   gello:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/data/bc_data/gello
+    path: ~/data/bc_data/gello
     episodes: 11
     frames: 280
     cameras: [base_rgb, wrist_rgb]
@@ -23,7 +23,7 @@ recordings:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/data/bc_data/gello base
+    path: ~/data/bc_data/gello base
     episodes: 1
     frames: 99
     cameras: [base_rgb]
@@ -36,7 +36,7 @@ recordings:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/data/bc_data/gello_3plants
+    path: ~/data/bc_data/gello_3plants
     episodes: 206
     frames: 15142
     cameras: [base_rgb, wrist_rgb]
@@ -49,7 +49,7 @@ recordings:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/data/bc_data/gello_model
+    path: ~/data/bc_data/gello_model
     episodes: 100
     frames: 3965
     cameras: [base_rgb, wrist_rgb]
@@ -62,7 +62,7 @@ recordings:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/data/bc_data/gello_v2_dual
+    path: ~/data/bc_data/gello_v2_dual
     episodes: 401
     frames: 27116
     cameras: [base_rgb, wrist_rgb]
@@ -79,7 +79,7 @@ recordings:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/data/bc_data/gello_v3_
+    path: ~/data/bc_data/gello_v3_
     episodes: 351
     frames: 20884
     cameras: [base_rgb, wrist_rgb]
@@ -97,7 +97,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0512_1621
+    path: ~/lerobot/splatsim_test_data/0512_1621
     created: 2026-05-12 16:21
     episodes: 1
     frames: 38
@@ -112,7 +112,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0513_1242
+    path: ~/lerobot/splatsim_test_data/0513_1242
     created: 2026-05-13 12:42
     episodes: 52
     frames: 3157
@@ -127,7 +127,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0513_1715
+    path: ~/lerobot/splatsim_test_data/0513_1715
     created: 2026-05-13 17:15
     episodes: 52
     frames: 3157
@@ -142,7 +142,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0513_2028
+    path: ~/lerobot/splatsim_test_data/0513_2028
     created: 2026-05-13 20:28
     episodes: 52
     frames: 3157
@@ -157,7 +157,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0528_1804
+    path: ~/lerobot/splatsim_test_data/0528_1804
     created: 2026-05-28 18:04
     episodes: 51
     frames: 1192
@@ -172,7 +172,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0529_1607
+    path: ~/lerobot/splatsim_test_data/0529_1607
     created: 2026-05-29 16:07
     episodes: 102
     frames: 2948
@@ -187,7 +187,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0601_1755
+    path: ~/lerobot/splatsim_test_data/0601_1755
     created: 2026-06-01 17:55
     episodes: 102
     frames: 2948
@@ -202,7 +202,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0602_1901
+    path: ~/lerobot/splatsim_test_data/0602_1901
     created: 2026-06-02 19:01
     episodes: 202
     frames: 6988
@@ -217,7 +217,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0603_1654
+    path: ~/lerobot/splatsim_test_data/0603_1654
     created: 2026-06-03 16:54
     episodes: 303
     frames: 21036
@@ -234,7 +234,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0604_1633
+    path: ~/lerobot/splatsim_test_data/0604_1633
     created: 2026-06-04 16:33
     episodes: 303
     frames: 21095
@@ -251,7 +251,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0605_1723
+    path: ~/lerobot/splatsim_test_data/0605_1723
     created: 2026-06-05 17:23
     episodes: 401
     frames: 27110
@@ -268,7 +268,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724
+    path: ~/lerobot/splatsim_test_data/0605_1723/splatsim_lerobot_splatsim_10fps_260605_1724
     created: 2026-06-05 17:24
     episodes: 401
     frames: 27110
@@ -285,7 +285,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/060_1723
+    path: ~/lerobot/splatsim_test_data/060_1723
     created: 2026-06-05 18:02
     episodes: 401
     frames: 27110
@@ -302,7 +302,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/060_1723/splatsim_lerobot_splatsim_10fps_260605_1724
+    path: ~/lerobot/splatsim_test_data/060_1723/splatsim_lerobot_splatsim_10fps_260605_1724
     created: 2026-06-05 17:24
     episodes: 401
     frames: 27110
@@ -319,7 +319,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_lerobot_splatsim_10fps_260609_0146
+    path: ~/lerobot/splatsim_test_data/splatsim_lerobot_splatsim_10fps_260609_0146
     created: 2026-06-09 01:46
     episodes: 401
     frames: 27109
@@ -336,7 +336,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_lerobot_splatsim_10fps_260609_0303
+    path: ~/lerobot/splatsim_test_data/splatsim_lerobot_splatsim_10fps_260609_0303
     created: 2026-06-09 03:03
     episodes: 401
     frames: 27109
@@ -353,7 +353,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260610_0210
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260610_0210
     created: 2026-06-10 02:10
     episodes: 401
     frames: 26802
@@ -370,7 +370,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_1930
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_1930
     created: 2026-06-12 19:30
     episodes: 10
     frames: 675
@@ -386,7 +386,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_1931
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_1931
     created: 2026-06-12 19:31
     episodes: 10
     frames: 675
@@ -402,7 +402,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_1952
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_1952
     created: 2026-06-12 19:52
     episodes: 1
     frames: 59
@@ -417,7 +417,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_2006
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_2006
     created: 2026-06-12 20:06
     episodes: 1
     frames: 59
@@ -432,7 +432,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_2011
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_2011
     created: 2026-06-12 20:11
     episodes: 1
     frames: 59
@@ -447,7 +447,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_2115
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260612_2115
     created: 2026-06-12 21:15
     episodes: 1
     frames: 59
@@ -462,7 +462,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260615_1901
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260615_1901
     created: 2026-06-15 19:01
     episodes: 1
     frames: 29
@@ -477,7 +477,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260616_0234
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260616_0234
     created: 2026-06-16 02:34
     episodes: 401
     frames: 26802
@@ -494,7 +494,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260616_1804
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260616_1804
     created: 2026-06-16 18:04
     episodes: 0
     frames: 0
@@ -509,7 +509,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260617_0248
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260617_0248
     created: 2026-06-17 02:48
     episodes: 201
     frames: 11214
@@ -525,7 +525,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260617_1732
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260617_1732
     created: 2026-06-17 17:32
     episodes: 301
     frames: 21831
@@ -541,7 +541,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260618_1445
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260618_1445
     created: 2026-06-18 14:45
     episodes: 302
     frames: 18314
@@ -558,7 +558,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260619_1723
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260619_1723
     created: 2026-06-19 17:23
     episodes: 351
     frames: 20649
@@ -575,7 +575,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260622_1924
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260622_1924
     created: 2026-06-22 19:24
     episodes: 362
     frames: 25103
@@ -592,7 +592,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260623_0204
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260623_0204
     created: 2026-06-23 02:04
     episodes: 362
     frames: 25103
@@ -609,7 +609,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260704_1203
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260704_1203
     created: 2026-07-04 12:03
     episodes: 400
     frames: 24315
@@ -626,7 +626,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260726_1024
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_260726_1024
     created: 2026-07-26 10:24
     episodes: 201
     frames: 22570
@@ -641,7 +641,7 @@ datasets:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010
     created: 2026-10-20 20:10
     episodes: 206
     frames: 15141
@@ -658,7 +658,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion
     started: null
     saved: 2026-05-14 02:10
     finished: true
@@ -680,7 +680,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0528_1804
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0528_1804
     started: 2026-05-28 18:04
     saved: 2026-05-31 02:18
     finished: true
@@ -702,7 +702,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0601_1755
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0601_1755
     started: 2026-06-01 17:55
     saved: 2026-06-01 20:29
     finished: true
@@ -724,7 +724,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0602_0230
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0602_0230
     started: 2026-06-02 02:30
     saved: 2026-06-02 05:44
     finished: true
@@ -746,7 +746,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0602_1917
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0602_1917
     started: 2026-06-02 19:17
     saved: 2026-06-02 23:43
     finished: true
@@ -768,7 +768,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0603_1702
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0603_1702
     started: 2026-06-03 17:02
     saved: 2026-06-04 02:53
     finished: true
@@ -790,7 +790,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0604_1706
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0604_1706
     started: 2026-06-04 17:06
     saved: 2026-06-05 02:37
     finished: true
@@ -812,7 +812,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0605_1802
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0605_1802
     started: 2026-06-05 18:02
     saved: 2026-06-06 05:37
     finished: true
@@ -834,7 +834,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0610_0210
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0610_0210
     started: 2026-06-10 02:10
     saved: 2026-06-10 22:16
     finished: true
@@ -856,7 +856,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0616_0234
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0616_0234
     started: 2026-06-16 02:34
     saved: 2026-06-16 05:34
     finished: true
@@ -878,7 +878,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0617_0248
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0617_0248
     started: 2026-06-17 02:48
     saved: 2026-06-17 07:22
     finished: true
@@ -900,7 +900,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0617_1732
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0617_1732
     started: 2026-06-17 17:32
     saved: 2026-06-18 01:13
     finished: true
@@ -922,7 +922,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0618_1445
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0618_1445
     started: 2026-06-18 14:45
     saved: 2026-06-18 19:23
     finished: true
@@ -944,7 +944,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0619_1723
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0619_1723
     started: 2026-06-19 17:23
     saved: 2026-06-19 22:03
     finished: true
@@ -966,7 +966,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0623_0204
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0623_0204
     started: 2026-06-23 02:04
     saved: 2026-06-24 08:49
     finished: true
@@ -988,7 +988,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0704_1501
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0704_1501
     started: 2026-07-04 15:01
     saved: 2026-07-05 02:16
     finished: true
@@ -1010,7 +1010,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0726_1024
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_0726_1024
     started: 2026-07-26 10:24
     saved: 2026-07-27 07:49
     finished: true
@@ -1032,7 +1032,7 @@ models:
     name: ''
     description: ''
     notes: ''
-    path: /home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_1021_1640
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_1021_1640
     started: 2026-10-21 16:40
     saved: 2026-10-22 00:52
     finished: true

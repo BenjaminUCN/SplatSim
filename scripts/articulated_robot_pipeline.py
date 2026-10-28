@@ -16,6 +16,7 @@ from gaussian_splatting.arguments import ModelParams, Namespace
 from gaussian_splatting.gaussian_renderer import GaussianModel
 
 from splatsim.utils.cameras import get_overall_pcd
+from splatsim.utils.paths import contract_tree, load_yaml
 
 class FlowStyleMatrixDumper(yaml.SafeDumper):
     def represent_sequence(self, tag, sequence, flow_style=None):
@@ -51,8 +52,7 @@ def create_window(app, title, geometry_list, x, y):
 def main(args):
 
     #load the transformation matrix (yaml file)
-    with open("./configs/object_configs/objects.yaml", "r") as file:
-        object_configs = yaml.safe_load(file)
+    object_configs = load_yaml("./configs/object_configs/objects.yaml")
 
     if not os.path.exists("data/labels_path"):
         os.makedirs("data/labels_path", exist_ok=True)
@@ -221,7 +221,7 @@ def main(args):
     #properly save the object_configs
     with open("./configs/object_configs/objects.yaml", "w") as file:
         yaml.dump(
-            object_configs,
+            contract_tree(object_configs),
             file,
             Dumper=FlowStyleMatrixDumper,
             sort_keys=False,

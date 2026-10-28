@@ -25,8 +25,8 @@ _N_OBS_STEPS = 2   # temporal window size
 _N_ACT_STEPS = 32  # action chunk size
 
 
-DEFAULT_CHECKPOINT = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_1021_1640"
-DEFAULT_DATASET_ROOT = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010"
+DEFAULT_CHECKPOINT = "~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_1021_1640"
+DEFAULT_DATASET_ROOT = "~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010"
 
 
 class LeRobotDiffusionAgent:
@@ -104,7 +104,7 @@ class LeRobotDiffusionAgent:
     def _load_ik_dummy_robot(self):
         p.connect(p.DIRECT)
         
-        urdf_path = "/home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf"
+        urdf_path = os.path.expanduser("~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf")
         if not os.path.exists(urdf_path):
             raise FileNotFoundError(f"URDF file not found: {urdf_path}")
         base_position = [0, 0, 0]
@@ -131,7 +131,7 @@ class LeRobotDiffusionAgent:
             transforms.ToTensor(),
         ])
         
-        checkpoint_path='/home/magister/fork-splatsim/image_classifier/best_model.pth'
+        checkpoint_path = os.path.join(os.path.dirname(__file__), '..', 'image_classifier', 'best_model.pth')
         
         self.classifier_model.load_state_dict(torch.load(checkpoint_path))
         self.classifier_model.eval()

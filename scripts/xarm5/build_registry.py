@@ -31,6 +31,8 @@ import numpy as np
 import pandas as pd
 import tyro
 import yaml
+
+from splatsim.utils.paths import contract_tree
 from safetensors.numpy import load_file
 
 MANUAL_FIELDS = ("name", "description", "notes")
@@ -393,7 +395,8 @@ def main(args: Args) -> None:
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     with open(args.out, "w") as f:
         f.write(_HEADER)
-        yaml.safe_dump(registry, f, sort_keys=False, default_flow_style=None, width=120, allow_unicode=True)
+        # rutas con ~: el registro sirve en cualquier máquina con la misma estructura bajo el home
+        yaml.safe_dump(contract_tree(registry), f, sort_keys=False, default_flow_style=None, width=120, allow_unicode=True)
 
     _print_summary(recordings, datasets, models)
     print(f"\nRegistro escrito en {args.out}")

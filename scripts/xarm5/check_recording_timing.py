@@ -9,14 +9,13 @@ import pickle
 import sys
 
 import numpy as np
-import yaml
+from splatsim.utils.paths import load_yaml
 
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         traj_folder = sys.argv[1]
     else:
-        with open("configs/folder_configs.yaml") as f:
-            traj_folder = yaml.safe_load(f)["traj_folder"]
+        traj_folder = load_yaml("configs/folder_configs.yaml")["traj_folder"]
 
     for episode in sorted(glob.glob(os.path.join(traj_folder, "[0-9][0-9][0-9]"))):
         pkls = sorted(glob.glob(os.path.join(episode, "*.pkl")))

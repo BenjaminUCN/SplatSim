@@ -1,8 +1,9 @@
+import os
 import pickle
 import numpy as np
 
 if __name__ == "__main__":
-    path = "/home/magister/data/bc_data/gello/000/00001.pkl"
+    path = os.path.expanduser("~/data/bc_data/gello/000/00001.pkl")
     with open(path, "rb") as f:
         data = pickle.load(f)
     

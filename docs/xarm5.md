@@ -21,13 +21,17 @@ The scripts added by this fork are in `scripts/xarm5/` (recording review and ren
 
 ## Paths to configure
 
-Several paths are still hardcoded to the original author's machine (`/home/magister/...`). Update them to your own:
+Paths to data outside the repo are written relative to the home folder (`~/...`), so the same configs work for any user as long as the data has the same layout under the home folder:
 
-| File | What to change |
+| Path | What it holds |
 |---|---|
-| `configs/object_configs/objects.yaml` | For the `xarm5_lite_plant_v*` entries: `urdf_path` (xArm5 URDF), `source_path` (colmap folder) and `model_path` (gaussian splat output) |
-| `configs/folder_configs.yaml` | `traj_folder`: where recorded trajectories are saved |
-| `splatsim/agents/lerobot_diffusion_agent.py` | `checkpoint` (trained policy), `dataset_id` / `dataset_root` (LeRobot dataset used for normalization stats) and `urdf_path` (xArm5 URDF used for IK) |
+| `~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/` | xArm5 URDF (`urdf_path` in `configs/object_configs/objects.yaml`, IK in the agents) |
+| `~/data/Colmaps/<scene>/` | colmap folder and gaussian splat output of each scene (`source_path`, `model_path`) |
+| `~/data/bc_data/` | recordings (`traj_folder` in `configs/folder_configs.yaml`) |
+| `~/lerobot/splatsim_test_data/` | LeRobot datasets |
+| `~/lerobot/examples/tutorial/diffusion/outputs/` | trained models |
+
+Configs are read with `splatsim.utils.paths.load_yaml`, which expands `~` in every path; scripts that write paths (`build_registry.py`, `estimate_grasp_point.py`, `articulated_robot_pipeline.py`) write them back with `~`. Write new paths in configs as `~/...`, not `/home/<user>/...`.
 
 Each scene also needs `data/labels_path/<robot_name>_labels.npy` and `data/pcds_path/<robot_name>_pcd.ply`, which are included for `xarm5_lite_plant_v0`–`v3`.
 

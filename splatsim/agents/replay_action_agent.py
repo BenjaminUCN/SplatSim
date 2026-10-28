@@ -60,7 +60,7 @@ class ReplayActionAgent(Agent):
         
         p.connect(p.GUI)
         
-        urdf_path = "/home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf"
+        urdf_path = os.path.expanduser("~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf")
         if not os.path.exists(urdf_path):
             raise FileNotFoundError(f"URDF file not found: {urdf_path}")
         base_position = [0, 0, 0]

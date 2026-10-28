@@ -4,9 +4,9 @@ from pathlib import Path
 
 import tyro
 import types
-import yaml
 
 from splatsim.robots.robot import BimanualRobot, PrintRobot
+from splatsim.utils.paths import load_yaml
 from gello.zmq_core.robot_node import ZMQServerRobot
 
 
@@ -39,8 +39,7 @@ class Args:
 
 
 def launch_robot_server(args: Args):
-    with open("configs/object_configs/objects.yaml", "r") as f:
-        object_config = yaml.safe_load(f)
+    object_config = load_yaml("configs/object_configs/objects.yaml")
 
     has_wrist_camera = object_config[args.robot_name].get("wrist_camera_link_name", None) is not None
     if has_wrist_camera:

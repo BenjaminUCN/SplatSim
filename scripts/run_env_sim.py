@@ -19,9 +19,9 @@ from gello.env import RobotEnv
 from splatsim.robots.robot import PrintRobot
 from gello.zmq_core.robot_node import ZMQClientRobot
 from gello.zmq_core.camera_node import ZMQClientCamera
+from splatsim.utils.paths import load_yaml
 from splatsim.utils.remote_call import call
 
-import yaml
 
 
 
@@ -271,24 +271,21 @@ def main(args):
             query_new_joints_per_startup_step = False
         elif args.agent == "replay_action":
             from splatsim.agents.replay_action_agent import ReplayActionAgent
-            with open("configs/folder_configs.yaml", "r") as file:
-                folder_config = yaml.safe_load(file)
+            folder_config = load_yaml("configs/folder_configs.yaml")
             traj_folder = folder_config["traj_folder"]
             agent = ReplayActionAgent(traj_folder=traj_folder, env=env, save_images=False)
             startup_steps = 2
             query_new_joints_per_startup_step = False
         elif args.agent == "replay_trajectory":
             from splatsim.agents.replay_trajectory_agent import ReplayTrajectoryAgent
-            with open("configs/folder_configs.yaml", "r") as file:
-                folder_config = yaml.safe_load(file)
+            folder_config = load_yaml("configs/folder_configs.yaml")
             traj_folder = folder_config["traj_folder"]
             agent = ReplayTrajectoryAgent(traj_folder=traj_folder, env=env, save_images=False)
             startup_steps = 2
             query_new_joints_per_startup_step = False
         elif args.agent == "replay_trajectory_and_save":
             from splatsim.agents.replay_trajectory_agent import ReplayTrajectoryAgent
-            with open("configs/folder_configs.yaml", "r") as file:
-                folder_config = yaml.safe_load(file)
+            folder_config = load_yaml("configs/folder_configs.yaml")
             traj_folder = folder_config["traj_folder"]
             agent = ReplayTrajectoryAgent(traj_folder=traj_folder, env=env, save_images=True)
             startup_steps = 2

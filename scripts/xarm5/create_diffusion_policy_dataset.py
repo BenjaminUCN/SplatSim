@@ -2,7 +2,7 @@ import zarr
 import numpy as np
 import argparse
 import os
-import yaml
+from splatsim.utils.paths import load_yaml
 from PIL import Image, ImageOps
 import pickle
 from tqdm import tqdm
@@ -14,8 +14,7 @@ def main(args):
     # and contains the current joint position within traj_folder/0/00001.pkl, traj_folder/0/00002.pkl, etc
     # The number of episodes is the number of folders within traj_folder
     if args.traj_folder is None:
-        with open("configs/folder_configs.yaml", 'r') as f:
-            folder_configs = yaml.safe_load(f)
+        folder_configs = load_yaml("configs/folder_configs.yaml")
         traj_folder = folder_configs['traj_folder']
     else:
         traj_folder = args.traj_folder

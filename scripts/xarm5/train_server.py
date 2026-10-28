@@ -169,7 +169,7 @@ class Worker:
         log.close()
         self.procs[job["id"]] = proc
         job.update(status="running", pid=proc.pid, model_name=cfg["model_name"],
-                   model_dir=str(Path(cfg["output_root"]) / cfg["model_name"]),
+                   model_dir=str(Path(cfg["output_root"]).expanduser() / cfg["model_name"]),
                    config=str(cfg_path), log=str(log_path),
                    training_steps=int(cfg.get("training_steps", 0)),
                    started=datetime.now().strftime("%Y-%m-%d %H:%M"), started_ts=time.time())

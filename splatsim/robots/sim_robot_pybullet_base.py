@@ -9,7 +9,6 @@ import math
 import os
 import pickle
 import shutil
-import yaml
 from argparse import ArgumentParser
 
 from dataclasses import dataclass, field
@@ -48,6 +47,7 @@ from gaussian_splatting.arguments import ModelParams, PipelineParams, Namespace
 from gaussian_splatting.scene import Scene
 
 from splatsim.utils.transform_utils import rotation_matrix_to_euler_angles
+from splatsim.utils.paths import load_yaml
 
 
 class GripperState(str, enum.Enum):
@@ -192,8 +192,7 @@ class PybulletRobotServerBase:
             "./submodules/pybullet-playground-wrapper/pybullet_playground/urdf/pybullet_ur5_gripper/urdf"
         )
 
-        with open(self.object_config_path, "r") as file:
-            self.object_config = yaml.safe_load(file)
+        self.object_config = load_yaml(self.object_config_path)
 
         urdf_path = self.object_config[self.robot_name]["urdf_path"][0]
         if not os.path.exists(urdf_path):
@@ -387,8 +386,7 @@ class PybulletRobotServerBase:
         self.current_gripper_action = 0
 
         # trajectory path
-        with open("configs/folder_configs.yaml", "r") as f:
-            folder_config = yaml.safe_load(f)
+        folder_config = load_yaml("configs/folder_configs.yaml")
         self.path = folder_config["traj_folder"]
         # get no of folders in the path
         self.trajectory_count = len(os.listdir(self.path))

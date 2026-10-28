@@ -125,5 +125,5 @@ def visualize_trajectories(traj_folder):
     plt.show()
     
 if __name__ == "__main__":
-    traj_folder = "/home/magister/data/bc_data/gello"
+    traj_folder = os.path.expanduser("~/data/bc_data/gello")
     visualize_trajectories(traj_folder)

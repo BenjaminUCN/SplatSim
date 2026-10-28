@@ -1,14 +1,14 @@
 xarm5_lite:
   urdf_path:
-  - /home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_mod.urdf
+  - ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_mod.urdf
   base_position:
   - [0, 0, 0]
   wrist_camera_link_name: wrist_camera_link
   joint_states:
   - [0, -3.1381019950858047, 0.4660029102824859, -1.8238690683340744, 0.41015237421866746,
     1.5707963267948966, 0]
-  source_path: /home/magister/data/Colmaps/260409_1748
-  model_path: /home/magister/SplatSim/output/fc383e6c-f
+  source_path: ~/data/Colmaps/260409_1748
+  model_path: ~/SplatSim/output/fc383e6c-f
   transformation:
     matrix:
     - [-0.33638, -0.03429, -0.032829, -0.132198]
@@ -26,15 +26,15 @@ xarm5_lite:
   use_gripper: true
 xarm5_lite_plant_v0:
   urdf_path:
-  - /home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf
+  - ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf
   base_position:
   - [0, 0, 0]
   wrist_camera_link_name: wrist_camera_link
   joint_states:
   - [0, -3.1381019950858047, 0.4660029102824859, -1.8238690683340744, 0.2788963267948966,
     1.5707963267948966, 0]
-  source_path: /home/magister/data/Colmaps/260419_1317
-  model_path: /home/magister/data/Colmaps/260419_1317/output
+  source_path: ~/data/Colmaps/260419_1317
+  model_path: ~/data/Colmaps/260419_1317/output
   transformation:
     matrix:
     - [0.383197, 0.048053, 0.079181, 0.192037]
@@ -52,14 +52,14 @@ xarm5_lite_plant_v0:
   use_gripper: true
 xarm5_lite_plant_v1:
   urdf_path:
-  - /home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf
+  - ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf
   base_position:
   - [0, 0, 0]
   wrist_camera_link_name: wrist_camera_link
   joint_states:
   - [0.0, -3.1415, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
-  source_path: /home/magister/data/Colmaps/260507_1800
-  model_path: /home/magister/data/Colmaps/260507_1800/output
+  source_path: ~/data/Colmaps/260507_1800
+  model_path: ~/data/Colmaps/260507_1800/output
   transformation:
     matrix:
     - [0.20275, -0.031258, 0.148612, -0.118648]
@@ -77,14 +77,14 @@ xarm5_lite_plant_v1:
   use_gripper: true
 xarm5_lite_plant_v2:
   urdf_path:
-  - /home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf
+  - ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf
   base_position:
   - [0, 0, 0]
   wrist_camera_link_name: wrist_camera_link
   joint_states:
   - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
-  source_path: /home/magister/data/Colmaps/260706_1832
-  model_path: /home/magister/data/Colmaps/260706_1832/output
+  source_path: ~/data/Colmaps/260706_1832
+  model_path: ~/data/Colmaps/260706_1832/output
   transformation:
     matrix:
     - [-0.036036, 0.093872, -0.241834, 0.325098]
@@ -102,14 +102,14 @@ xarm5_lite_plant_v2:
   use_gripper: true
 xarm5_lite_plant_v3:
   urdf_path:
-  - /home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf
+  - ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf
   base_position:
   - [0, 0, 0]
   wrist_camera_link_name: wrist_camera_link
   joint_states:
   - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
-  source_path: /home/magister/data/Colmaps/260729_2003
-  model_path: /home/magister/data/Colmaps/260729_2003/output
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output
   transformation:
     matrix:
     - [0.05331, -0.06126, -0.281102, -0.1197]
@@ -174,8 +174,8 @@ robot_iphone_w_engine_new:
   - [0, 0.0, -1.5707963267948966, 1.5707963267948966, -1.5707963267948966, -1.5707963267948966,
     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
     0.0]
-  source_path: /home/magister/data/sfm_disk_disk+lightglue/undistorted
-  model_path: /home/magister/data/small_engine_on_table_new_all_views_images_500_40match_800height_stdangle
+  source_path: ~/data/sfm_disk_disk+lightglue/undistorted
+  model_path: ~/data/small_engine_on_table_new_all_views_images_500_40match_800height_stdangle
   use_gripper: true
   is_articulated: true
   use_fixed_base: true
@@ -220,7 +220,7 @@ plastic_apple:
     bounding_box:
     - [-0.040464000284671786, -0.04481899875402451, -0.003991999986581507]
     - [0.042181999862194064, 0.03782700139284134, 0.07506100225448609]
-  ply_path: /home/magister/SplatSim/output/plastic_apple/point_cloud/iteration_7000/point_cloud.ply
+  ply_path: ~/data/output/plastic_apple/point_cloud/iteration_7000/point_cloud.ply
 plastic_banana:
   transformation:
     matrix:

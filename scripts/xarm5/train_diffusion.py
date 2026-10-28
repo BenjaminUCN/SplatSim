@@ -9,7 +9,7 @@ La configuración final se guarda en <output_root>/<model_name>/train_config.yam
 
 import argparse
 import sys
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -30,6 +30,7 @@ from lerobot.transforms import (
 from lerobot.utils.feature_utils import dataset_to_policy_features
 
 from splatsim.utils.camera_setup import arrangement_cameras
+from splatsim.utils.paths import expand
 
 DEFAULT_CONFIG = "configs/train/diffusion.yaml"
 
@@ -40,11 +41,11 @@ class TrainConfig:
     model_name: str | None = None      # None -> diffusion_<MMDD_HHMM> (carpeta de salida)
     name: str = ""                     # nombre corto para configs/registry.yaml
     description: str = ""              # qué intenta mejorar este modelo
-    output_root: str = "/home/magister/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial"
+    output_root: str = "~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial"
     device: str = "cuda"
     # dataset
     dataset_id: str = "LuEduSoHu/splatsim_xarm5_lite_10fps_261020_2010"
-    dataset_root: str = "/home/magister/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010"
+    dataset_root: str = "~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010"
     cameras: tuple[str, ...] | None = None  # subconjunto de cámaras del dataset; None -> todas
     arrangement: str | None = None      # arreglo de configs/camera_poses.yaml (en vez de cameras)
     # policy
@@ -79,7 +80,8 @@ def load_config(argv: list[str]) -> TrainConfig:
         values["cameras"] = tuple(values["cameras"])
 
     print(f"Config: {known.config}")
-    return tyro.cli(TrainConfig, default=TrainConfig(**values), args=rest)
+    cfg = tyro.cli(TrainConfig, default=TrainConfig(**values), args=rest)
+    return replace(cfg, output_root=expand(cfg.output_root), dataset_root=expand(cfg.dataset_root))
 
 
 def make_image_transforms() -> ImageTransforms:

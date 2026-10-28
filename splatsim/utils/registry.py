@@ -4,13 +4,14 @@ import os
 
 import yaml
 
+from splatsim.utils.paths import load_yaml
+
 REGISTRY_PATH = "configs/registry.yaml"
 
 
 def load_registry(path: str = REGISTRY_PATH) -> dict:
     try:
-        with open(path) as f:
-            return yaml.safe_load(f) or {}
+        return load_yaml(path)
     except FileNotFoundError:
         return {}
 

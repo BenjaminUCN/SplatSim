@@ -19,6 +19,7 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.utils.episode_selection import load_discarded  # noqa: E402
 from splatsim.utils.grasp_point import GRASP_POINT_PATH, tomato_in_ee  # noqa: E402
+from splatsim.utils.paths import contract  # noqa: E402
 
 APPLE_KEY = "plastic_apple_position"
 
@@ -52,7 +53,7 @@ def main(args: Args):
                 continue
             rels.append(tomato_in_ee(obs["state"], obs[APPLE_KEY]))
             n += 1
-        sources.append({"folder": str(folder), "episodes": n})
+        sources.append({"folder": contract(str(folder)), "episodes": n})
         print(f"{folder}: {n} episodios")
     if not rels:
         raise SystemExit("Ningún episodio con posición del tomate")
