@@ -27,10 +27,12 @@ import hashlib
 import os
 import pickle
 import re
+import subprocess
 import sys
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -40,7 +42,9 @@ import yaml
 from matplotlib import colormaps
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(REPO_ROOT))
+from splatsim.utils.camera_setup import load_camera_setup  # noqa: E402
 from splatsim.utils.episode_selection import load_discarded, save_discarded  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
 from splatsim.utils.grasp_point import GRASP_POINT_PATH, grasp_error, load_grasp_point  # noqa: E402
@@ -60,6 +64,7 @@ _IMG = re.compile(r"^(.+_rgb)_(\d+)\.png$")
 # colores de la trayectoria por etiqueta de parada (paleta de referencia)
 LABEL_COLORS = {1: (0, 131, 0), 0: (42, 120, 214), -1: (175, 175, 170)}
 RENDER_INFO_FILE = "render_info.yaml"   # lo escribe scripts/xarm5/render_recordings.py
+DEFAULT_DATASETS_DIR = "~/lerobot/splatsim_test_data"   # donde build_registry.py busca datasets
 # comparación original / remuestreada (paleta de referencia: serie 1 azul, serie 2 naranja)
 RESAMPLED_HEX, SOURCE_HEX = "#2a78d6", "#eb6834"
 RESAMPLED_RGB, SOURCE_RGB = (42, 120, 214), (235, 104, 52)
@@ -239,6 +244,7 @@ class Reviewer:
             self.folder_select = gui.add_dropdown("Folder", ["-"])
             self.load_progress = gui.add_progress_bar(0.0)
             self.load_status = gui.add_markdown("")
+        self._build_dataset_gui()
         with gui.add_folder("Episode"):
             self.filter_select = gui.add_dropdown("Show", ["all", "kept", "discarded", "stop: unlabeled"],
                                                   initial_value="all")
@@ -299,6 +305,142 @@ class Reviewer:
         set1.on_click(lambda e: self._stop_action(e.target.value))
         set2.on_click(lambda e: self._stop_action(e.target.value))
 
+    # ── dataset LeRobot: renderizar (solo estado) y convertir ────────────────
+    def _build_dataset_gui(self):
+        gui = self.v.gui
+        self._job = None              # proceso en curso (render o conversión)
+        arrangements = list(load_camera_setup().get("arrangements") or {})
+        with gui.add_folder("LeRobot dataset", expand_by_default=False):
+            self.ds_info = gui.add_markdown("")
+            self.render_folder = gui.add_folder("Render (state-only recordings)")
+            with self.render_folder:
+                self.render_fps = gui.add_number("Render fps", 10, min=1, max=60, step=1)
+                self.render_cams = gui.add_dropdown("Render cameras", ["all", *arrangements],
+                                                    initial_value="all")
+                render = gui.add_button("Render", color="blue")
+            self.convert_folder = gui.add_folder("Convert")
+            with self.convert_folder:
+                self.conv_out = gui.add_text("Output folder", DEFAULT_DATASETS_DIR)
+                self.conv_fps = gui.add_number("fps", 10, min=1, max=60, step=1,
+                                               hint="Must be the recordings' rate (and the policy's --hz)")
+                self.conv_cams = gui.add_text("Cameras", "", hint="Space-separated; empty = all")
+                self.conv_suffix = gui.add_text("Name suffix", "", hint="Dataset name ends in it; empty = date")
+                self.conv_discarded = gui.add_checkbox("Include discarded", False)
+                self.conv_push = gui.add_checkbox("Push to Hub", False, hint="Push the dataset to the Hugging Face Hub")
+                self.conv_registry = gui.add_checkbox("Update registry", True,
+                                                      hint="Run build_registry.py afterwards (Reload Registry in the robot panel)")
+                convert = gui.add_button("Convert", color="green")
+            self.job_progress = gui.add_progress_bar(0.0, visible=False)
+            self.job_status = gui.add_markdown("")
+        render.on_click(lambda _: self._start_render())
+        convert.on_click(lambda _: self._start_convert())
+
+    def _folder_kind(self) -> tuple[str, list[str]]:
+        """("images" | "state" | "empty", cámaras) según el primer episodio no descartado."""
+        f = self.folder
+        names = [n for n in f.names if n not in f.discarded] or f.names
+        if not names:
+            return "empty", []
+        cams = list(f.images(names[0]))
+        return ("images" if cams else "state"), cams
+
+    def _show_dataset(self, reset_fields: bool = True):
+        """reset_fields: proponer fps y cámaras de la carpeta (al abrirla, no al descartar)."""
+        f = self.folder
+        kind, cams = self._folder_kind()
+        kept = len(f.names) - len(f.discarded)
+        if kind == "state":
+            self.ds_info.content = (f"{kept} kept episodes, **state only** (`sim_clock=realtime`): "
+                                    "render them at a fixed rate first")
+        elif kind == "images":
+            fps = (f.render_info or {}).get("fps")
+            self.ds_info.content = (f"{kept} kept episodes, cameras {', '.join(cams)}"
+                                    + (f"; rendered at {fps} fps" if fps else ""))
+            if reset_fields:
+                if fps:
+                    self.conv_fps.value = fps
+                self.conv_cams.value = " ".join(cams)
+        else:
+            self.ds_info.content = "No episodes"
+        self.render_folder.visible = kind == "state"
+        self.convert_folder.visible = kind == "images"
+
+    def _start_render(self):
+        if self._job is not None:
+            return
+        fps = int(self.render_fps.value)
+        cmd = ["scripts/xarm5/render_recordings.py", str(self.folder.path), "--fps", str(fps)]
+        if self.render_cams.value != "all":
+            cmd += ["--arrangement", self.render_cams.value]
+        out = f"{self.folder.path.name}_{fps}hz"
+        self._run_job("Rendering", [cmd], on_done=lambda: self._open_new_folder(out))
+
+    def _start_convert(self):
+        if self._job is not None:
+            return
+        suffix = self.conv_suffix.value.strip() or datetime.now().strftime("%y%m%d_%H%M")
+        if not re.fullmatch(r"[\w.-]+", suffix):
+            self.job_status.content = "**Name suffix**: letters, digits, `_`, `-` or `.`"
+            return
+        cmd = ["splatsim/utils/lerobot_conversion.py", "--input_dir", str(self.folder.path),
+               "--output_dir", os.path.expanduser(self.conv_out.value.strip() or DEFAULT_DATASETS_DIR),
+               "--fps", str(int(self.conv_fps.value)), "--repo_suffix", suffix]
+        if self.conv_cams.value.split():
+            cmd += ["--cameras", *self.conv_cams.value.split()]
+        if self.conv_discarded.value:
+            cmd.append("--ignore_selection")
+        if not self.conv_push.value:
+            cmd.append("--no_push")
+        steps = [cmd]
+        if self.conv_registry.value:
+            steps.append(["scripts/xarm5/build_registry.py"])
+        self._run_job("Converting", steps)
+
+    def _run_job(self, what: str, steps: list[list[str]], on_done=None):
+        """Corre los pasos en orden en otro proceso, con el avance (x/y) en la barra."""
+        self._job = True
+        self.job_progress.value, self.job_progress.visible = 0.0, True
+        self.job_status.content = f"{what} `{self.folder.path.name}`..."
+
+        def run():
+            last = ""
+            for i, args in enumerate(steps):
+                name = Path(args[0]).name
+                proc = subprocess.Popen([sys.executable, "-u", *args], cwd=REPO_ROOT, stdin=subprocess.DEVNULL,
+                                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+                buf = b""
+                while chunk := proc.stdout.read1(4096):
+                    sys.stdout.write(chunk.decode(errors="replace"))
+                    buf = (buf + chunk)[-4096:]
+                    lines = [ln for ln in re.split(rb"[\r\n]", buf) if ln.strip()]
+                    if not lines:
+                        continue
+                    last = lines[-1].decode(errors="replace").strip()
+                    # tqdm del convertidor ("3/20") o "[3/20]" de render_recordings.py
+                    if m := re.search(r"(\d+)/(\d+)", last):
+                        done, total = int(m.group(1)), int(m.group(2))
+                        self.job_progress.value = 100.0 * (i + done / max(total, 1)) / len(steps)
+                    self.job_status.content = f"{what}: `{name}` — {last[-120:]}"
+                if proc.wait() != 0:
+                    self.job_status.content = (f"**{name} failed** (code {proc.returncode}): "
+                                               f"{last[-200:]} — see the terminal")
+                    break
+            else:
+                self.job_progress.value = 100.0
+                self.job_status.content = f"**Done**: {last[-200:]}"
+                if on_done:
+                    on_done()
+            self._job = None
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _open_new_folder(self, name: str):
+        folders = self._folders()
+        self.folder_select.options = folders or ["-"]
+        if name in folders:
+            self.open_folder(name)
+            self.job_status.content = f"**Rendered** into `{name}`, now open: review it and Convert"
+
     # ── carpeta ──────────────────────────────────────────────────────────────
     def open_folder(self, name: str):
         self.folder = RecordingFolder(self.root / name)
@@ -309,6 +451,7 @@ class Reviewer:
             self.open_episode(visible[0])
         self._loader_gen += 1
         threading.Thread(target=self._load_all, args=(self.folder, self._loader_gen), daemon=True).start()
+        self._show_dataset()
 
     def _load_all(self, folder: RecordingFolder, gen: int):
         """Hilo: carga (y guarda en caché) todas las trayectorias de la carpeta."""
@@ -384,6 +527,7 @@ class Reviewer:
 
     def _toggle_discard(self):
         self.folder.set_discarded(self.episode, self.discard_box.value)
+        self._show_dataset(reset_fields=False)
         self._refresh_episode_list()
         self._show_info()
         self._draw_background()

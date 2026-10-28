@@ -50,6 +50,7 @@ from __future__ import annotations
 import argparse
 import pickle
 import re
+import sys
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -516,6 +517,9 @@ def push_lerobot_to_hub(dataset: "LeRobotDataset") -> None:
             print(f"[LeRobot] ERROR: Failed to push to hub: {e}")
             print("[LeRobot] Repo ID should be in 'username/dataset_name' format.")
             print("[LeRobot] Make sure you are authenticated with `huggingface-cli login`.")
+            if not sys.stdin.isatty():       # lanzado desde un panel: no hay a quién preguntar
+                print("[LeRobot] Skipping push to hub. Dataset is saved locally.")
+                return
             new_repo_id = input("[LeRobot] Enter a new repo_id to retry (or press Enter to skip): ").strip()
             if not new_repo_id:
                 print("[LeRobot] Skipping push to hub. Dataset is saved locally.")
