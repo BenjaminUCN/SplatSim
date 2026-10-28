@@ -13,9 +13,11 @@ Las subclases agregan lo suyo con _build_robot_extra, _build_tabs y _update_stat
 (SimPanel en splatsim/robots/xarm/panel.py: escena, tomate, cámaras base, sim clock).
 """
 import atexit
+import glob
 import os
 import queue
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -26,6 +28,7 @@ from pathlib import Path
 
 import numpy as np
 import viser
+import yaml
 
 from splatsim.robots.joint_controller import MODES
 from splatsim.utils.apple_grid import load_grid
@@ -53,6 +56,10 @@ PREVIEW_PANEL_WIDTH = 360
 MAIN_PANEL_WIDTH = 380
 STOP_TIMEOUT = 5.0     # s que se espera a que la política termine tras Ctrl+C antes de matarla
 TOOLS_PERIOD = 1.0     # s entre revisiones del estado de las herramientas
+GELLO_CONFIG_PATH = "configs/gello.yaml"
+# WSL: dispositivos USB que hay que pasar de Windows a WSL con usbipd (como el .bat de Windows)
+USB_DEVICES = (("GELLO", "CH343"), ("RealSense cameras", "RealSense"))
+IS_WSL = "microsoft" in open("/proc/version").read().lower() if os.path.exists("/proc/version") else False
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TOOLS_LOG_DIR = Path("~/.cache/splatsim/tools").expanduser()
 # herramientas con su propio panel viser que se pueden lanzar desde la pestaña Tools
@@ -106,10 +113,13 @@ class StationPanel:
         with tabs.add_tab("Run", viser.Icon.PLAYER_PLAY):
             self._build_robot_gui()
             self._build_policy_gui()
+            self._build_gello_gui()
             self._build_recording_gui()
         self._build_tabs(tabs)
         with tabs.add_tab("Tools", viser.Icon.TOOL):
             self._build_tools_gui()
+            if IS_WSL and shutil.which("usbipd.exe"):
+                self._build_usb_gui()
         set_page_title(self.v, label)
         self.v.gui.main_panel.dock_right()
         self.v.gui.main_panel.set_width(MAIN_PANEL_WIDTH)
@@ -118,6 +128,134 @@ class StationPanel:
 
     def _build_tabs(self, tabs):
         """Pestañas propias de cada backend, después de Run."""
+
+    # ── GELLO ────────────────────────────────────────────────────────────────
+    def _build_gello_gui(self):
+        """Lanza run_env_sim.py --agent gello como cliente (comparte el lugar con la política)."""
+        try:
+            with open(GELLO_CONFIG_PATH) as f:
+                self._gello_cfg = yaml.safe_load(f) or {}
+        except FileNotFoundError:
+            self._gello_cfg = {}
+        joints = self._gello_cfg.get("start_joints") or []
+        with self.v.gui.add_folder("GELLO"):
+            self._gello_port = self.v.gui.add_dropdown("Port", ["-"])
+            self._gello_joints = self.v.gui.add_text(
+                "Start joints", " ".join(str(j) for j in joints),
+                hint="GELLO joints at the start pose, rad (configs/gello.yaml)")
+            start = self.v.gui.add_button("Start GELLO", color="green")
+            stop = self.v.gui.add_button("Stop")
+            refresh = self.v.gui.add_button("Refresh ports")
+            self._gello_status = self.v.gui.add_markdown("")
+        self._on_click(start, self._start_gello)
+        self._on_click(stop, self._stop_policy)
+        self._on_click(refresh, self._refresh_gello_ports)
+        self._refresh_gello_ports()
+
+    def _refresh_gello_ports(self):
+        """Puertos con calibración en PORT_CONFIG_MAP que existen (GelloAgent exige ese nombre)."""
+        from splatsim.agents.gello_agent import PORT_CONFIG_MAP
+        ports = [p for p in PORT_CONFIG_MAP if os.path.exists(p)]
+        self._gello_port.options = ports or ["-"]
+        if ports:
+            self._gello_port.value = ports[0]
+            denied = [p for p in ports if not os.access(p, os.R_OK | os.W_OK)]
+            self._gello_status.content = (
+                f"**No permission on {', '.join(denied)}**: `sudo usermod -aG dialout $USER` "
+                "and log in again" if denied else "")
+            return
+        found = sorted(set(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")))
+        if found:
+            self._gello_status.content = (f"Serial devices {', '.join(found)} have no GELLO calibration: "
+                                          "add the port to PORT_CONFIG_MAP (`splatsim/agents/gello_agent.py`)")
+        else:
+            self._gello_status.content = "No GELLO connected" + (
+                ": attach its USB to WSL (Tools → USB)" if IS_WSL else "")
+
+    def _start_gello(self):
+        if self._policy_proc is not None:
+            self._gello_status.content = f"**{self._policy_label} is running**: press Stop first"
+            return
+        port = self._gello_port.value
+        if port == "-" or not os.path.exists(port):
+            self._refresh_gello_ports()
+            return
+        try:
+            joints = [float(v) for v in self._gello_joints.value.replace(",", " ").split()]
+        except ValueError:
+            self._gello_status.content = "**Start joints**: numbers separated by spaces"
+            return
+        # sim realtime: la física sigue al reloj y un lazo rápido es más suave; si no, el --hz del servidor
+        realtime = getattr(self.s, "sim_clock", None) == "realtime"
+        hz = int(self._gello_cfg.get("realtime_hz", 30)) if realtime else self.s.control_hz
+        cmd = ["scripts/run_env_sim.py", "--agent", "gello", "--gello_port", port,
+               "--hz", str(hz), "--robot_port", str(self.s.zmq_port)]
+        if joints:
+            cmd += ["--start_joints", *map(str, joints)]
+        self._gello_status.content = f"GELLO on `{port}` at {hz} Hz"
+        self._start_client(cmd, "GELLO", trials=False)
+
+    # ── USB en WSL (usbipd) ──────────────────────────────────────────────────
+    def _build_usb_gui(self):
+        with self.v.gui.add_folder("USB (WSL)"):
+            self.v.gui.add_markdown("*Pass the GELLO and the RealSense cameras from Windows to WSL "
+                                    "(`usbipd attach --wsl`)*")
+            self._usb_status = self.v.gui.add_markdown("")
+            buttons = self.v.gui.add_button_group("Attach", [name for name, _ in USB_DEVICES])
+            refresh = self.v.gui.add_button("Refresh")
+        buttons.on_click(lambda e: threading.Thread(
+            target=self._attach_usb, args=(e.target.value,), daemon=True).start())
+        refresh.on_click(lambda _: threading.Thread(target=self._show_usb, daemon=True).start())
+        threading.Thread(target=self._show_usb, daemon=True).start()
+
+    @staticmethod
+    def _usbipd_devices() -> list[dict]:
+        """Dispositivos conectados según `usbipd list` (bus, descripción, estado)."""
+        out = subprocess.run(["usbipd.exe", "list"], capture_output=True, text=True, timeout=20).stdout
+        devices, connected = [], False
+        for line in out.splitlines():
+            if line.startswith("Connected:"):
+                connected = True
+                continue
+            if line.startswith("Persisted:"):
+                break
+            cols = re.split(r"\s{2,}", line.strip())
+            if connected and len(cols) >= 4 and re.match(r"^\d+-\d+$", cols[0]):
+                devices.append({"busid": cols[0], "name": cols[2], "state": cols[-1]})
+        return devices
+
+    def _show_usb(self, note: str = ""):
+        try:
+            devices = self._usbipd_devices()
+        except (OSError, subprocess.TimeoutExpired) as e:
+            self._usb_status.content = f"**usbipd failed**: {e}"
+            return
+        lines = []
+        for label, key in USB_DEVICES:
+            found = [d for d in devices if key.lower() in d["name"].lower()]
+            states = ", ".join(f"{d['busid']} {d['state']}" for d in found) or "not connected"
+            lines.append(f"{label}: {states}")
+        self._usb_status.content = "  \n".join(([note] if note else []) + lines)
+
+    def _attach_usb(self, label: str):
+        key = dict(USB_DEVICES)[label]
+        notes = []
+        for d in self._usbipd_devices():
+            if key.lower() not in d["name"].lower() or d["state"] == "Attached":
+                continue
+            if d["state"] == "Not shared":
+                # bind necesita administrador; se hace una vez por dispositivo
+                notes.append(f"**{d['busid']} is not shared**: run once in an admin terminal "
+                             f"`usbipd bind --busid {d['busid']}`")
+                continue
+            r = subprocess.run(["usbipd.exe", "attach", "--wsl", "--busid", d["busid"]],
+                               capture_output=True, text=True, timeout=30)
+            if r.returncode != 0:
+                notes.append(f"**attach {d['busid']} failed**: {(r.stderr or r.stdout).strip()[:200]}")
+        time.sleep(1.0)                       # el dispositivo tarda en aparecer en WSL
+        self._show_usb("  \n".join(notes))
+        if label == "GELLO":
+            self._do(self._refresh_gello_ports)
 
     # ── herramientas (revisor de grabaciones, cola de entrenamiento) ─────────
     def _build_tools_gui(self):

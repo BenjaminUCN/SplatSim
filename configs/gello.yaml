@@ -1,0 +1,7 @@
+# GELLO teleoperation from the control panel (Run tab > GELLO), which starts
+#   scripts/run_env_sim.py --agent gello --gello_port <port> --start_joints <start_joints> --hz <rate>
+# The port's calibration is PORT_CONFIG_MAP in splatsim/agents/gello_agent.py.
+start_joints: [-3.1415, 0.4712, -1.8151, 0.4188, 1.5708, 0]
+# client rate with sim_clock=realtime (physics follows the clock, so a fast loop is smoother);
+# otherwise the client uses the server's Control Hz
+realtime_hz: 30
