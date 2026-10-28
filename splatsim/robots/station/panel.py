@@ -142,6 +142,12 @@ class StationPanel:
             stop = self.v.gui.add_button("Stop")
             reload = self.v.gui.add_button("Reload Registry")
             self._policy_status = self.v.gui.add_markdown("No policy running")
+            # preguntas de run_policy_trials.py al operador (en el real: poner el tomate, resultado)
+            self._op_folder = self.v.gui.add_folder("Operator", visible=False)
+            with self._op_folder:
+                self._op_text = self.v.gui.add_markdown("")
+            self._op_buttons = None
+            self._op_shown = None
             # ensayos automáticos sobre la grilla de la manzana (run_policy_trials.py)
             with self.v.gui.add_folder("Trials", expand_by_default=False):
                 self._trials_per_pos = self.v.gui.add_number("Trials per position", 3, min=1, step=1)
@@ -288,6 +294,9 @@ class StationPanel:
                 info["done"] += 1
                 info["result"] = (f"last: grasp error final {float(m.group(2)):.3f} m, "
                                   f"min {float(m.group(3)):.3f} m")
+            elif m := re.search(r"\[Trials\] (\d+) frames, resultado: (\w+)", line):
+                info["done"] += 1
+                info["result"] = f"last: {m.group(2)} (marked by the operator)"
             elif m := re.search(r"\[Trials\] Resultados en (.+)", line):
                 info["root"] = m.group(1).strip()
 
@@ -398,8 +407,31 @@ class StationPanel:
             self._last_preview = now
             self._update_preview()
 
+    def _update_operator(self):
+        """Muestra la pregunta pendiente al operador con un botón por opción (o la oculta)."""
+        op = getattr(self.s, "operator", None)
+        if op is None:
+            return
+        state = (op.id, op.text is None)
+        if state == self._op_shown:
+            return
+        self._op_shown = state
+        if self._op_buttons is not None:
+            self._op_buttons.remove()
+            self._op_buttons = None
+        if op.text is None:
+            self._op_folder.visible = False
+            return
+        self._op_text.content = f"**{op.text}**"
+        with self._op_folder:
+            self._op_buttons = self.v.gui.add_button_group("Answer", op.options)
+        prompt_id = op.id
+        self._op_buttons.on_click(lambda e: op.reply(prompt_id, e.target.value))
+        self._op_folder.visible = True
+
     def _update_status(self):
         self._poll_policy()
+        self._update_operator()
         rec = self.s.recorder
         self._rec_status.content = (
             f"**● Recording** — {rec._length} frames in `{rec._folder}`" if rec.active

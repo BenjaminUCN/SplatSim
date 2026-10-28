@@ -41,14 +41,16 @@ from .debug_ui import (
 )
 from .gripper import XArm5Gripper
 from .preview import PreviewStream
+from splatsim.robots.station.operator import OperatorMixin, OperatorPrompt
 from splatsim.robots.station.recorder import TrajectoryRecorder, to_uint8_image
 from .trail import EETrail
 
 
-class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
+class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
     ENV_CONFIG = ENV_CONFIG
     # métodos que el cliente puede llamar por ZMQ además de los de la base
-    REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording", "get_preview")
+    REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording", "get_preview",
+                      "operator_prompt", "operator_answer")
 
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
@@ -92,6 +94,7 @@ class XArm5PybulletRobotServerCamera(PybulletRobotServerBase):
         self._rt_last = time.monotonic() # realtime: última vuelta del serve_loop
         self._rt_acc = 0.0               # realtime: pasos pendientes (fracción incluida)
         self._preview = None             # PreviewStream, se crea con el primer get_preview
+        self.operator = OperatorPrompt()  # preguntas de un cliente que el panel muestra
         self._last_images = {}           # cámaras de la última observación (vista previa del panel)
         self._last_images_time = 0.0
         self._last_command_time = 0.0    # time.monotonic() del último comando

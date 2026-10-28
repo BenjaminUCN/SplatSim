@@ -14,6 +14,7 @@ import time
 
 import numpy as np
 
+from splatsim.robots.station.operator import OperatorMixin, OperatorPrompt
 from splatsim.robots.station.recorder import TrajectoryRecorder
 from splatsim.robots.station.zmq_server import ZMQRobotServer, ZMQServerThread
 
@@ -27,8 +28,9 @@ def _min_jerk(tau: float) -> float:
     return tau**3 * (10 - 15 * tau + 6 * tau**2)
 
 
-class XArm5RealServer:
-    REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording")
+class XArm5RealServer(OperatorMixin):
+    REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording",
+                      "operator_prompt", "operator_answer")
 
     def __init__(self, robot, cameras: dict, port: int = 6001, host: str = "127.0.0.1",
                  control_hz: int = 30, panel_port: int | None = 8080,
@@ -51,6 +53,7 @@ class XArm5RealServer:
         self._last_images, self._last_images_time = {}, 0.0
         self._t0 = time.monotonic()
         self.recorder = TrajectoryRecorder(self, max_record_seconds, every=1)
+        self.operator = OperatorPrompt()   # preguntas de run_policy_trials.py (ensayos a mano)
         self._zmq_server_thread = ZMQServerThread(ZMQRobotServer(self, host=host, port=port))
         self.controls = []
         if panel_port is not None:
@@ -78,6 +81,7 @@ class XArm5RealServer:
             obs = self.robot.get_observations()
             obs.update(self._read_cameras(self.camera_names))
             obs["time"] = self.clock()
+            obs["control_hz"] = self.control_hz   # los clientes de ensayos se pacen con esto
             self.recorder.on_observation(obs)
             obs["recording"] = self.recorder.active   # tras on_observation: refleja el auto-stop
             obs["reset_joint_command"] = self.reset_joint_command()

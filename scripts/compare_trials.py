@@ -72,20 +72,26 @@ def load_runs(entries) -> pd.DataFrame:
         df = pd.concat([pd.read_csv(c) for c in csvs], ignore_index=True)
         if df.empty:
             raise SystemExit(f"{path}: trials.csv sin ensayos")
-        if "min_grasp_err" not in df or df.min_grasp_err.isna().any():
-            df = _backfill_grasp(df)
+        manual = df["manual_success"].notna() if "manual_success" in df else pd.Series(False, df.index)
+        if "min_grasp_err" not in df or df.min_grasp_err[~manual].isna().any():
+            df = _backfill_grasp(df, skip=manual)
         df["model"] = label
         frames.append(df)
         print(f"{label}: {len(df)} ensayos de {len(csvs)} corrida(s)")
     return pd.concat(frames, ignore_index=True)
 
 
-def _backfill_grasp(df: pd.DataFrame) -> pd.DataFrame:
-    """Calcula el error de agarre de ensayos antiguos desde los .pkl de cada carpeta de ensayo."""
+def _backfill_grasp(df: pd.DataFrame, skip: pd.Series) -> pd.DataFrame:
+    """Calcula el error de agarre de ensayos antiguos desde los .pkl de cada carpeta de ensayo
+    (salvo los marcados a mano en el robot real, que no tienen posición del tomate)."""
     point = load_grasp_point()
     finals, mins = [], []
-    for folder in df.folder:
+    for folder, is_manual in zip(df.folder, skip):
         errs = []
+        if is_manual:
+            finals.append(np.nan)
+            mins.append(np.nan)
+            continue
         for p in sorted(Path(folder).glob("*.pkl"), key=lambda p: (len(p.stem), p.stem)):
             try:
                 with open(p, "rb") as f:
@@ -95,7 +101,7 @@ def _backfill_grasp(df: pd.DataFrame) -> pd.DataFrame:
                 continue
         finals.append(errs[-1] if errs else np.nan)
         mins.append(min(errs) if errs else np.nan)
-    print(f"  error de agarre calculado desde los .pkl de {len(df)} ensayos")
+    print(f"  error de agarre calculado desde los .pkl de {int((~skip).sum())} ensayos")
     return df.assign(final_grasp_err=finals, min_grasp_err=mins)
 
 
@@ -232,7 +238,9 @@ def plot_distances(df: pd.DataFrame, models: list[str], metric: str, threshold: 
     _style(ax)
     rng = np.random.default_rng(0)
     for i, m in enumerate(models):
-        v = df[df.model == m][metric].to_numpy()
+        v = df[df.model == m][metric].dropna().to_numpy()   # los marcados a mano no tienen error
+        if not len(v):
+            continue
         ax.scatter(i + rng.uniform(-0.15, 0.15, len(v)), v, s=22, color=SERIES, alpha=0.75,
                    edgecolors=SURFACE, linewidths=0.8, zorder=3)
         ax.hlines(np.median(v), i - 0.25, i + 0.25, color=TEXT, linewidth=2, zorder=4)
@@ -265,6 +273,10 @@ def main(args: Args):
     df = load_runs(args.runs)
     models = list(dict.fromkeys(df.model))
     df["success"] = df[args.metric] <= args.success_dist
+    # robot real: el resultado lo marca el operador (no hay posición del tomate)
+    manual = df["manual_success"].notna() if "manual_success" in df else pd.Series(False, df.index)
+    if manual.any():
+        df.loc[manual, "success"] = df.loc[manual, "manual_success"] == 1
     out = Path(os.path.expanduser(args.out or
                f"~/data/policy_trials/comparisons/{datetime.now().strftime('%y%m%d_%H%M%S')}"))
     out.mkdir(parents=True, exist_ok=True)
@@ -278,6 +290,8 @@ def main(args: Args):
     per_pos.to_csv(out / "per_position.csv", index=False)
 
     threshold_text = f"{METRICS[args.metric]} ≤ {args.success_dist:.2f} m"
+    if manual.any():
+        threshold_text += f" (real-robot trials, {int(manual.sum())}: marked by the operator)"
     plot_success(summary, out / "success_rate.png", threshold_text)
     plot_by_position(df, models, out / "success_by_position.png")
     plot_distances(df, models, args.metric, args.success_dist, out / "distances.png")
