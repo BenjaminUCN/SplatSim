@@ -147,6 +147,8 @@ class StationPanel:
             stop = self.v.gui.add_button("Stop")
             refresh = self.v.gui.add_button("Refresh ports")
             self._gello_status = self.v.gui.add_markdown("")
+        self._gello_note = ""        # avisos de puerto / joints, bajo la línea de estado
+        self._gello_run = None       # puerto y Hz del GELLO en curso
         self._on_click(start, self._start_gello)
         self._on_click(stop, self._stop_policy)
         self._on_click(refresh, self._refresh_gello_ports)
@@ -160,22 +162,21 @@ class StationPanel:
         if ports:
             self._gello_port.value = ports[0]
             denied = [p for p in ports if not os.access(p, os.R_OK | os.W_OK)]
-            self._gello_status.content = (
+            self._gello_note = (
                 f"**No permission on {', '.join(denied)}**: `sudo usermod -aG dialout $USER` "
                 "and log in again" if denied else "")
             return
         found = sorted(set(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")))
         if found:
-            self._gello_status.content = (f"Serial devices {', '.join(found)} have no GELLO calibration: "
+            self._gello_note = (f"Serial devices {', '.join(found)} have no GELLO calibration: "
                                           "add the port to PORT_CONFIG_MAP (`splatsim/agents/gello_agent.py`)")
         else:
-            self._gello_status.content = "No GELLO connected" + (
+            self._gello_note = "No GELLO connected" + (
                 ": attach its USB to WSL (Tools → USB)" if IS_WSL else "")
 
     def _start_gello(self):
         if self._policy_proc is not None:
-            self._gello_status.content = f"**{self._policy_label} is running**: press Stop first"
-            return
+            return                        # el estado ya dice quién maneja el robot
         port = self._gello_port.value
         if port == "-" or not os.path.exists(port):
             self._refresh_gello_ports()
@@ -183,7 +184,8 @@ class StationPanel:
         try:
             joints = [float(v) for v in self._gello_joints.value.replace(",", " ").split()]
         except ValueError:
-            self._gello_status.content = "**Start joints**: numbers separated by spaces"
+            self._gello_note = "**Start joints**: numbers separated by spaces"
+            self._update_gello_status()
             return
         # sim realtime: la física sigue al reloj y un lazo rápido es más suave; si no, el --hz del servidor
         realtime = getattr(self.s, "sim_clock", None) == "realtime"
@@ -192,8 +194,27 @@ class StationPanel:
                "--hz", str(hz), "--robot_port", str(self.s.zmq_port)]
         if joints:
             cmd += ["--start_joints", *map(str, joints)]
-        self._gello_status.content = f"GELLO on `{port}` at {hz} Hz"
+        self._gello_note = ""
+        self._gello_run = {"port": port, "hz": hz}
         self._start_client(cmd, "GELLO", trials=False)
+        self._update_gello_status()
+
+    def _update_gello_status(self):
+        """Estado del GELLO (corriendo / detenido / terminó con error) más los avisos de puerto."""
+        proc, label = self._policy_proc, self._policy_label
+        if proc is not None and label == "GELLO":
+            run = self._gello_run or {}
+            state = (f"● **Running** on `{run.get('port')}` at {run.get('hz')} Hz (pid {proc.pid})"
+                     + (" — stopping..." if self._stop_deadline is not None else ""))
+        elif proc is not None:
+            state = f"{label} is driving the robot: press Stop first"
+        elif self._last_client and self._last_client["label"] == "GELLO":
+            code = self._last_client["code"]
+            state = ("Stopped" if self._last_client["stopped"] else "Finished" if code == 0 else
+                     f"**Exited with code {code}**: see the server terminal (is GELLO powered?)")
+        else:
+            state = "Not running"
+        self._gello_status.content = "  \n".join(t for t in (state, self._gello_note) if t)
 
     # ── USB en WSL (usbipd) ──────────────────────────────────────────────────
     def _build_usb_gui(self):
@@ -374,6 +395,7 @@ class StationPanel:
         self._models = {}            # etiqueta del dropdown -> (carpeta, entrada del registro)
         self._policy_proc = None
         self._policy_label = None
+        self._last_client = None     # cómo terminó el último cliente (etiqueta, código, si se detuvo)
         self._policy_trials = False
         self._trial_info = {}
         self._stop_deadline = None
@@ -601,7 +623,7 @@ class StationPanel:
                 info["root"] = m.group(1).strip()
 
     def _stop_policy(self):
-        if self._policy_proc is None:
+        if self._policy_proc is None or self._stop_deadline is not None:
             return
         self._policy_proc.send_signal(signal.SIGINT)   # como Ctrl+C: los scripts cierran limpio
         self._stop_deadline = time.monotonic() + STOP_TIMEOUT
@@ -618,6 +640,8 @@ class StationPanel:
             if self._stop_deadline is not None and time.monotonic() > self._stop_deadline:
                 proc.kill()
             return
+        self._last_client = {"label": self._policy_label, "code": code,
+                             "stopped": self._stop_deadline is not None}
         if self._stop_deadline is not None:
             self._policy_status.content = f"Stopped {self._policy_label}"
         elif code == 0:
@@ -734,6 +758,7 @@ class StationPanel:
 
     def _update_status(self):
         self._poll_policy()
+        self._update_gello_status()
         self._update_operator()
         rec = self.s.recorder
         self._rec_status.content = (
