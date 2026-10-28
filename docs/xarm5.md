@@ -46,7 +46,7 @@ python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5
 
 The server renders `base_rgb`, `base_left_rgb`, `base_right_rgb` and `wrist_rgb` from the gaussian splat; render only an arrangement with `--arrangement 2cam`, or any subset with `--cameras base_rgb wrist_rgb` (every rendered camera is recorded). Camera FoV, recording length and other constants live in `splatsim/robots/xarm/config.py`.
 
-**Control panel (viser).** Open http://localhost:8080 in a browser. The 3D view shows the world frame, the end effector, the base camera frustums, the tomato and the saved grid positions. The controls are split into a main panel (docked right) with two tabs and a separate *Cameras* window (docked left); both can be moved, docked or minimized.
+**Control panel (viser).** Open http://localhost:8080 in a browser. The 3D view shows the robot's URDF following its joints (the same URDF PyBullet loads; *Robot → Show robot (URDF)* hides it; needs `yourdfpy`, in `requirements.txt`), the world frame, the end effector, the base camera frustums, the tomato and the saved grid positions. The controls are split into a main panel (docked right) with two tabs and a separate *Cameras* window (docked left); both can be moved, docked or minimized.
 
 *Run* tab:
 - *Robot*: Reset Robot Joints, the control mode (`position` / `interp` / `velocity`, see [Control modes](#control-modes)), which can be changed while a policy runs and resumes from the current pose, and the sim clock (`fixed` / `realtime`, see `--sim_clock`). **Control Hz** changes the server's `--hz` without restarting it: Run and the trials use the new rate, and the model info warns when it differs from the fps of the model's dataset. In sim it must divide the 240 Hz physics rate (5, 10, 15, 20, 30...) so each command is a whole number of steps; on the real arm it is 1-30 Hz. It can't change while a policy started from the panel is running or a recording is active.
@@ -88,7 +88,7 @@ Start the real robot with the same `--hz` the client uses (e.g. `--hz 10` for th
 
 ## Real xArm5 station
 
-The real arm runs behind the same ZMQ protocol, recorder and control panel as the simulator (`splatsim/robots/station/`), so `run_env_sim.py` (GELLO or the policy), `run_policy_trials.py` and the panel work against both. Settings are in `configs/xarm5_real.yaml`: IP, `home_joints` (the pose **Reset Robot** moves to, slowly; `null` = Reset Robot does nothing), `reset_speed`, the cameras and the recordings folder.
+The real arm runs behind the same ZMQ protocol, recorder and control panel as the simulator (`splatsim/robots/station/`), so `run_env_sim.py` (GELLO or the policy), `run_policy_trials.py` and the panel work against both. Settings are in `configs/xarm5_real.yaml`: IP, `urdf` (shown in the panel's 3D view; `null` = the one of `--robot_name` in `objects.yaml`), `home_joints` (the pose **Reset Robot** moves to, slowly; `null` = Reset Robot does nothing), `reset_speed`, the cameras and the recordings folder.
 ```bash
 python scripts/launch_camera_nodes.py --config configs/xarm5_real.yaml   # one ZMQ node per RealSense
 python scripts/launch_nodes.py --robot xarm5_lite --hz 10 [--control_mode interp] [--gui none]

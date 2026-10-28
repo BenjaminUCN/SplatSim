@@ -22,6 +22,9 @@ LOOP_HZ = 100            # vueltas por segundo del lazo del servidor (panel, tec
 RESET_TOLERANCE = 0.02   # rad: Reset Robot termina cuando todas las articulaciones están a esto
 RESET_EXTRA_TIME = 3.0   # s de margen sobre la duración prevista del reset antes de rendirse
 MAX_CONTROL_HZ = 30      # el lazo de control del driver corre a 30 Hz: comandar más rápido no sirve
+GRIPPER_MAX_ANGLE = 0.85 # rad del drive_joint con el gripper normalizado en 1 (igual que el sim)
+GRIPPER_JOINTS = ("drive_joint", "left_finger_joint", "left_inner_knuckle_joint",
+                  "right_outer_knuckle_joint", "right_finger_joint", "right_inner_knuckle_joint")
 
 
 def _min_jerk(tau: float) -> float:
@@ -36,7 +39,8 @@ class XArm5RealServer(OperatorMixin):
     def __init__(self, robot, cameras: dict, port: int = 6001, host: str = "127.0.0.1",
                  control_hz: int = 30, panel_port: int | None = 8080,
                  home_joints=None, reset_speed: float = 0.3,
-                 path: str = "~/data/bc_data/real", max_record_seconds: float = 120):
+                 path: str = "~/data/bc_data/real", max_record_seconds: float = 120,
+                 urdf_path: str | None = None):
         """robot: el driver XArmRobot (o algo con su interfaz); cameras: nombre -> cliente de
         cámara con read() -> (imagen RGB HxWx3, profundidad), p.ej. gello ZMQClientCamera."""
         self.robot = robot
@@ -45,6 +49,7 @@ class XArm5RealServer(OperatorMixin):
         self.control_hz = control_hz
         self.zmq_port = port
         self.home_joints = None if home_joints is None else np.asarray(home_joints, dtype=float)
+        self.urdf_path = urdf_path         # el robot en la escena 3D del panel (None: no se muestra)
         self.reset_speed = reset_speed
         self.path = path
         # el hilo ZMQ y el lazo del servidor (panel, teclado) comparten el driver y el recorder;
@@ -168,6 +173,15 @@ class XArm5RealServer(OperatorMixin):
     def get_current_ee_pose(self):
         quat = np.asarray(self.robot.get_observations()["ee_pos_quat"], dtype=float)
         return quat[:3], quat[3:]
+
+    def urdf_joint_positions(self) -> dict:
+        q = np.asarray(self.robot.get_joint_state(), dtype=float)
+        joints = {f"joint{i + 1}": q[i] for i in range(5)}
+        joints.update({name: q[5] * GRIPPER_MAX_ANGLE for name in GRIPPER_JOINTS})
+        return joints
+
+    def robot_base_pose(self):
+        return None                        # la base del brazo es el origen del mundo
 
     @property
     def preview_cameras(self) -> list[str]:

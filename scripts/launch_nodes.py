@@ -246,7 +246,9 @@ def launch_robot_server(args: Args):
             panel_port=None if args.gui == "none" else args.panel_port,
             home_joints=cfg.get("home_joints"), reset_speed=cfg.get("reset_speed", 0.3),
             path=cfg.get("recordings", "~/data/bc_data/real"),
-            max_record_seconds=cfg.get("max_record_seconds", 120))
+            max_record_seconds=cfg.get("max_record_seconds", 120),
+            # el URDF del archivo, o el de la escena del sim en objects.yaml
+            urdf_path=cfg.get("urdf") or object_config.get(args.robot_name, {}).get("urdf_path", [None])[0])
 
     else:
         if args.robot == "xarm":

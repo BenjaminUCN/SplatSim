@@ -306,6 +306,25 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         return self.joint_ctrl.mode
 
     @property
+    def urdf_path(self) -> str:
+        """El URDF del robot de la escena (el mismo que carga PyBullet)."""
+        return self.object_config[self.robot_name]["urdf_path"][0]
+
+    def urdf_joint_positions(self) -> dict:
+        """Posición de cada articulación de PyBullet por su nombre en el URDF."""
+        c = self.pybullet_client
+        with self.lock:
+            if getattr(self, "_joint_names", None) is None:
+                self._joint_names = [c.getJointInfo(self.dummy_robot, i)[1].decode()
+                                     for i in range(c.getNumJoints(self.dummy_robot))]
+            return {name: c.getJointState(self.dummy_robot, i)[0]
+                    for i, name in enumerate(self._joint_names)}
+
+    def robot_base_pose(self):
+        with self.lock:
+            return self.pybullet_client.getBasePositionAndOrientation(self.dummy_robot)
+
+    @property
     def preview_cameras(self) -> list[str]:
         """Cámaras que se pueden ver en el panel (todas las del splat, no solo las grabadas)."""
         return list(self.cameras)

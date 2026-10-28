@@ -10,3 +10,5 @@ cameras:
   base_rgb: {serial: null, port: 5001}
 recordings: ~/data/bc_data/real   # default folder for recordings (r/s + Enter, panel)
 max_record_seconds: 120
+# URDF shown in the control panel's 3D view (null = the one of --robot_name in objects.yaml)
+urdf: null

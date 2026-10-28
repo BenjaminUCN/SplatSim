@@ -9,3 +9,4 @@ opencv-python==4.12.0.88
 git+https://github.com/francescofugazzi/3dgsconverter.git
 zarr==3.1.1
 viser==1.1.1
+yourdfpy==0.0.60   # URDF del robot en el panel (viser.extras.ViserUrdf)

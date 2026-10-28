@@ -9,6 +9,8 @@ El servidor (backend) expone:
   recorder, control_hz, zmq_port, camera_names (las que ve la política)
   reset_robot(), control_mode, set_control_mode(mode), get_current_ee_pose() -> (pos, xyzw) | None
   preview_cameras, preview_images(names, max_age) -> {nombre: uint8 HxWx3}
+  opcional: urdf_path, urdf_joint_positions(), robot_base_pose() (el robot en la escena 3D,
+  splatsim/robots/station/urdf_view.py)
 Las subclases agregan lo suyo con _build_robot_extra, _build_tabs y _update_status_extra
 (SimPanel en splatsim/robots/xarm/panel.py: escena, tomate, cámaras base, sim clock).
 """
@@ -50,6 +52,7 @@ LOCAL_SUFFIX = " · local"   # modelos cargados con "Load model" (configs/local_
 
 STATUS_PERIOD = 0.2    # s entre refrescos de estado y pose del efector
 PREVIEW_PERIOD = 0.5   # s entre vistas previas (en el sim cuesta un render del splat)
+URDF_PERIOD = 0.05     # s entre actualizaciones del URDF en la escena 3D
 PREVIEW_DEFAULT = ("base_rgb", "wrist_rgb")  # vistas activas al abrir el panel
 PREVIEW_H, PREVIEW_W = 240, 320              # tamaño de las vistas (la mitad de la imagen)
 PREVIEW_PANEL_WIDTH = 360
@@ -101,11 +104,13 @@ class StationPanel:
         self._actions = queue.SimpleQueue()
         self._last_status = 0.0
         self._last_preview = 0.0
+        self._last_urdf = 0.0
 
         self.v = viser.ViserServer(port=port, label=label, verbose=False)
         self.v.scene.add_frame("/world", axes_length=0.15, axes_radius=0.005)
         self.v.scene.add_grid("/ground", width=2.0, height=2.0, cell_size=0.1, section_size=0.5)
         self._ee = self.v.scene.add_frame("/ee", axes_length=0.06, axes_radius=0.004)
+        self._urdf = self._load_urdf()
 
         # panel principal a la derecha, en pestañas por tarea; vistas de cámara en
         # una ventana aparte a la izquierda (se puede mover, acoplar o minimizar)
@@ -128,6 +133,25 @@ class StationPanel:
 
     def _build_tabs(self, tabs):
         """Pestañas propias de cada backend, después de Run."""
+
+    def _load_urdf(self):
+        """El robot en la escena 3D (si el backend tiene urdf_path y está yourdfpy)."""
+        path = getattr(self.s, "urdf_path", None)
+        if not path:
+            return None
+        if not os.path.exists(path):
+            print(f"[Panel] URDF no encontrado: {path} (el robot no se muestra en la escena)")
+            return None
+        try:
+            from splatsim.robots.station.urdf_view import RobotUrdfView
+            return RobotUrdfView(self.v, path)
+        except ImportError:
+            print("[Panel] Falta yourdfpy para mostrar el robot: pip install yourdfpy==0.0.60")
+            return None
+
+    def _update_urdf(self):
+        if self._urdf is not None and self._urdf.visible:
+            self._urdf.update(self.s.urdf_joint_positions(), self.s.robot_base_pose())
 
     # ── GELLO ────────────────────────────────────────────────────────────────
     def _build_gello_gui(self):
@@ -463,6 +487,10 @@ class StationPanel:
                 hint="Commands per second (the server's --hz): Run and the trials use it. Match the "
                      "fps of the model's dataset. Not while a policy runs or a recording is active")
             self._hz_info = self.v.gui.add_markdown("")
+            if self._urdf is not None:
+                show = self.v.gui.add_checkbox("Show robot (URDF)", True,
+                                               hint="The robot's URDF in the 3D view, following its joints")
+                show.on_update(lambda _: setattr(self._urdf, "visible", show.value))
             self._build_robot_extra()
         self._on_user(mode, lambda h: self.s.set_control_mode(h.value))
         self._on_user(hz, self._set_control_hz)
@@ -876,6 +904,9 @@ class StationPanel:
         if now - self._last_tools > TOOLS_PERIOD:
             self._last_tools = now
             self._update_tools()
+        if now - self._last_urdf > URDF_PERIOD:
+            self._last_urdf = now
+            self._update_urdf()
 
     def _update_operator(self):
         """Muestra la pregunta pendiente al operador con un botón por opción (o la oculta)."""
