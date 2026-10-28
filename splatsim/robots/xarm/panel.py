@@ -8,6 +8,8 @@ from splatsim.robots.station.panel import StationPanel, wxyz_to_xyzw, xyzw_to_wx
 from splatsim.utils.apple_grid import APPLE_GRID_PATH, load_grid
 
 from .config import BASE_CAM_FOV, SIM_CLOCKS
+
+RANGE_COLOR = (255, 170, 0)   # caja del rango aleatorio (como las esferas de la grilla)
 from .debug_ui import save_camera_poses
 
 
@@ -90,6 +92,7 @@ class SimPanel(StationPanel):
             # cargar una posición guardada (también se puede hacer clic en su esfera)
             self._grid_select = self.v.gui.add_dropdown("Grid position", ["-"])
             load = self.v.gui.add_button("Load Grid Position")
+            self._build_range_gui()
         self._apple_gizmo = self.v.scene.add_transform_controls(
             "/apple", scale=0.12, position=pos, disable_rotations=True)
         self.v.scene.add_icosphere("/apple/sphere", radius=0.03, color=(230, 40, 30))
@@ -103,6 +106,61 @@ class SimPanel(StationPanel):
         self._on_click(load, self._load_grid_position)
         self._grid_positions = []
         self._show_grid()
+
+    # ── rango de la posición aleatoria ───────────────────────────────────────
+    def _build_range_gui(self):
+        """Caja donde "Random Position" pone el tomate: esquinas editables con números o con
+        los dos gizmos de la escena; Save Range la guarda en APPLE_GRID_PATH."""
+        lo, hi = self.s.apple.range_corners()
+        with self.v.gui.add_folder("Random range", expand_by_default=False):
+            self._range_min = self.v.gui.add_vector3("Min (m)", lo, step=0.01)
+            self._range_max = self.v.gui.add_vector3("Max (m)", hi, step=0.01)
+            self._range_show = self.v.gui.add_checkbox("Show box", True,
+                                                       hint="Box and corner gizmos in the 3D view")
+            save = self.v.gui.add_button("Save Range")
+            self._range_info = self.v.gui.add_markdown("")
+        self._range_gizmos = [
+            self.v.scene.add_transform_controls(f"/apple_range/{name}", scale=0.08,
+                                                disable_rotations=True, position=corner)
+            for name, corner in (("min", lo), ("max", hi))]
+        self._on_user(self._range_min, lambda _: self._set_range(self._range_min.value, self._range_max.value))
+        self._on_user(self._range_max, lambda _: self._set_range(self._range_min.value, self._range_max.value))
+        for gizmo in self._range_gizmos:
+            gizmo.on_update(lambda _: self._do(self._set_range, *(g.position for g in self._range_gizmos)))
+        self._range_show.on_update(lambda _: self._draw_range())
+        self._on_click(save, self._save_range)
+        self._range_saved = self.s.apple.range
+        self._draw_range()
+
+    def _set_range(self, lo, hi):
+        self.s.apple.set_range(lo, hi)
+        lo, hi = self.s.apple.range_corners()        # ordenadas y con lado mínimo
+        self._range_min.value, self._range_max.value = lo, hi
+        for gizmo, corner in zip(self._range_gizmos, (lo, hi)):
+            if np.abs(np.subtract(gizmo.position, corner)).max() > 1e-4:
+                gizmo.position = corner             # no se pisa al gizmo mientras se arrastra
+        self._draw_range()
+
+    def _save_range(self):
+        self.s.apple.save_range()
+        self._range_saved = self.s.apple.range
+        self._draw_range()
+
+    def _draw_range(self):
+        lo, hi = (np.array(c) for c in self.s.apple.range_corners())
+        show = self._range_show.value
+        center, size = tuple((lo + hi) / 2), tuple(hi - lo)
+        # caja translúcida y su contorno, del color de las esferas de la grilla
+        self.v.scene.add_box("/apple_range/box", color=RANGE_COLOR, dimensions=size, position=center,
+                             opacity=0.08, visible=show)
+        self.v.scene.add_box("/apple_range/edges", color=RANGE_COLOR, dimensions=size, position=center,
+                             wireframe=True, visible=show)
+        for gizmo in self._range_gizmos:
+            gizmo.visible = show
+        saved = self.s.apple.range == self._range_saved
+        dims = ", ".join(f"{a} ∈ [{self.s.apple.range[a][0]:.2f}, {self.s.apple.range[a][1]:.2f}]" for a in "xyz")
+        self._range_info.content = (f"{dims} m" + ("" if saved else "  \n**not saved**: Random Position "
+                                                   "uses it now; Save Range keeps it for next time"))
 
     def _move_apple(self, xyz):
         self.s.apple.move_to(xyz)
