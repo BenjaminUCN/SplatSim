@@ -115,8 +115,9 @@ class SimPanel(StationPanel):
         with self.v.gui.add_folder("Random range", expand_by_default=False):
             self._range_min = self.v.gui.add_vector3("Min (m)", lo, step=0.01)
             self._range_max = self.v.gui.add_vector3("Max (m)", hi, step=0.01)
-            self._range_show = self.v.gui.add_checkbox("Show box", True,
-                                                       hint="Box and corner gizmos in the 3D view")
+            self._range_show = self.v.gui.add_checkbox("Show box", False, hint="The range as a box in the 3D view")
+            self._range_edit = self.v.gui.add_checkbox("Corner gizmos", False,
+                                                       hint="Drag the box corners in the 3D view (with Show box)")
             save = self.v.gui.add_button("Save Range")
             self._range_info = self.v.gui.add_markdown("")
         self._range_gizmos = [
@@ -128,6 +129,7 @@ class SimPanel(StationPanel):
         for gizmo in self._range_gizmos:
             gizmo.on_update(lambda _: self._do(self._set_range, *(g.position for g in self._range_gizmos)))
         self._range_show.on_update(lambda _: self._draw_range())
+        self._range_edit.on_update(lambda _: self._draw_range())
         self._on_click(save, self._save_range)
         self._range_saved = self.s.apple.range
         self._draw_range()
@@ -156,7 +158,7 @@ class SimPanel(StationPanel):
         self.v.scene.add_box("/apple_range/edges", color=RANGE_COLOR, dimensions=size, position=center,
                              wireframe=True, visible=show)
         for gizmo in self._range_gizmos:
-            gizmo.visible = show
+            gizmo.visible = show and self._range_edit.value
         saved = self.s.apple.range == self._range_saved
         dims = ", ".join(f"{a} ∈ [{self.s.apple.range[a][0]:.2f}, {self.s.apple.range[a][1]:.2f}]" for a in "xyz")
         self._range_info.content = (f"{dims} m" + ("" if saved else "  \n**not saved**: Random Position "
