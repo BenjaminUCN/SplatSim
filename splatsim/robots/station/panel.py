@@ -28,7 +28,18 @@ import viser
 from splatsim.robots.joint_controller import MODES
 from splatsim.utils.apple_grid import load_grid
 from splatsim.utils.camera_setup import load_camera_setup
-from splatsim.utils.registry import load_registry, loadable_models, model_label
+from splatsim.utils.registry import (
+    dataset_for_checkpoint,
+    describe_dataset,
+    describe_model,
+    load_local_models,
+    load_registry,
+    loadable_models,
+    model_label,
+    save_local_model,
+)
+
+LOCAL_SUFFIX = " · local"   # modelos cargados con "Load model" (configs/local_models.yaml)
 
 STATUS_PERIOD = 0.2    # s entre refrescos de estado y pose del efector
 PREVIEW_PERIOD = 0.5   # s entre vistas previas (en el sim cuesta un render del splat)
@@ -157,10 +168,21 @@ class StationPanel:
                 run_trials = self.v.gui.add_button("Run Trials", color="blue")
                 self._trial_progress = self.v.gui.add_progress_bar(0.0, visible=False)
                 self._trial_status = self.v.gui.add_markdown("")
+            # un modelo y su dataset por ruta, p.ej. en otra máquina donde el registro no sirve
+            with self.v.gui.add_folder("Load model", expand_by_default=False):
+                self._load_model_path = self.v.gui.add_text(
+                    "Model folder", "", hint="Final folder of a trained model (config.json + model.safetensors)")
+                self._load_dataset_path = self.v.gui.add_text(
+                    "Dataset folder", "", hint="LeRobot dataset it was trained on (meta/info.json); "
+                                               "empty = the one in configs/registry.yaml")
+                load_model = self.v.gui.add_button("Load")
+                self._load_status = self.v.gui.add_markdown(
+                    "Loaded models are kept in `configs/local_models.yaml` (this machine only)")
         self._model_select.on_update(lambda _: self._show_model_info())
         self._on_click(run, self._run_policy)
         self._on_click(run_trials, self._run_trials)
         self._on_click(stop, self._stop_policy)
+        self._on_click(load_model, self._load_model_from_paths)
         reload.on_click(lambda _: self._load_models())
         self._load_models()
         atexit.register(self._kill_policy)
@@ -171,6 +193,8 @@ class StationPanel:
         models = sorted(loadable_models(registry).items(),
                         key=lambda kv: kv[1].get("started") or "", reverse=True)  # recientes primero
         self._models = {}
+        for label, model in load_local_models().items():   # primero: en otra máquina son los que sirven
+            self._models[label + LOCAL_SUFFIX] = (model["path"], model)
         for key, model in models:
             label = model_label(key, model)
             if label in self._models:      # nombres repetidos: se agrega la carpeta
@@ -178,6 +202,34 @@ class StationPanel:
             self._models[label] = (key, model)
         self._model_select.options = list(self._models) or ["-"]
         self._show_model_info()
+
+    def _load_model_from_paths(self):
+        """Valida el modelo y su dataset, los agrega a la lista (y a configs/local_models.yaml)."""
+        try:
+            model = describe_model(self._load_model_path.value)
+            ds_path = self._load_dataset_path.value.strip()
+            if not ds_path:
+                found = dataset_for_checkpoint(model["path"])
+                if found is None or not os.path.isdir(found["path"]):
+                    raise ValueError("this model's dataset is not in configs/registry.yaml on this "
+                                     "machine: set Dataset folder")
+                ds_path = found["path"]
+            ds = describe_dataset(ds_path)
+            missing = [c for c in model["cameras"] if c not in ds["cameras"]]
+            if missing:
+                raise ValueError(f"the dataset has no {', '.join(missing)}, which the model uses "
+                                 f"(dataset cameras: {', '.join(ds['cameras'])})")
+        except ValueError as e:
+            self._load_status.content = f"**Cannot load**: {e}"
+            return
+        label = os.path.basename(model["path"])
+        save_local_model(label, {**model, "dataset_root": ds["path"],
+                                 "dataset_episodes": ds["episodes"], "dataset_fps": ds["fps"]})
+        self._load_models()
+        self._model_select.value = label + LOCAL_SUFFIX
+        self._show_model_info()
+        self._load_status.content = (f"Loaded **{label}** ({', '.join(model['cameras'])}) with dataset "
+                                     f"`{os.path.basename(ds['path'])}` ({ds['episodes']} ep, {ds['fps']} fps)")
 
     def _missing_cameras(self, model) -> list:
         return [c for c in model.get("cameras", []) if c not in self.s.camera_names]
@@ -192,7 +244,8 @@ class StationPanel:
             f"*{m['description']}*" if m.get("description") else "",
             f"`{key}`",
             f"cameras: {', '.join(m.get('cameras', []))}",
-            f"dataset: `{m.get('dataset')}` ({ds.get('episodes', '?')} ep)",
+            (f"dataset: `{os.path.basename(m['dataset_root'])}` ({m.get('dataset_episodes', '?')} ep)"
+             if m.get("dataset_root") else f"dataset: `{m.get('dataset')}` ({ds.get('episodes', '?')} ep)"),
             f"horizon {m.get('horizon')}, n_action_steps {m.get('n_action_steps')}, "
             f"n_obs_steps {m.get('n_obs_steps')}",
             m.get("notes") or "",
@@ -230,8 +283,13 @@ class StationPanel:
         self._start_client(
             ["scripts/run_env_sim.py", "--agent", "lerobot_diffusion",
              "--hz", str(self.s.control_hz), "--robot_port", str(self.s.zmq_port),
-             "--checkpoint", model["path"]],
+             "--checkpoint", model["path"], *self._dataset_args(model)],
             label, trials=False)
+
+    @staticmethod
+    def _dataset_args(model) -> list:
+        """--dataset_root para los modelos cargados a mano (los del registro lo buscan solos)."""
+        return ["--dataset_root", model["dataset_root"]] if model.get("dataset_root") else []
 
     def _run_trials(self):
         selected = self._selected_model()
@@ -254,7 +312,8 @@ class StationPanel:
         self._start_trials(label, model, extra, n)
 
     def _start_trials(self, label, model, extra: list, n: int):
-        cmd = ["scripts/run_policy_trials.py", "--checkpoint", model["path"], "--run_name", label,
+        cmd = ["scripts/run_policy_trials.py", "--checkpoint", model["path"], *self._dataset_args(model),
+               "--run_name", label.removesuffix(LOCAL_SUFFIX),
                "--robot_port", str(self.s.zmq_port),
                "--trial_seconds", str(float(self._trial_seconds.value)), *extra]
         self._trial_info = {"done": 0, "total": n, "last": "", "root": None}
@@ -406,6 +465,7 @@ class StationPanel:
         if now - self._last_preview > PREVIEW_PERIOD:
             self._last_preview = now
             self._update_preview()
+
 
     def _update_operator(self):
         """Muestra la pregunta pendiente al operador con un botón por opción (o la oculta)."""

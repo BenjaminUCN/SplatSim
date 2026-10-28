@@ -36,3 +36,6 @@ splatsim/utils/outputs/
 splatsim/evaluation/metrics
 splatsim/evaluation/metrics_output/
 splatsim/image_classifier/*.pth
+
+# per-machine model paths (control panel "Load model")
+configs/local_models.yaml
