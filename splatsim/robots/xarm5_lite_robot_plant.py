@@ -196,6 +196,9 @@ class XArmRobot(Robot):
         # no envía nada. Solo enable_arm() lo vuelve a habilitar: tras una parada de emergencia o
         # una colisión, el operador decide cuándo es seguro
         self.arm_problem = None
+        if real and not self._report_connected():
+            print(f"[XArmRobot] No report stream from {ip} (ports 30001-30003 unreachable): "
+                  "the arm state is queried directly")
         self._clear_error_states()
         self._set_gripper_position(self.GRIPPER_OPEN)
 
@@ -241,7 +244,8 @@ class XArmRobot(Robot):
                 # con el lock tomado el hilo de control espera: que no vea el modo viejo del
                 # reporte y lo tome por un brazo detenido
                 deadline = time.monotonic() + 1.0
-                while self.robot.mode != (4 if mode == "velocity" else 1) and time.monotonic() < deadline:
+                while (self._report_connected() and time.monotonic() < deadline
+                       and self.robot.mode != (4 if mode == "velocity" else 1)):
                     time.sleep(0.02)
         print(f"[XArmRobot] control_mode={mode}")
 
@@ -260,17 +264,19 @@ class XArmRobot(Robot):
     def _clear_error_states(self):
         if self.robot is None:
             return
-        self.robot.clean_error()
-        self.robot.clean_warn()
-        self.robot.motion_enable(True)
+        codes = {"clean_error": self.robot.clean_error(),
+                 "clean_warn": self.robot.clean_warn(),
+                 "motion_enable": self.robot.motion_enable(True)}
         time.sleep(1)
         # modo 1: servo por posición (set_servo_angle_j); modo 4: velocidad articular
-        self.robot.set_mode(4 if self.ctrl.mode == "velocity" else 1)
+        codes["set_mode"] = self.robot.set_mode(4 if self.ctrl.mode == "velocity" else 1)
         time.sleep(1)
-        self.robot.set_collision_sensitivity(0)
+        codes["set_collision_sensitivity"] = self.robot.set_collision_sensitivity(0)
         time.sleep(1)
-        self.robot.set_state(state=0)
+        codes["set_state"] = self.robot.set_state(state=0)
         time.sleep(1)
+        if any(codes.values()):
+            print(f"[XArmRobot] Return codes while enabling: {codes}")
         self.robot.set_gripper_enable(True)
         time.sleep(1)
         self.robot.set_gripper_mode(0)
@@ -278,17 +284,35 @@ class XArmRobot(Robot):
         self.robot.set_gripper_speed(3000)
         time.sleep(1)
 
-    def _check_arm(self) -> Optional[str]:
-        """Por qué el brazo no acepta comandos según el último reporte del xArm, o None si está listo."""
+    def _report_connected(self) -> bool:
+        """Si llega el reporte del xArm (puertos 30001-30003): de él salen robot.state, mode y
+        error_code. Hay redes que solo dejan pasar el puerto de comandos (502); sin reporte esos
+        valores quedan en los iniciales (state 4, mode 0) y no dicen nada."""
+        stream = getattr(self.robot._arm, "_stream_report", None)
+        return bool(stream is not None and stream.connected)
+
+    def _check_arm(self, query: bool = False) -> Optional[str]:
+        """Por qué el brazo no acepta comandos, o None si está listo. Con el reporte se usa el
+        último; sin él, con query=True se le pregunta al brazo el estado y el error (el modo no se
+        puede preguntar: vale el código de set_mode) y con query=False no se sabe (None)."""
         if self.robot is None:
             return None
+        if self._report_connected():
+            error, state, mode = self.robot.error_code, self.robot.state, self.robot.mode
+        elif query:
+            code, err_warn = self.robot.get_err_warn_code()
+            error = err_warn[0] if code == 0 else 0
+            code, state = self.robot.get_state()
+            mode = None
+        else:
+            return None
         expected = 4 if self.ctrl.mode == "velocity" else 1
-        if self.robot.error_code:
-            return f"controller error {self.robot.error_code}"
-        if self.robot.state not in self.READY_STATES:
-            return f"state {self.robot.state} (4 = stopped, e.g. emergency stop)"
-        if self.robot.mode != expected:
-            return f"mode {self.robot.mode}, expected {expected}"
+        if error:
+            return f"controller error {error}"
+        if state not in self.READY_STATES:
+            return f"state {state} (3 = suspended, 4 = stopped, e.g. emergency stop)"
+        if mode is not None and mode != expected:
+            return f"mode {mode}, expected {expected}"
         return None
 
     def enable_arm(self) -> Optional[str]:
@@ -302,7 +326,15 @@ class XArmRobot(Robot):
             joints = self._update_last_state().joints()
             self.ctrl.reset(joints, time.monotonic())
             self.target_command = {"joints": joints, "gripper": self.target_command["gripper"]}
-        problem = self._check_arm()
+        # tras set_state(0) el controlador reporta un rato el estado 0 (transición) antes de 1/2
+        deadline = time.monotonic() + 3.0
+        expected = 4 if self.ctrl.mode == "velocity" else 1
+        while (problem := self._check_arm(query=True)) is not None and time.monotonic() < deadline:
+            if problem.startswith("mode"):
+                # el controlador puede ignorar el cambio de modo si llegó durante la transición
+                print(f"[XArmRobot] {problem}: set_mode -> {self.robot.set_mode(expected)}, "
+                      f"set_state -> {self.robot.set_state(state=0)}")
+            time.sleep(0.5)
         self.arm_problem = problem
         print(f"[XArmRobot] Arm {'ready' if problem is None else f'still not ready: {problem}'}")
         return problem
@@ -352,14 +384,15 @@ class XArmRobot(Robot):
                     self.last_state.joints(), time.monotonic(), 1 / self._control_frequency)
 
             if self.arm_problem is None and (problem := self._check_arm()) is not None:
-                self.arm_problem = problem
-                print(f"[XArmRobot] Arm stopped: {problem}. Commands are paused until Enable arm "
-                      "(panel, Robot folder)")
+                self._pause_arm(problem)
             if self.arm_problem is None:
                 if kind == "position":
-                    self._set_position(values)
+                    ret = self._set_position(values)
                 else:
-                    self._set_velocity(values)
+                    ret = self._set_velocity(values)
+                # sin reporte, la parada se nota en el código del comando (1 error, 9 no listo)
+                if ret in (1, 9) and not self._report_connected():
+                    self._pause_arm(self._check_arm(query=True) or f"command returned code {ret}")
 
             if gripper_command is not None:
                 # Solo envía si cambió más del 2 % (evita spam al gripper)
@@ -422,22 +455,28 @@ class XArmRobot(Robot):
                 aa,
             )
 
-    def _set_velocity(self, speeds: np.ndarray) -> None:
+    def _pause_arm(self, problem: str) -> None:
+        self.arm_problem = problem
+        print(f"[XArmRobot] Arm stopped: {problem}. Commands are paused until Enable arm "
+              "(panel, Robot folder)")
+
+    def _set_velocity(self, speeds: np.ndarray) -> int:
         if self.robot is None:
-            return
+            return 0
         # is_sync=False: cada articulación sigue su propia velocidad (no se escalan juntas)
         ret = self.robot.vc_set_joint_velocity(
             [float(v) for v in speeds], is_radian=True, is_sync=False,
             duration=self.VELOCITY_WATCHDOG_PERIODS / self._control_frequency)
-        # ret 1/9 (error, brazo no listo): _check_arm lo detecta en la próxima vuelta; antes se
-        # rehabilitaba solo, también tras una parada de emergencia
+        # ret 1/9 (error, brazo no listo): pausa el brazo hasta Enable arm; antes se rehabilitaba
+        # solo, también tras una parada de emergencia
+        return ret
 
-    def _set_position(self, joints: np.ndarray) -> None:
+    def _set_position(self, joints: np.ndarray) -> int:
         if self.robot is None:
-            return
+            return 0
         ret = self.robot.set_servo_angle_j(joints, wait=False, is_radian=True)
-        # ret 1/9 (error, brazo no listo): _check_arm lo detecta en la próxima vuelta; antes se
-        # rehabilitaba solo, también tras una parada de emergencia
+        # ret 1/9: ver _set_velocity
+        return ret
 
     # ------------------------------------------------------------------ #
     # Observations (interfaz SplatSim)                                     #
