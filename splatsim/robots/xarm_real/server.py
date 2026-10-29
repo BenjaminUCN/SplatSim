@@ -102,6 +102,16 @@ class XArm5RealServer(OperatorMixin):
             self._last_images, self._last_images_time = dict(images), time.monotonic()
         return images
 
+    # ── brazo detenido (parada de emergencia, colisión, stop desde la app) ───
+    def arm_status(self) -> str | None:
+        """Por qué el brazo no acepta comandos, o None si está listo."""
+        return getattr(self.robot, "arm_problem", None)
+
+    def enable_arm(self) -> str | None:
+        """Vuelve a habilitar el brazo (lo decide el operador); el problema si sigue sin estar listo."""
+        with self.lock:
+            return self.robot.enable_arm()
+
     # ── REMOTE_METHODS ───────────────────────────────────────────────────────
     def reset_joint_command(self) -> np.ndarray | None:
         """Comando (5 joints + gripper abierto) de la pose home, o None si no está configurada."""
@@ -113,6 +123,10 @@ class XArm5RealServer(OperatorMixin):
         """Lleva el brazo despacio a home_joints (perfil de mínimo jerk) y espera a que llegue."""
         if self.home_joints is None:
             print("[xArm5 real] Reset Robot: home_joints no está en configs/xarm5_real.yaml; no se mueve")
+            return
+        if self.arm_status() is not None:
+            print(f"[xArm5 real] Reset Robot: el brazo está detenido ({self.arm_status()}); "
+                  "Enable arm en el panel")
             return
         with self.lock:
             q0 = np.asarray(self.robot.get_joint_state(), dtype=float)

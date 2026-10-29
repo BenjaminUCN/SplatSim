@@ -10,7 +10,8 @@ El servidor (backend) expone:
   reset_robot(), control_mode, set_control_mode(mode), get_current_ee_pose() -> (pos, xyzw) | None
   preview_cameras, preview_images(names, max_age) -> {nombre: uint8 HxWx3}
   opcional: urdf_path, urdf_joint_positions(), robot_base_pose() (el robot en la escena 3D,
-  splatsim/robots/station/urdf_view.py)
+  splatsim/robots/station/urdf_view.py); arm_status() -> str | None y enable_arm() (robot real:
+  el brazo detenido por la parada de emergencia y el botón para habilitarlo)
 Las subclases agregan lo suyo con _build_robot_extra, _build_tabs y _update_status_extra
 (SimPanel en splatsim/robots/xarm/panel.py: escena, tomate, cámaras base, sim clock).
 """
@@ -476,6 +477,15 @@ class StationPanel:
     # ── robot ────────────────────────────────────────────────────────────────
     def _build_robot_gui(self):
         with self.v.gui.add_folder("Robot"):
+            self._arm_status = None
+            if hasattr(self.s, "enable_arm"):
+                self._arm_status = self.v.gui.add_markdown("")
+                self._on_click(self.v.gui.add_button(
+                    "Enable arm", color="yellow",
+                    hint="After an emergency stop, a collision or a stop from the app: clears errors, "
+                         "enables the motors and holds the arm where it is. Release the emergency "
+                         "stop first, and stop a running policy if it should not resume"),
+                    self.s.enable_arm)
             self._on_click(self.v.gui.add_button("Reset Robot Joints"), self.s.reset_robot)
             # cómo se siguen los objetivos articulares (ver splatsim/robots/joint_controller.py);
             # se puede cambiar con una política corriendo: retoma desde la posición actual
@@ -952,6 +962,11 @@ class StationPanel:
         self._op_folder.visible = True
 
     def _update_status(self):
+        if self._arm_status is not None:
+            problem = self.s.arm_status()
+            self._arm_status.content = (
+                f"**⚠ Arm stopped** ({problem}): commands are paused. Release the emergency stop, "
+                "then Enable arm" if problem else "Arm ready")
         self._poll_policy()
         self._update_gello_status()
         self._update_operator()

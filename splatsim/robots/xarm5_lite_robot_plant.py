@@ -107,6 +107,9 @@ class XArmRobot(Robot):
     DEFAULT_MAX_DELTA = 0.05
     # modo velocidad: si el hilo de control se atrasa, el xArm detiene el brazo tras este tiempo
     VELOCITY_WATCHDOG_PERIODS = 3
+    # estados del xArm en que acepta comandos: 1 en movimiento, 2 quieto (3 suspendido, 4 detenido,
+    # p.ej. tras la parada de emergencia, una colisión o un stop desde la app)
+    READY_STATES = (1, 2)
 
     # ------------------------------------------------------------------ #
     # Interface                                                            #
@@ -180,6 +183,7 @@ class XArmRobot(Robot):
         self._gripper_counter = 0
         self._cached_gripper_pos = 0.0
         self._last_sent_gripper = -1.0   # evita envíos redundantes al gripper
+        self._gripper_read_failed = False
 
         if real:
             from xarm.wrapper import XArmAPI
@@ -188,6 +192,10 @@ class XArmRobot(Robot):
             self.robot = None
 
         self._control_frequency = control_frequency
+        # por qué el brazo no acepta comandos (None: listo); mientras no sea None el hilo de control
+        # no envía nada. Solo enable_arm() lo vuelve a habilitar: tras una parada de emergencia o
+        # una colisión, el operador decide cuándo es seguro
+        self.arm_problem = None
         self._clear_error_states()
         self._set_gripper_position(self.GRIPPER_OPEN)
 
@@ -230,6 +238,11 @@ class XArmRobot(Robot):
                     self.robot.vc_set_joint_velocity([0.0] * 5, is_radian=True)
                 self.robot.set_mode(4 if mode == "velocity" else 1)
                 self.robot.set_state(state=0)
+                # con el lock tomado el hilo de control espera: que no vea el modo viejo del
+                # reporte y lo tome por un brazo detenido
+                deadline = time.monotonic() + 1.0
+                while self.robot.mode != (4 if mode == "velocity" else 1) and time.monotonic() < deadline:
+                    time.sleep(0.02)
         print(f"[XArmRobot] control_mode={mode}")
 
     def set_command(self, joints: np.ndarray, gripper: Optional[float] = None) -> None:
@@ -265,16 +278,49 @@ class XArmRobot(Robot):
         self.robot.set_gripper_speed(3000)
         time.sleep(1)
 
+    def _check_arm(self) -> Optional[str]:
+        """Por qué el brazo no acepta comandos según el último reporte del xArm, o None si está listo."""
+        if self.robot is None:
+            return None
+        expected = 4 if self.ctrl.mode == "velocity" else 1
+        if self.robot.error_code:
+            return f"controller error {self.robot.error_code}"
+        if self.robot.state not in self.READY_STATES:
+            return f"state {self.robot.state} (4 = stopped, e.g. emergency stop)"
+        if self.robot.mode != expected:
+            return f"mode {self.robot.mode}, expected {expected}"
+        return None
+
+    def enable_arm(self) -> Optional[str]:
+        """Limpia errores, habilita los motores y vuelve al modo de control (como al arrancar).
+        El brazo queda sostenido donde está: el objetivo pasa a ser la posición actual. Devuelve
+        el problema si sigue sin estar listo (p.ej. la parada de emergencia sigue apretada)."""
+        self.arm_problem = "enabling"     # el hilo de control no envía nada mientras tanto
+        print("[XArmRobot] Enabling the arm...")
+        self._clear_error_states()
+        with self.target_command_lock:
+            joints = self._update_last_state().joints()
+            self.ctrl.reset(joints, time.monotonic())
+            self.target_command = {"joints": joints, "gripper": self.target_command["gripper"]}
+        problem = self._check_arm()
+        self.arm_problem = problem
+        print(f"[XArmRobot] Arm {'ready' if problem is None else f'still not ready: {problem}'}")
+        return problem
+
     def _get_gripper_pos(self) -> float:
         if self.robot is None:
             return 0.0
         code, gripper_pos = self.robot.get_gripper_position()
-        while code != 0 or gripper_pos is None:
-            print(f"[XArmRobot] Error code {code} in get_gripper_position(). {gripper_pos}")
-            time.sleep(0.001)
-            code, gripper_pos = self.robot.get_gripper_position()
-            if code == 22:
-                self._clear_error_states()
+        if code != 0 or gripper_pos is None:
+            # con el brazo detenido (parada de emergencia) el gripper no responde por modbus
+            # (code 22): se sigue con el último valor. Antes se reintentaba en un lazo rehabilitando
+            # el brazo, que trababa el hilo de control; ahora lo rehabilita Enable arm
+            if not self._gripper_read_failed:
+                print(f"[XArmRobot] get_gripper_position() failed (code {code}): keeping the last "
+                      "gripper position until it responds")
+            self._gripper_read_failed = True
+            return self._cached_gripper_pos
+        self._gripper_read_failed = False
 
         normalized = (gripper_pos - self.GRIPPER_OPEN) / (
             self.GRIPPER_CLOSE - self.GRIPPER_OPEN
@@ -305,10 +351,15 @@ class XArmRobot(Robot):
                 kind, values = self.ctrl.step(
                     self.last_state.joints(), time.monotonic(), 1 / self._control_frequency)
 
-            if kind == "position":
-                self._set_position(values)
-            else:
-                self._set_velocity(values)
+            if self.arm_problem is None and (problem := self._check_arm()) is not None:
+                self.arm_problem = problem
+                print(f"[XArmRobot] Arm stopped: {problem}. Commands are paused until Enable arm "
+                      "(panel, Robot folder)")
+            if self.arm_problem is None:
+                if kind == "position":
+                    self._set_position(values)
+                else:
+                    self._set_velocity(values)
 
             if gripper_command is not None:
                 # Solo envía si cambió más del 2 % (evita spam al gripper)
@@ -378,15 +429,15 @@ class XArmRobot(Robot):
         ret = self.robot.vc_set_joint_velocity(
             [float(v) for v in speeds], is_radian=True, is_sync=False,
             duration=self.VELOCITY_WATCHDOG_PERIODS / self._control_frequency)
-        if ret in [1, 9]:
-            self._clear_error_states()
+        # ret 1/9 (error, brazo no listo): _check_arm lo detecta en la próxima vuelta; antes se
+        # rehabilitaba solo, también tras una parada de emergencia
 
     def _set_position(self, joints: np.ndarray) -> None:
         if self.robot is None:
             return
         ret = self.robot.set_servo_angle_j(joints, wait=False, is_radian=True)
-        if ret in [1, 9]:
-            self._clear_error_states()
+        # ret 1/9 (error, brazo no listo): _check_arm lo detecta en la próxima vuelta; antes se
+        # rehabilitaba solo, también tras una parada de emergencia
 
     # ------------------------------------------------------------------ #
     # Observations (interfaz SplatSim)                                     #
