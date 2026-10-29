@@ -86,6 +86,16 @@ def load_reference(episode: str, hz: float):
     return times, np.array(joints), commanded
 
 
+def nearest_turn(joints, current):
+    """Desplaza cada articulación del brazo en vueltas enteras (2π) para que la trayectoria empiece
+    lo más cerca posible de current: misma pose física, sin dar una vuelta entera (p.ej. la muñeca
+    grabada en -2π con el brazo en 0). Devuelve los joints y las vueltas por articulación."""
+    turns = np.round((joints[0, ARM] - current[ARM]) / (2 * np.pi))
+    joints = joints.copy()
+    joints[:, ARM] -= 2 * np.pi * turns
+    return joints, turns.astype(int)
+
+
 def resample(times, joints, t):
     """Joints interpolados linealmente en los instantes t (constantes fuera del rango)."""
     return np.stack([np.interp(t, times, joints[:, j]) for j in range(joints.shape[1])], axis=1)
@@ -201,7 +211,12 @@ def main(args: Args) -> None:
                     call(robot, "set_control_mode", mode=mode)
                     if args.reset:
                         call(robot, "reset_robot")
-                    gap = np.abs(joints[0, ARM] - np.asarray(robot.get_joint_state())[ARM]).max()
+                    current = np.asarray(robot.get_joint_state(), dtype=float)
+                    joints, turns = nearest_turn(joints, current)
+                    if turns.any():
+                        print(f"[Replay] vueltas de 2π restadas por articulación: {turns.tolist()} "
+                              "(misma pose física)")
+                    gap = np.abs(joints[0, ARM] - current[ARM]).max()
                     if gap > args.max_approach:
                         print(f"[Replay] la primera pose está a {gap:.2f} rad (> --max_approach "
                               f"{args.max_approach}); se salta. ¿Falta Reset Robot o es de otro robot?")
