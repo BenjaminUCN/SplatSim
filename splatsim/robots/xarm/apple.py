@@ -1,9 +1,17 @@
 """Manzana de la escena: cuerpo estático + sliders opcionales para moverla."""
 import numpy as np
 
-from splatsim.utils.apple_grid import APPLE_GRID_PATH, load_grid, load_random_range, save_grid_file
+from splatsim.utils.apple_grid import (
+    APPLE_GRID_PATH,
+    load_grid,
+    load_random_range,
+    load_random_shape,
+    normalize_hemisphere,
+    sample_hemisphere,
+    save_grid_file,
+)
 
-from .config import APPLE_INIT, APPLE_NAME, APPLE_RANGE
+from .config import APPLE_HEMISPHERE, APPLE_INIT, APPLE_NAME, APPLE_RANGE
 
 MIN_RANGE_SIZE = 0.01   # m: lado mínimo del rango aleatorio
 
@@ -14,6 +22,8 @@ class AppleController:
         self.movable = movable
         # rango de "Random Position": el guardado en APPLE_GRID_PATH o APPLE_RANGE
         self.range = load_random_range(APPLE_RANGE)
+        # o el hemisferio (al alcance del brazo), según la forma guardada
+        self.shape, self.hemisphere = load_random_shape(APPLE_HEMISPHERE)
 
         idx = server.splat_object_name_list.index(APPLE_NAME)
         self.body_id = server.urdf_object_list[idx]
@@ -48,7 +58,12 @@ class AppleController:
         self.s.set_object_pose(APPLE_NAME, np.array(xyz), np.array([0, 0, 0, 1]), use_gravity=False)
 
     def random_position(self):
+        if self.shape == "hemisphere":
+            return sample_hemisphere(self.hemisphere)
         return [np.random.uniform(*self.range[a]) for a in "xyz"]
+
+    def set_hemisphere(self, center, radius, facing, z) -> None:
+        self.hemisphere = normalize_hemisphere(center, radius, facing, z)
 
     def set_range(self, lo, hi) -> None:
         """Rango aleatorio entre las esquinas lo y hi (se ordenan; lado mínimo MIN_RANGE_SIZE)."""
@@ -62,8 +77,20 @@ class AppleController:
         return (tuple(self.range[a][0] for a in "xyz"), tuple(self.range[a][1] for a in "xyz"))
 
     def save_range(self) -> None:
-        save_grid_file(random_range=self.range)
-        print(f"[xArm5] Rango aleatorio {self.range} guardado en {APPLE_GRID_PATH}")
+        save_grid_file(random_range=self.range, random_shape=self.shape,
+                       random_hemisphere=self.hemisphere)
+        what = self.hemisphere if self.shape == "hemisphere" else self.range
+        print(f"[xArm5] Rango aleatorio ({self.shape}) {what} guardado en {APPLE_GRID_PATH}")
+
+    def remove_from_grid(self, index: int) -> list | None:
+        """Quita la posición `index` de APPLE_GRID_PATH (las siguientes bajan un número)."""
+        positions = load_grid()
+        if not 0 <= index < len(positions):
+            return None
+        removed = positions.pop(index)
+        save_grid_file(positions=positions)
+        print(f"[xArm5] Posición #{index} {removed} quitada de {APPLE_GRID_PATH}")
+        return removed
 
     def update(self) -> None:
         """Llamar cada tick."""

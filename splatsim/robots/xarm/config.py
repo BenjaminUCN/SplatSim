@@ -38,6 +38,10 @@ APPLE_CAM_OFFSET_RPY = (-1.562, 0.0, -1.562)
 FLOOR_Z = -0.7
 APPLE_NAME = "plastic_apple"
 APPLE_RANGE = {"x": (-0.9, -0.3), "y": (-0.8, 0.8), "z": (-0.5, 0.6)}
+# alternativa a la caja: media cáscara alrededor del hombro (joint2, 0.267 m sobre la base), hacia la
+# planta (-x). Con el punto de agarre (0.17 m del efector) el brazo llega a ~0.93 m del hombro
+APPLE_HEMISPHERE = {"center": (0.0, 0.0, 0.267), "radius": (0.5, 0.95), "facing": 180.0,
+                    "z": (-0.5, 0.6)}
 # Valor inicial de los sliders. Antes x=0.3 (fuera de rango); ahora dentro.
 APPLE_INIT = (-0.3, 0.2, 0.1)
 # grilla de posiciones para scripts/xarm5/run_policy_trials.py (se llena con el botón de guardar)
