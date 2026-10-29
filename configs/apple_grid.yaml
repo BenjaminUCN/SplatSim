@@ -1,14 +1,26 @@
-# Tomato positions (x, y, z) in PyBullet world coordinates used by scripts/xarm5/run_policy_trials.py.
-# Add positions with the "Save Apple Position to Grid" button (launch_nodes.py --move_apple)
-# or edit this list by hand.
+# Tomato positions (x, y, z) in PyBullet world coordinates used by scripts/xarm5/run_policy_trials.py,
+# added with "Save Position to Grid" in the control panel (or by hand), and random_range: the box
+# (min, max per axis, m) or random_hemisphere: where "Random Position" puts it, chosen by random_shape
+# (panel: Tomato > Random range). The hemisphere: center (m), radius [min, max] (m), facing (deg, the
+# horizontal direction of its axis, 180 = -x) and z [min, max] (m, cuts it at those heights).
 positions:
-- [-0.9, 0.2, 0.1]
-- [-0.9, 0.2274, 0.3395]
 - [-0.8716, 0.0337, 0.3395]
-- [-0.8716, -0.2274, 0.3395]
-- [-0.8716, -0.2274, 0.1774]
 - [-0.8716, 0.0253, 0.1137]
-- [-0.8716, 0.3368, 0.1137]
-- [-0.8716, 0.3368, -0.0195]
 - [-0.8716, 0.0421, -0.0195]
-- [-0.8716, -0.32, -0.0195]
+- [-0.7442, -0.2274, 0.1774]
+- [-0.8206, 0.0253, 0.1137]
+- [-0.761, 0.3368, -0.0195]
+- [-0.7668, 0.3368, 0.1137]
+- [-0.8158, 0.2, 0.1]
+- [-0.8245, -0.2274, 0.3395]
+- [-0.8082, -0.2274, 0.1774]
+random_range:
+  x: [-0.9, -0.3]
+  y: [-0.8, 0.8]
+  z: [-0.5, 0.6]
+random_shape: hemisphere
+random_hemisphere:
+  center: [0.0, 0.0, 0.267]
+  radius: [0.5, 0.9]
+  facing: 180.0
+  z: [-0.5, 0.6]
