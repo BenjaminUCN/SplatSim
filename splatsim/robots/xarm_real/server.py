@@ -16,15 +16,13 @@ import numpy as np
 
 from splatsim.robots.station.operator import OperatorMixin, OperatorPrompt
 from splatsim.robots.station.recorder import TrajectoryRecorder
+from splatsim.robots.station.urdf_view import xarm5_urdf_joints
 from splatsim.robots.station.zmq_server import ZMQRobotServer, ZMQServerThread
 
 LOOP_HZ = 100            # vueltas por segundo del lazo del servidor (panel, teclado)
 RESET_TOLERANCE = 0.02   # rad: Reset Robot termina cuando todas las articulaciones están a esto
 RESET_EXTRA_TIME = 3.0   # s de margen sobre la duración prevista del reset antes de rendirse
 MAX_CONTROL_HZ = 30      # el lazo de control del driver corre a 30 Hz: comandar más rápido no sirve
-GRIPPER_MAX_ANGLE = 0.85 # rad del drive_joint con el gripper normalizado en 1 (igual que el sim)
-GRIPPER_JOINTS = ("drive_joint", "left_finger_joint", "left_inner_knuckle_joint",
-                  "right_outer_knuckle_joint", "right_finger_joint", "right_inner_knuckle_joint")
 
 
 def _min_jerk(tau: float) -> float:
@@ -193,10 +191,7 @@ class XArm5RealServer(OperatorMixin):
         return quat[:3], quat[3:]
 
     def urdf_joint_positions(self) -> dict:
-        q = np.asarray(self.robot.get_joint_state(), dtype=float)
-        joints = {f"joint{i + 1}": q[i] for i in range(5)}
-        joints.update({name: q[5] * GRIPPER_MAX_ANGLE for name in GRIPPER_JOINTS})
-        return joints
+        return xarm5_urdf_joints(self.robot.get_joint_state())
 
     def robot_base_pose(self):
         return None                        # la base del brazo es el origen del mundo

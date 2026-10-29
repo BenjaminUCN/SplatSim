@@ -27,6 +27,7 @@ import hashlib
 import os
 import pickle
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -44,7 +45,9 @@ from PIL import Image
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
+from splatsim.robots.station.urdf_view import xarm5_urdf_joints  # noqa: E402
 from splatsim.utils.camera_setup import load_camera_setup  # noqa: E402
+from splatsim.utils.paths import load_yaml  # noqa: E402
 from splatsim.utils.episode_selection import load_discarded, save_discarded  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
 from splatsim.utils.grasp_point import GRASP_POINT_PATH, grasp_error, load_grasp_point  # noqa: E402
@@ -63,6 +66,9 @@ PLAYBACK_FPS = 10
 _IMG = re.compile(r"^(.+_rgb)_(\d+)\.png$")
 # colores de la trayectoria por etiqueta de parada (paleta de referencia)
 LABEL_COLORS = {1: (0, 131, 0), 0: (42, 120, 214), -1: (175, 175, 170)}
+OBJECTS_CONFIG = "configs/object_configs/objects.yaml"   # urdf_path de cada robot
+ROBOT_COLOR = (0.82, 0.82, 0.8)   # "Show robot (URDF)": un color, para poder hacerlo translúcido
+ROBOT_OPACITY = 0.5
 RENDER_INFO_FILE = "render_info.yaml"   # lo escribe scripts/xarm5/render_recordings.py
 DEFAULT_DATASETS_DIR = "~/lerobot/splatsim_test_data"   # donde build_registry.py busca datasets
 # comparación original / remuestreada (paleta de referencia: serie 1 azul, serie 2 naranja)
@@ -74,6 +80,9 @@ RESAMPLED_RGB, SOURCE_RGB = (42, 120, 214), (235, 104, 52)
 class Args:
     root: str = "~/data/bc_data"   # carpeta con carpetas de grabaciones (gello, gello_3plants, ...)
     port: int = 8081
+    # robot de "Show robot (URDF)": su urdf_path en objects.yaml, o un URDF dado con --urdf
+    robot_name: str = "xarm5_lite_plant_v3"
+    urdf: str | None = None
 
 
 def _pkl_key(p: Path):
@@ -147,7 +156,7 @@ class RecordingFolder:
         if entry is not None:
             return entry
         ep = self.path / name
-        ee, rpy, grip, t, apple, bad, src = [], [], [], [], None, [], []
+        ee, rpy, grip, t, apple, bad, src, joints = [], [], [], [], None, [], [], []
         for p in sorted(ep.glob("*.pkl"), key=_pkl_key):
             try:
                 with open(p, "rb") as f:
@@ -159,6 +168,7 @@ class RecordingFolder:
             rpy.append(np.asarray(obs["state"][3:6], dtype=float))
             grip.append(float(np.ravel(obs["state"])[6]) if len(obs["state"]) > 6 else 0.0)
             t.append(obs.get("sim_time", np.nan))
+            joints.append(np.asarray(obs.get("joint_positions", np.full(6, np.nan)), dtype=float))
             if apple is None and obs.get(APPLE_KEY) is not None:
                 apple = np.asarray(obs[APPLE_KEY], dtype=float)
             if "source_frames" in obs:
@@ -167,11 +177,22 @@ class RecordingFolder:
                  "rpy": np.array(rpy).reshape(-1, 3),
                  "gripper": np.array(grip), "sim_time": np.array(t, dtype=float), "apple": apple,
                  "unreadable": bad,
+                 "joints": np.array(joints).reshape(len(joints), -1),
                  # render_recordings.py: (frame i, frame i+1, peso) de la grabación original
                  "source_frames": np.array(src, dtype=float) if src else None}
         with self._lock:
             self._cache[name] = entry
         return entry
+
+    def joints(self, name: str) -> np.ndarray:
+        """joint_positions por frame; las entradas de caché anteriores no las tienen: se releen."""
+        entry = self.trail(name)
+        if "joints" not in entry:
+            with self._lock:
+                self._cache.pop(name, None)
+            entry = self.trail(name)
+            self.save_cache()
+        return entry["joints"]
 
     def images(self, name: str) -> dict[str, list[Path]]:
         """Cámara -> imágenes del episodio en orden (una por frame, sirve para ambas numeraciones)."""
@@ -207,11 +228,28 @@ class RecordingFolder:
         (self.discarded.add if discarded else self.discarded.discard)(name)
         save_discarded(self.path, self.discarded)
 
+    def delete(self, names) -> None:
+        """Borra los episodios del disco (con sus imágenes), su descarte y su etiqueta de parada."""
+        for name in names:
+            shutil.rmtree(self.path / name)
+            self.discarded.discard(name)
+            self.stop_labels.pop(name, None)
+            with self._lock:
+                self._cache.pop(name, None)
+            self._images.pop(name, None)
+        save_discarded(self.path, self.discarded)
+        save_stop_labels(self.path, self.stop_labels)
+        self.save_cache()
+        self.episodes = [d for d in self.episodes if d.name not in names]
+        self.names = [d.name for d in self.episodes]
+
 
 # ── app ──────────────────────────────────────────────────────────────────────
 class Reviewer:
-    def __init__(self, root: Path, port: int):
+    def __init__(self, root: Path, port: int, urdf_path: str | None = None):
         self.root = root
+        self.urdf_path = urdf_path
+        self._robot = None            # RobotUrdfView, al marcar "Show robot (URDF)"
         self.folder: RecordingFolder | None = None
         self.episode: str | None = None
         self.trail_data: dict | None = None
@@ -219,6 +257,8 @@ class Reviewer:
         self._loader_gen = 0          # al cambiar de carpeta, el hilo de carga anterior se detiene
         self._loaded = 0
         self._need_background = False
+
+        self._to_delete: list[str] = []   # episodios esperando confirmación para borrarse
 
         self.v = viser.ViserServer(port=port, label="Recordings review", verbose=False)
         set_page_title(self.v, "Recordings review")
@@ -252,6 +292,10 @@ class Reviewer:
             nav = gui.add_button_group("Navigate", ["◀ Prev", "Next ▶"])
             self.discard_box = gui.add_checkbox("Discard episode", False,
                                                 hint="Excluded from datasets (selection.yaml)")
+            delete = gui.add_button_group("Delete", ["This episode", "All discarded"])
+            self.delete_info = gui.add_markdown("")
+            self.delete_confirm = gui.add_button_group("Confirm", ["Delete from disk", "Cancel"],
+                                                       visible=False)
             self.episode_info = gui.add_markdown("")
         with gui.add_folder("Stop labels"):
             self.stop_info = gui.add_markdown("")
@@ -271,6 +315,11 @@ class Reviewer:
             self.show_all = gui.add_checkbox("Show other trails", True)
             self.color_mode = gui.add_dropdown("Trail color", ["gradient", "stop label"],
                                                initial_value="gradient")
+            self.show_robot = gui.add_checkbox(
+                "Show robot (URDF)", False,
+                hint="The robot at the playback frame, from the recorded joint_positions")
+            self.robot_opacity = gui.add_slider("Robot opacity", 0.05, 1.0, 0.05, ROBOT_OPACITY,
+                                                hint="Lower it to see the trail through the robot")
             self.show_source = gui.add_checkbox(
                 "Show source recording", True,
                 hint="Rendered folders: original teleoperation trail (orange) and resampled frames (blue)")
@@ -297,9 +346,14 @@ class Reviewer:
             lambda e: e.client and self.open_episode(self.episode_select.value.split(" ")[0]))
         nav.on_click(lambda e: self._step_episode(-1 if e.target.value.startswith("◀") else 1))
         self.discard_box.on_update(lambda e: e.client and self._toggle_discard())
+        delete.on_click(lambda e: self._ask_delete(e.target.value))
+        self.delete_confirm.on_click(lambda e: self._confirm_delete(e.target.value == "Delete from disk"))
         self.frame_slider.on_update(lambda _: self._show_frame(int(self.frame_slider.value)))
         self.play_button.on_click(lambda _: self._toggle_play())
         self.show_all.on_update(lambda _: self._draw_background())
+        self.show_robot.on_update(lambda _: self._toggle_robot())
+        self.robot_opacity.on_update(
+            lambda _: self._robot is not None and setattr(self._robot, "opacity", self.robot_opacity.value))
         self.color_mode.on_update(lambda _: self.trail_data is not None and self._draw_trail())
         self.show_source.on_update(lambda _: self.trail_data is not None and self._draw_source())
         set1.on_click(lambda e: self._stop_action(e.target.value))
@@ -532,6 +586,48 @@ class Reviewer:
         self._show_info()
         self._draw_background()
 
+    def _ask_delete(self, which: str):
+        """Primer paso del borrado: muestra qué se borrará y pide confirmar."""
+        if self.folder is None:
+            return
+        f = self.folder
+        names = [self.episode] if which == "This episode" else [n for n in f.names if n in f.discarded]
+        names = [n for n in names if n in f.names]
+        if not names:
+            self.delete_info.content = "No discarded episodes in this folder"
+            self.delete_confirm.visible = False
+            return
+        self._to_delete = names
+        shown = ", ".join(names[:12]) + (f" … ({len(names)})" if len(names) > 12 else "")
+        self.delete_info.content = (f"**Delete {shown} from `{f.path}`?** The episode folders and "
+                                    "their images are removed: this cannot be undone")
+        self.delete_confirm.visible = True
+
+    def _confirm_delete(self, confirmed: bool):
+        names, self._to_delete = self._to_delete, []
+        self.delete_confirm.visible = False
+        if not confirmed or not names or self.folder is None:
+            self.delete_info.content = ""
+            return
+        f = self.folder
+        # después se abre el siguiente episodio visible que siga existiendo
+        visible = self._visible_names()
+        i = visible.index(self.episode) if self.episode in visible else 0
+        after = [n for n in visible[i:] + visible[:i] if n not in names]
+        f.delete(names)
+        print(f"[Review] Borrados de {f.path}: {', '.join(names)}")
+        self.delete_info.content = f"Deleted {len(names)} episode{'s' * (len(names) > 1)}: {', '.join(names[:12])}"
+        if not f.names:
+            self.folder_select.options = self._folders() or ["-"]
+            self.episode, self.trail_data = None, None
+            self.episode_select.options = ["-"]
+            self.episode_info.content = f"`{f.path}` has no episodes left"
+            self._show_dataset(reset_fields=False)
+            return
+        self.open_episode(after[0] if after else f.names[0])
+        self._show_dataset(reset_fields=False)
+        self._draw_background()
+
     def _stop_action(self, action: str):
         f, d, name = self.folder, self.trail_data, self.episode
         if d is None:
@@ -706,10 +802,34 @@ class Reviewer:
             return
         k = min(k, len(d["ee"]) - 1)
         self._ee_marker.position = d["ee"][k]
+        if self._robot is not None and self._robot.visible:
+            q = self.folder.joints(self.episode)
+            if k < len(q) and len(q[k]) >= 6 and np.isfinite(q[k]).all():
+                self._robot.update(xarm5_urdf_joints(q[k]))
         for cam, files in self.folder.images(self.episode).items():
             if cam in self.images and k < len(files):
                 img = Image.open(files[k]).convert("RGB")
                 self.images[cam].image = np.asarray(img.resize((img.width // 2, img.height // 2)))
+
+    def _toggle_robot(self):
+        if self._robot is None and self.show_robot.value:
+            path = self.urdf_path
+            if not path or not os.path.exists(path):
+                print(f"[Review] URDF no encontrado: {path} (--urdf o --robot_name)")
+                self.show_robot.value = False
+                return
+            try:
+                from splatsim.robots.station.urdf_view import RobotUrdfView
+                self._robot = RobotUrdfView(self.v, path, color=ROBOT_COLOR,
+                                            opacity=self.robot_opacity.value)
+            except ImportError:
+                print("[Review] Falta yourdfpy para mostrar el robot: pip install yourdfpy==0.0.60")
+                self.show_robot.value = False
+                return
+        if self._robot is not None:
+            self._robot.visible = self.show_robot.value
+            if self.show_robot.value:
+                self._show_frame(int(self.frame_slider.value))
 
     def _toggle_play(self):
         self.playing = not self.playing
@@ -776,7 +896,9 @@ def _resampling_figure(source: dict, resampled: dict) -> np.ndarray:
 
 
 def main(args: Args):
-    Reviewer(Path(args.root).expanduser(), args.port).run()
+    urdf = args.urdf or (load_yaml(REPO_ROOT / OBJECTS_CONFIG).get(args.robot_name, {})
+                         .get("urdf_path") or [None])[0]
+    Reviewer(Path(args.root).expanduser(), args.port, urdf and os.path.expanduser(urdf)).run()
 
 
 if __name__ == "__main__":
