@@ -33,7 +33,7 @@ import yaml
 from gello.zmq_core.robot_node import ZMQClientRobot
 
 from splatsim.utils.grasp_point import grasp_error, load_grasp_point
-from splatsim.utils.remote_call import call
+from splatsim.utils.remote_call import ask_operator, call
 
 APPLE_NAME = "plastic_apple"
 APPLE_QUAT = (0.0, 0.0, 0.0, 1.0)
@@ -78,15 +78,6 @@ def grid_index(apple_grid, pos, tol: float = 0.01) -> int:
         return -1
     d = np.linalg.norm(np.asarray(apple_grid) - np.asarray(pos), axis=1)
     return int(d.argmin()) if d.min() < tol else -1
-
-
-def ask_operator(robot, text: str, options: list[str]) -> str:
-    """Pregunta en el panel del servidor y espera la respuesta."""
-    print(f"[Trials] Operador: {text} {options}")
-    prompt_id = call(robot, "operator_prompt", text=text, options=options)
-    while (answer := call(robot, "operator_answer", prompt_id=prompt_id)) is None:
-        time.sleep(0.2)
-    return answer
 
 
 def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_point,

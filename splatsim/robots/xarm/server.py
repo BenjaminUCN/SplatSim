@@ -50,7 +50,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
     ENV_CONFIG = ENV_CONFIG
     # métodos que el cliente puede llamar por ZMQ además de los de la base
     REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording", "get_preview",
-                      "operator_prompt", "operator_answer")
+                      "set_control_mode", "operator_prompt", "operator_answer")
 
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
@@ -98,6 +98,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         self._last_images = {}           # cámaras de la última observación (vista previa del panel)
         self._last_images_time = 0.0
         self._last_command_time = 0.0    # time.monotonic() del último comando
+        self._last_command = None        # último objetivo recibido (se graba como joint_command)
         # el recorder no toca la base en su constructor, así que es seguro crearlo antes
         self.recorder = TrajectoryRecorder(
             self, MAX_RECORD_SECONDS, RECORD_EVERY, state_only_max_seconds=TELEOP_MAX_RECORD_SECONDS)
@@ -242,6 +243,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
                 self._advance(self.steps_per_command)
             # con realtime la física la avanza el serve_loop
             self._last_command_time = time.monotonic()
+            self._last_command = np.array(joint_state, dtype=float)
             self.recorder.on_command()
 
     def _idle(self) -> bool:
@@ -395,6 +397,8 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
     def _add_extras(self, obs: dict) -> None:
         c = self.pybullet_client
         obs["joint_positions"] = self.get_joint_state()
+        if self._last_command is not None:   # lo que pidió el cliente (GELLO), para reproducirlo
+            obs["joint_command"] = self._last_command
         obs["sim_time"] = self.sim_steps * SIM_DT
         obs["control_mode"] = self.joint_ctrl.mode
         obs["sim_clock"] = self.sim_clock

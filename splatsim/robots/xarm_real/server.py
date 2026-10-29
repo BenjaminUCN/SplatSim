@@ -33,7 +33,7 @@ def _min_jerk(tau: float) -> float:
 
 
 class XArm5RealServer(OperatorMixin):
-    REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording",
+    REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording", "set_control_mode",
                       "operator_prompt", "operator_answer")
 
     def __init__(self, robot, cameras: dict, port: int = 6001, host: str = "127.0.0.1",
@@ -58,6 +58,7 @@ class XArm5RealServer(OperatorMixin):
         self._camera_lock = threading.Lock()
         self._last_images, self._last_images_time = {}, 0.0
         self._t0 = time.monotonic()
+        self._last_command = None          # último objetivo recibido (se graba como joint_command)
         self.recorder = TrajectoryRecorder(self, max_record_seconds, every=1)
         self.operator = OperatorPrompt()   # preguntas de run_policy_trials.py (ensayos a mano)
         self._zmq_server_thread = ZMQServerThread(ZMQRobotServer(self, host=host, port=port))
@@ -77,6 +78,7 @@ class XArm5RealServer(OperatorMixin):
     def command_joint_state(self, joint_state: np.ndarray) -> None:
         with self.lock:
             self.robot.command_joint_state(joint_state)
+            self._last_command = np.array(joint_state, dtype=float)
             self.recorder.on_command()
 
     def set_object_pose(self, *args, **kwargs) -> None:
@@ -87,6 +89,8 @@ class XArm5RealServer(OperatorMixin):
             obs = self.robot.get_observations()
             obs.update(self._read_cameras(self.camera_names))
             obs["time"] = self.clock()
+            if self._last_command is not None:   # lo que pidió el cliente (GELLO), para reproducirlo
+                obs["joint_command"] = self._last_command
             obs["control_hz"] = self.control_hz   # los clientes de ensayos se pacen con esto
             self.recorder.on_observation(obs)
             obs["recording"] = self.recorder.active   # tras on_observation: refleja el auto-stop

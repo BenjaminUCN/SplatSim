@@ -1,5 +1,5 @@
 """Panel de control web (viser) compartido por el sim y el xArm5 real: robot, política (Run,
-Record as trial, Trials), grabación y vistas de cámara.
+Record as trial, Trials), GELLO, grabación, reproducción de grabaciones y vistas de cámara.
 
 Abre http://localhost:<puerto> en el navegador. Los callbacks de viser corren en sus propios
 hilos, así que solo encolan acciones; update() las ejecuta desde el lazo del servidor con su lock
@@ -121,6 +121,7 @@ class StationPanel:
             self._build_policy_gui()
             self._build_gello_gui()
             self._build_recording_gui()
+            self._build_replay_gui()
         self._build_tabs(tabs)
         with tabs.add_tab("Tools", viser.Icon.TOOL):
             self._build_tools_gui()
@@ -491,6 +492,7 @@ class StationPanel:
             # se puede cambiar con una política corriendo: retoma desde la posición actual
             mode = self.v.gui.add_dropdown("Control mode", list(MODES),
                                            initial_value=self.s.control_mode)
+            self._mode = mode
             # frecuencia de comandos (el --hz del servidor): la usan Run y los ensayos
             hz = self.v.gui.add_number(
                 "Control Hz", self.s.control_hz, min=1, max=60, step=1,
@@ -716,17 +718,18 @@ class StationPanel:
         self._trial_status.content = f"0/{n} trials — loading the model..."
         self._start_client(cmd, label, trials=True)
 
-    def _start_client(self, args, label, trials: bool):
-        """Lanza un cliente (política o ensayos) en otro proceso; su salida va a esta terminal."""
+    def _start_client(self, args, label, trials: bool, reader=None):
+        """Lanza un cliente (política, ensayos, GELLO o replay) en otro proceso; su salida va a
+        esta terminal. reader(proc): hilo que la lee para mostrar el avance (los ensayos tienen uno)."""
         cmd = [sys.executable, *args]
         print(f"[Panel] {' '.join(cmd)}")
-        if trials:
-            # se lee su salida para mostrar el avance; sin buffer para que llegue al momento
+        reader = reader or (self._read_trials_output if trials else None)
+        if reader is not None:
+            # sin buffer para que la salida llegue al momento
             self._policy_proc = subprocess.Popen(
                 cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
                 env={**os.environ, "PYTHONUNBUFFERED": "1"})
-            threading.Thread(target=self._read_trials_output, args=(self._policy_proc,),
-                             daemon=True).start()
+            threading.Thread(target=reader, args=(self._policy_proc,), daemon=True).start()
         else:
             self._policy_proc = subprocess.Popen(cmd)
         self._policy_label = label
@@ -845,6 +848,8 @@ class StationPanel:
         names = sorted(d.name for d in self._rec_base.iterdir() if d.is_dir()) if self._rec_base.is_dir() else []
         self._rec_folder.options = sorted(set(names) | {select})
         self._rec_folder.value = select
+        if hasattr(self, "_replay_source"):
+            self._replay_source.options = self._rec_folder.options
         self._set_rec_folder(select)
 
     def _set_rec_folder(self, name: str):
@@ -879,6 +884,95 @@ class StationPanel:
         (self._rec_base / name).mkdir(parents=True, exist_ok=True)
         self._rec_new.value = ""
         self._refresh_rec_folders(name)
+
+    # ── reproducción de grabaciones ──────────────────────────────────────────
+    def _build_replay_gui(self):
+        """Reproduce episodios grabados en uno o varios modos de control
+        (scripts/xarm5/replay_recordings.py), para comparar los modos con la misma trayectoria."""
+        real = not hasattr(self.s, "sim_clock")
+        with self.v.gui.add_folder("Replay", expand_by_default=False):
+            self._replay_source = self.v.gui.add_dropdown(
+                "Source", list(self._rec_folder.options), initial_value=self._rec_folder.value,
+                hint=f"Recording folder to replay (folders of {self._rec_base})")
+            self._replay_episodes = self.v.gui.add_text(
+                "Episodes", "", hint="Episode numbers, e.g. 0,2,5-7; empty = all")
+            self._replay_modes = {m: self.v.gui.add_checkbox(m, True) for m in MODES}
+            self._replay_record = self.v.gui.add_checkbox(
+                "Record replays", True, hint="Save each replay as an episode in <source>_replay/<date>/<mode>/")
+            self._replay_ask = self.v.gui.add_checkbox(
+                "Ask before each", real,
+                hint="Wait for Start in the Operator box (Policy folder) before each replay, "
+                     "to set the scene again")
+            start = self.v.gui.add_button("Replay", color="green")
+            stop = self.v.gui.add_button("Stop")
+            self._replay_status = self.v.gui.add_markdown("")
+        self._replay_info = {}
+        self._on_click(start, self._start_replay)
+        self._on_click(stop, self._stop_policy)
+
+    def _start_replay(self):
+        if self._policy_proc is not None:
+            return                        # el estado ya dice quién maneja el robot
+        folder = self._rec_base / self._replay_source.value
+        numbers = sorted(int(d.name) for d in folder.iterdir()
+                         if d.is_dir() and d.name.isdigit()) if folder.is_dir() else []
+        if not numbers:
+            self._replay_info = {"note": f"**`{folder}` has no episodes**"}
+            return
+        try:
+            episodes = parse_indices(self._replay_episodes.value, numbers[-1] + 1)
+        except ValueError:
+            self._replay_info = {"note": f"**Episodes**: numbers between {numbers[0]} and "
+                                         f"{numbers[-1]}, e.g. 0,2,5-7"}
+            return
+        missing = sorted(set(episodes or []) - set(numbers))
+        modes = [m for m, check in self._replay_modes.items() if check.value]
+        if missing or not modes:
+            self._replay_info = {"note": f"**Episodes {missing} do not exist**" if missing
+                                 else "**Pick at least one mode**"}
+            return
+        cmd = ["scripts/xarm5/replay_recordings.py", str(folder), "--hz", str(self.s.control_hz),
+               "--robot_port", str(self.s.zmq_port), "--modes", *modes,
+               "--record" if self._replay_record.value else "--no-record",
+               "--ask", str(bool(self._replay_ask.value))]
+        if episodes is not None:
+            cmd += ["--episodes", *map(str, episodes)]
+        total = len(episodes if episodes is not None else numbers) * len(modes)
+        self._replay_info = {"done": 0, "total": total, "now": "starting...", "results": []}
+        self._start_client(cmd, "Replay", trials=False, reader=self._read_replay_output)
+
+    def _read_replay_output(self, proc):
+        """Hilo: reenvía la salida de replay_recordings.py y extrae el avance y los errores."""
+        info = self._replay_info
+        for line in proc.stdout:
+            sys.stdout.write(line)
+            if m := re.search(r"\[Replay\] (\d+)/(\d+) — (.+)", line):
+                info["done"], info["now"] = int(m.group(1)) - 1, m.group(3).strip()
+            elif m := re.search(r"\[Replay\] (\w+): error RMS ([\d.]+) rad, máx ([\d.]+) rad, "
+                                r"final ([\d.]+) rad, retraso ([\d.]+) s", line):
+                info["done"] += 1
+                info["results"].append(f"{info['now']}: error RMS {m.group(2)} rad, "
+                                       f"max {m.group(3)} rad, lag {m.group(5)} s")
+            elif "[Replay]" in line and "se salta" in line:
+                info["results"].append(f"{info['now']}: **skipped**, first pose too far (Reset Robot?)")
+            elif m := re.search(r"\[Replay\] Resultados en (.+)", line):
+                info["root"] = m.group(1).strip()
+
+    def _update_replay_status(self):
+        info = self._replay_info
+        lines = []
+        if "total" in info:
+            running = self._policy_proc is not None and self._policy_label == "Replay"
+            head = f"{info['done']}/{info['total']} replays"
+            lines.append(f"● {head} — now {info['now']}" if running else head)
+            lines += info["results"][-len(MODES):]          # los últimos, en rad
+            if info.get("root"):
+                lines.append(f"summary in `{info['root']}/summary.csv`")
+        elif self._policy_proc is not None and self._policy_label != "Replay":
+            lines.append(f"{self._policy_label} is driving the robot: press Stop first")
+        if info.get("note"):
+            lines.append(info["note"])
+        self._replay_status.content = "  \n".join(lines)
 
     # ── vista previa ─────────────────────────────────────────────────────────
     def _build_preview_gui(self):
@@ -969,6 +1063,9 @@ class StationPanel:
                 "then Enable arm" if problem else "Arm ready")
         self._poll_policy()
         self._update_gello_status()
+        self._update_replay_status()
+        if self._mode.value != self.s.control_mode:   # cambiado por un cliente (p.ej. el replay)
+            self._mode.value = self.s.control_mode
         self._update_operator()
         rec = self.s.recorder
         self._rec_status.content = (
