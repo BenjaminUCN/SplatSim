@@ -4,9 +4,18 @@ comparar cómo sigue cada modo (position / interp / velocity) la misma trayector
 Primero lanzar el servidor (real o sim) y luego, p.ej.:
     python scripts/xarm5/replay_recordings.py ~/data/bc_data/real_fewshot --episodes 0 2 --hz 10
 
-Por cada episodio y cada modo: cambia el modo del servidor, Reset Robot, lleva el brazo despacio a
-la primera pose del episodio, y manda la trayectoria a --hz (remuestreada a instantes k/hz desde los
-tiempos grabados), grabándola como un episodio normal. Se reproduce lo que pidió el cliente al
+Por cada episodio y cada modo: cambia el modo del servidor, Reset Robot (y comprueba que el brazo
+quedó en la pose de reset guardada: si no, se salta esa repetición), lleva el brazo despacio a la
+primera pose del episodio, y manda la trayectoria a --hz (remuestreada a instantes k/hz desde los
+tiempos grabados), grabándola como un episodio normal. Así todas las repeticiones parten del mismo
+lugar, sea cual sea el modo o el episodio anterior.
+
+Antes de empezar se revisa con la URDF (splatsim/utils/self_collision.py) que ni la trayectoria ni
+el acercamiento desde el reset choquen el brazo consigo mismo; los episodios que chocan se saltan
+(--no-collision-check para no revisar). Con --order rotate (por defecto) el orden de los modos rota
+de un episodio al siguiente (position→interp→velocity, interp→velocity→position, ...): cada modo
+va primero, al medio y al final igual número de veces, y el calentamiento del brazo o el cansancio
+del operador no favorecen a ninguno. Analizar con scripts/xarm5/compare_replays.py. Se reproduce lo que pidió el cliente al
 grabar (joint_command, p.ej. el GELLO); las grabaciones anteriores a ese campo solo tienen la
 posición alcanzada (joint_positions), que se usa en su lugar.
 
@@ -15,7 +24,9 @@ Skip / Stop), para reponer el tomate y tener la parada de emergencia a mano.
 
 Salida en <folder>_replay/<fecha>/: una carpeta por modo con los episodios grabados (meta.json con
 el episodio de origen) y summary.csv con el error de seguimiento de las 5 articulaciones respecto
-de la trayectoria de origen: RMS, máximo, final y el retraso que mejor las alinea.
+de la trayectoria de origen: RMS, máximo, final y el retraso que mejor las alinea, más el orden
+del modo en su episodio (order: 1 = primero), la distancia al reset al empezar (start_err) y la
+menor distancia entre links de la trayectoria (min_link_dist).
 """
 import csv
 import datetime
@@ -24,17 +35,20 @@ import os
 import pickle
 import time
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 import tyro
 from gello.zmq_core.robot_node import ZMQClientRobot
 
 from splatsim.robots.joint_controller import MODES
+from splatsim.utils.paths import expand, load_yaml
 from splatsim.utils.remote_call import ask_operator, call
 
 ARM = slice(0, 5)        # articulaciones del brazo (la 6ª es el gripper)
 SETTLE_SECONDS = 0.5     # s quieto en la primera pose antes de empezar
 MAX_LAG = 0.5            # s: retraso máximo buscado al alinear la reproducción con el origen
+CHECK_STEP = 0.05        # s entre poses revisadas por autocolisión
 
 
 @dataclass
@@ -50,6 +64,10 @@ class Args:
     approach_speed: float = 0.3            # rad/s hasta la primera pose
     max_approach: float = 1.0              # rad: más lejos que esto no se mueve (¿falta Reset Robot?)
     hold_seconds: float = 1.0              # s sosteniendo la última pose al terminar (sigue grabando)
+    order: Literal["rotate", "fixed"] = "rotate"  # rotate: el orden de los modos rota entre episodios
+    start_tolerance: float = 0.03          # rad: tras Reset Robot el brazo debe estar a esto del reset
+    collision_check: bool = True           # revisar autocolisiones con la URDF antes de empezar
+    robot_name: str = "xarm5_lite_plant_v3"  # robot de objects.yaml cuya URDF se usa para revisar
     robot_port: int = 6001
     hostname: str = "127.0.0.1"
 
@@ -160,6 +178,46 @@ def replay(robot, times, joints, args, hz, wall, record: bool, state_only: bool)
     return np.array(sample_t), np.array(achieved)
 
 
+def mode_order(modes, k: int, order: str) -> list[str]:
+    """Modos del k-ésimo episodio: rotados k lugares con order=rotate."""
+    modes = list(modes)
+    if order == "rotate":
+        k %= len(modes)
+        modes = modes[k:] + modes[:k]
+    return modes
+
+
+def approach_path(start, target, step: float = 0.05) -> np.ndarray:
+    """Poses del acercamiento (recta en espacio articular, como approach) cada ~step rad."""
+    n = max(2, int(np.ceil(np.abs(target[ARM] - start[ARM]).max() / step)) + 1)
+    return start[None, ARM] + np.linspace(0, 1, n)[:, None] * (target[ARM] - start[ARM])[None]
+
+
+def screen_episodes(episodes, home, hz, args) -> tuple[list, dict]:
+    """Episodios que no chocan consigo mismos (trayectoria y acercamiento desde home) y la menor
+    distancia entre links de cada uno."""
+    from splatsim.utils.self_collision import SelfCollisionChecker
+    urdf = expand(load_yaml("configs/object_configs/objects.yaml")[args.robot_name]["urdf_path"][0])
+    checker = SelfCollisionChecker(urdf, home)
+    ok, min_dist = [], {}
+    for episode in episodes:
+        times, joints, _ = load_reference(episode, hz)
+        joints, _ = nearest_turn(joints, home)
+        step = max(1, int(round(CHECK_STEP / max(np.median(np.diff(times)), 1e-6)))) if len(times) > 1 else 1
+        poses = np.concatenate([approach_path(home, joints[0]), joints[::step, ARM]])
+        hit = checker.check(poses)
+        name = os.path.basename(episode)
+        if hit is not None:
+            k, pairs = hit
+            where = "en el acercamiento desde el reset" if k < len(poses) - len(joints[::step]) else \
+                f"a los {(k - (len(poses) - len(joints[::step]))) * step / hz:.1f} s"
+            print(f"[Replay] {name}: autocolisión {where} ({', '.join('–'.join(p) for p in pairs)}); se salta")
+            continue
+        min_dist[episode] = min(checker.min_distance(q)[0] for q in poses)
+        ok.append(episode)
+    return ok, min_dist
+
+
 def main(args: Args) -> None:
     bad = [m for m in args.modes if m not in MODES]
     if bad:
@@ -176,6 +234,19 @@ def main(args: Args) -> None:
     state_only = obs.get("sim_clock") == "realtime"
     ask = real if args.ask is None else args.ask
     original_mode = obs.get("control_mode")
+    home = obs.get("reset_joint_command")
+    if args.reset and home is None:
+        raise SystemExit("El servidor no tiene pose de reset (en el real: home_joints en "
+                         "configs/xarm5_real.yaml); sin ella no se puede partir siempre del mismo lugar")
+    home = None if home is None else np.asarray(home, dtype=float)
+    min_dist = {}
+    if args.collision_check:
+        ref = home if home is not None else np.asarray(robot.get_joint_state(), dtype=float)
+        n_before = len(episodes)
+        episodes, min_dist = screen_episodes(episodes, ref, hz, args)
+        print(f"[Replay] autocolisión: {n_before - len(episodes)} de {n_before} episodios se saltan")
+        if not episodes:
+            raise SystemExit("Ningún episodio sin autocolisión")
 
     source = os.path.expanduser(args.folder).rstrip("/")
     root = os.path.expanduser(args.output_dir) if args.output_dir else os.path.join(
@@ -185,19 +256,19 @@ def main(args: Args) -> None:
           f"({'robot real' if real else 'sim'}); resultados en {root}")
 
     total = len(episodes) * len(args.modes)
-    fields = ["source_episode", "mode", "folder", "commanded", "frames", "duration",
-              "rms_err", "max_err", "final_err", "lag_s"]
+    fields = ["source_episode", "mode", "order", "run", "folder", "commanded", "frames", "duration",
+              "rms_err", "max_err", "final_err", "lag_s", "start_err", "min_link_dist"]
     n = 0
     try:
         with open(os.path.join(root, "summary.csv"), "w", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=fields)
             writer.writeheader()
-            for episode in episodes:
+            for k_ep, episode in enumerate(episodes):
                 times, joints, commanded = load_reference(episode, hz)
                 if not commanded:
                     print(f"[Replay] {episode}: sin joint_command (grabación antigua), se "
                           "reproduce la posición alcanzada")
-                for mode in args.modes:
+                for position, mode in enumerate(mode_order(args.modes, k_ep, args.order), 1):
                     n += 1
                     what = f"episode {os.path.basename(episode)} in {mode}"
                     print(f"[Replay] {n}/{total} — {what} ({times[-1]:.1f} s)")
@@ -212,6 +283,12 @@ def main(args: Args) -> None:
                     if args.reset:
                         call(robot, "reset_robot")
                     current = np.asarray(robot.get_joint_state(), dtype=float)
+                    start_err = (float(np.abs(current[ARM] - home[ARM]).max())
+                                 if home is not None else float("nan"))
+                    if args.reset and start_err > args.start_tolerance:
+                        print(f"[Replay] tras Reset Robot el brazo está a {start_err:.3f} rad del reset "
+                              f"(> --start_tolerance {args.start_tolerance}); se salta. ¿Brazo detenido?")
+                        continue
                     joints, turns = nearest_turn(joints, current)
                     if turns.any():
                         print(f"[Replay] vueltas de 2π restadas por articulación: {turns.tolist()} "
@@ -234,7 +311,10 @@ def main(args: Args) -> None:
                     finally:
                         call(robot, "stop_recording")
                     result = tracking(times, joints, sample_t, achieved)
-                    writer.writerow({"source_episode": episode, "mode": mode, "folder": folder or "",
+                    writer.writerow({"source_episode": episode, "mode": mode, "order": position, "run": n,
+                                     "start_err": round(start_err, 4),
+                                     "min_link_dist": round(min_dist[episode], 4) if episode in min_dist else "",
+                                     "folder": folder or "",
                                      "commanded": commanded, "frames": len(sample_t),
                                      "duration": round(float(sample_t[-1]), 3),
                                      **{k: round(v, 4) for k, v in result.items()}})
