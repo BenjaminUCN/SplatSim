@@ -10,8 +10,9 @@ corrida; "etiqueta=ruta" cambia el nombre que aparece en tablas y gráficos.
 Éxito: error de agarre mínimo <= --success_dist (4 cm) durante el ensayo, es decir, el tomate
 llegó a estar en el punto de agarre del efector (configs/grasp_point.yaml). --metric elige
 min_grasp_err (por defecto), final_grasp_err, o las distancias crudas efector–tomate min_dist /
-final_dist (que no bajan de ~13 cm porque se miden desde el último link). Para ensayos antiguos
-sin columnas de agarre, se calculan desde los .pkl grabados de cada ensayo. Tests: con 2 modelos, exacto de Fisher; con más, chi-cuadrado de
+final_dist (que no bajan de ~13 cm porque se miden desde el último link). Para ensayos sin
+columnas de agarre, o medidos con otro punto de agarre (columna grasp_point de trials.csv; los
+anteriores a ella no la tienen), se calculan desde los .pkl grabados de cada ensayo. Tests: con 2 modelos, exacto de Fisher; con más, chi-cuadrado de
 independencia y Fisher por pares con corrección de Holm. Los intervalos son de Wilson (95%).
 
 Salida (--out, por defecto ~/data/policy_trials/comparisons/<fecha>/): summary.md,
@@ -73,12 +74,21 @@ def load_runs(entries) -> pd.DataFrame:
         if df.empty:
             raise SystemExit(f"{path}: trials.csv sin ensayos")
         manual = df["manual_success"].notna() if "manual_success" in df else pd.Series(False, df.index)
-        if "min_grasp_err" not in df or df.min_grasp_err[~manual].isna().any():
+        # ensayos sin error de agarre, o medido con otro punto de agarre (o sin anotarlo, los
+        # anteriores a la columna grasp_point): se recalcula desde los .pkl con el actual
+        stale = ("min_grasp_err" not in df or df.min_grasp_err[~manual].isna().any()
+                 or "grasp_point" not in df or (df.grasp_point[~manual] != _point_text()).any())
+        if stale:
             df = _backfill_grasp(df, skip=manual)
         df["model"] = label
         frames.append(df)
         print(f"{label}: {len(df)} ensayos de {len(csvs)} corrida(s)")
     return pd.concat(frames, ignore_index=True)
+
+
+def _point_text() -> str:
+    """El punto de agarre actual como lo anota run_policy_trials.py en trials.csv."""
+    return " ".join(f"{v:.4f}" for v in load_grasp_point())
 
 
 def _backfill_grasp(df: pd.DataFrame, skip: pd.Series) -> pd.DataFrame:
@@ -101,8 +111,9 @@ def _backfill_grasp(df: pd.DataFrame, skip: pd.Series) -> pd.DataFrame:
                 continue
         finals.append(errs[-1] if errs else np.nan)
         mins.append(min(errs) if errs else np.nan)
-    print(f"  error de agarre calculado desde los .pkl de {int((~skip).sum())} ensayos")
-    return df.assign(final_grasp_err=finals, min_grasp_err=mins)
+    print(f"  error de agarre calculado desde los .pkl de {int((~skip).sum())} ensayos "
+          f"(punto de agarre {_point_text()})")
+    return df.assign(final_grasp_err=finals, min_grasp_err=mins, grasp_point=_point_text())
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:

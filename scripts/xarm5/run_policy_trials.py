@@ -155,8 +155,10 @@ def main(args: Args) -> None:
         positions = args.positions if args.positions is not None else range(len(apple_grid))
     total = len(positions) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
-              "final_grasp_err", "min_grasp_err", "manual_success"]
+              "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point"]
     grasp_point = load_grasp_point()
+    # con qué punto se midió el error de agarre: compare_trials.py recalcula si cambió
+    point_text = " ".join(f"{v:.4f}" for v in grasp_point)
 
     with open(os.path.join(root, "trials.csv"), "w", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=fields)
@@ -197,7 +199,7 @@ def main(args: Args) -> None:
                             print(f"[Trials] Descartado por el operador ({result['folder']})")
                             continue
                         result["manual_success"] = int(answer == "Success")
-                    row = {"pos_idx": pos_idx, "trial": trial, **result}
+                    row = {"pos_idx": pos_idx, "trial": trial, **result, "grasp_point": point_text}
                     if apple_pos:
                         row.update(x=apple_pos[0], y=apple_pos[1], z=apple_pos[2])
                     writer.writerow(row)

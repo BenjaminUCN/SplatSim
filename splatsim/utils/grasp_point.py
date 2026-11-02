@@ -27,6 +27,34 @@ def tomato_in_ee(state, tomato_pos) -> np.ndarray:
     return rel[0] if single else rel
 
 
+FINGER_LINKS = ("left_finger", "right_finger")
+EE_LINK = "link_eef"          # el link de obs["state"]
+
+
+def gripper_center(urdf_path: str) -> np.ndarray:
+    """Centro del espacio entre las pinzas en el marco del efector, desde la URDF: el punto medio
+    de las cajas de los dos dedos con el gripper abierto (en el xArm5 ≈ [0, 0, 0.128], 4 cm antes
+    de link_tcp, la punta de los dedos)."""
+    import itertools
+
+    import pybullet as p
+    from pybullet_utils.bullet_client import BulletClient
+    c = BulletClient(connection_mode=p.DIRECT)
+    try:
+        body = c.loadURDF(urdf_path, useFixedBase=True)
+        links = {c.getJointInfo(body, i)[12].decode(): i for i in range(c.getNumJoints(body))}
+        ee = c.getLinkState(body, links[EE_LINK], computeForwardKinematics=True)
+        rot = np.array(c.getMatrixFromQuaternion(ee[5])).reshape(3, 3)
+        centers = []
+        for name in FINGER_LINKS:
+            lo, hi = c.getAABB(body, links[name])
+            corners = np.array([rot.T @ (np.array(v) - ee[4]) for v in itertools.product(*zip(lo, hi))])
+            centers.append((corners.min(0) + corners.max(0)) / 2)
+        return np.mean(centers, axis=0)
+    finally:
+        c.disconnect()
+
+
 def load_grasp_point(path: str = GRASP_POINT_PATH) -> np.ndarray:
     with open(path) as f:
         return np.asarray(yaml.safe_load(f)["point"], dtype=float)

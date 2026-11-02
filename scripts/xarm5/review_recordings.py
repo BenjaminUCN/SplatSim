@@ -42,6 +42,7 @@ import viser
 import yaml
 from matplotlib import colormaps
 from PIL import Image
+from scipy.spatial.transform import Rotation
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -50,7 +51,13 @@ from splatsim.utils.camera_setup import load_camera_setup  # noqa: E402
 from splatsim.utils.paths import load_yaml  # noqa: E402
 from splatsim.utils.episode_selection import load_discarded, save_discarded  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
-from splatsim.utils.grasp_point import GRASP_POINT_PATH, grasp_error, load_grasp_point  # noqa: E402
+from splatsim.utils.grasp_point import (  # noqa: E402
+    GRASP_POINT_PATH,
+    SUCCESS_RADIUS,
+    grasp_error,
+    gripper_center,
+    load_grasp_point,
+)
 from splatsim.utils.stop_labels import (  # noqa: E402
     VALID_RADIUS,
     auto_valid_from,
@@ -74,6 +81,9 @@ DEFAULT_DATASETS_DIR = "~/lerobot/splatsim_test_data"   # donde build_registry.p
 # comparación original / remuestreada (paleta de referencia: serie 1 azul, serie 2 naranja)
 RESAMPLED_HEX, SOURCE_HEX = "#2a78d6", "#eb6834"
 RESAMPLED_RGB, SOURCE_RGB = (42, 120, 214), (235, 104, 52)
+# "Show grasp point": zona de éxito (verde con el tomate dentro), punto de agarre y centro de la pinza
+ZONE_IN_RGB, ZONE_OUT_RGB = (0, 131, 0), (175, 175, 170)
+GRASP_RGB, CENTER_RGB = (0, 131, 0), (42, 120, 214)
 
 
 @dataclass
@@ -259,6 +269,8 @@ class Reviewer:
         self._need_background = False
 
         self._to_delete: list[str] = []   # episodios esperando confirmación para borrarse
+        self._grasp_handles = {}          # "Show grasp point": zona, punto de agarre y centro de la pinza
+        self._gripper_center = None       # en el marco del efector, desde la URDF (se calcula una vez)
 
         self.v = viser.ViserServer(port=port, label="Recordings review", verbose=False)
         set_page_title(self.v, "Recordings review")
@@ -311,6 +323,7 @@ class Reviewer:
         with gui.add_folder("Playback"):
             self.frame_slider = gui.add_slider("Frame", 0, 1, 1, 0)
             self.play_button = gui.add_button("Play", icon=viser.Icon.PLAYER_PLAY)
+            self.frame_info = gui.add_markdown("")
         with gui.add_folder("View"):
             self.show_all = gui.add_checkbox("Show other trails", True)
             self.color_mode = gui.add_dropdown("Trail color", ["gradient", "stop label"],
@@ -320,6 +333,10 @@ class Reviewer:
                 hint="The robot at the playback frame, from the recorded joint_positions")
             self.robot_opacity = gui.add_slider("Robot opacity", 0.05, 1.0, 0.05, ROBOT_OPACITY,
                                                 hint="Lower it to see the trail through the robot")
+            self.show_grasp = gui.add_checkbox(
+                "Show grasp point", True,
+                hint=f"Success zone: {SUCCESS_RADIUS * 100:.0f} cm around the grasp point "
+                     f"({GRASP_POINT_PATH}), green with the tomato inside; blue = center between the fingers")
             self.show_source = gui.add_checkbox(
                 "Show source recording", True,
                 hint="Rendered folders: original teleoperation trail (orange) and resampled frames (blue)")
@@ -352,6 +369,7 @@ class Reviewer:
         self.play_button.on_click(lambda _: self._toggle_play())
         self.show_all.on_update(lambda _: self._draw_background())
         self.show_robot.on_update(lambda _: self._toggle_robot())
+        self.show_grasp.on_update(lambda _: self._show_frame(int(self.frame_slider.value)))
         self.robot_opacity.on_update(
             lambda _: self._robot is not None and setattr(self._robot, "opacity", self.robot_opacity.value))
         self.color_mode.on_update(lambda _: self.trail_data is not None and self._draw_trail())
@@ -717,6 +735,49 @@ class Reviewer:
                                        position=d["apple"])
         self._ee_marker = self.v.scene.add_icosphere("/ee", radius=0.012, color=(255, 255, 255),
                                                      position=ee[0])
+        self._draw_grasp()
+
+    def _draw_grasp(self):
+        """Zona de éxito, punto de agarre y centro de la pinza (las mueve _show_frame)."""
+        if self._gripper_center is None and self.urdf_path and os.path.exists(self.urdf_path):
+            try:
+                self._gripper_center = gripper_center(self.urdf_path)
+            except Exception as e:  # noqa: BLE001  sin el centro igual se ve la zona de éxito
+                print(f"[Review] No se pudo calcular el centro de la pinza: {e}")
+                self._gripper_center = False
+        add = self.v.scene.add_icosphere
+        h = {}
+        if self.folder.grasp_point is not None:
+            h["zone"] = add("/grasp/zone", radius=SUCCESS_RADIUS, color=ZONE_OUT_RGB, opacity=0.25)
+            h["point"] = add("/grasp/point", radius=0.006, color=GRASP_RGB)
+        if self._gripper_center is not None and self._gripper_center is not False:
+            h["center"] = add("/grasp/center", radius=0.006, color=CENTER_RGB)
+        self._grasp_handles = h
+
+    def _update_grasp(self, k: int):
+        """Mueve los marcadores al efector del frame k y escribe los errores del frame."""
+        d, h = self.trail_data, self._grasp_handles
+        show = self.show_grasp.value
+        for handle in h.values():
+            handle.visible = show
+        lines = []
+        rot = Rotation.from_euler("xyz", d["rpy"][k]).as_matrix()   # como getEulerFromQuaternion
+        for key, local in (("point", self.folder.grasp_point), ("center", self._gripper_center)):
+            if key in h:
+                h[key].position = d["ee"][k] + rot @ local
+        if "zone" in h:
+            h["zone"].position = h["point"].position
+        if d["apple"] is not None:
+            if "point" in h:
+                err = float(np.linalg.norm(rot.T @ (d["apple"] - d["ee"][k]) - self.folder.grasp_point))
+                inside = err <= SUCCESS_RADIUS
+                h["zone"].color = ZONE_IN_RGB if inside else ZONE_OUT_RGB
+                lines.append(f"grasp error {err * 100:.1f} cm ({'success' if inside else 'out'}, "
+                             f"≤ {SUCCESS_RADIUS * 100:.0f} cm)")
+            if "center" in h:
+                dist = np.linalg.norm(d["apple"] - h["center"].position)
+                lines.append(f"tomato–gripper center {dist * 100:.1f} cm")
+        self.frame_info.content = "  \n".join(lines)
 
     def _source_trail(self) -> dict | None:
         """Trayectoria original del episodio actual (carpetas renderizadas)."""
@@ -802,6 +863,7 @@ class Reviewer:
             return
         k = min(k, len(d["ee"]) - 1)
         self._ee_marker.position = d["ee"][k]
+        self._update_grasp(k)
         if self._robot is not None and self._robot.visible:
             q = self.folder.joints(self.episode)
             if k < len(q) and len(q[k]) >= 6 and np.isfinite(q[k]).all():

@@ -1,9 +1,14 @@
-# Tomato position in the end-effector frame at the end of the demos (m), and how far
-# each demo's last frame is from it. Written by scripts/xarm5/estimate_grasp_point.py.
-point: [-0.0191, 0.0034, 0.168]
-spread_std: [0.0122, 0.013, 0.0166]
-final_error_p50: 0.0193
-final_error_p90: 0.0343
+# Where the tomato must be in the end-effector frame (m): point, from point_source
+# (gripper_center: middle of the space between the fingers, from the URDF; demos: median
+# of the demos' last frame, demo_point). final_*: the demos' last frame vs point.
+# Written by scripts/xarm5/estimate_grasp_point.py.
+point: [0.0, 0.0, 0.1287]
+point_source: gripper_center
+demo_point: [-0.0191, 0.0034, 0.168]
+demo_spread_std: [0.0122, 0.013, 0.0166]
+final_error_p50: 0.0492
+final_error_p90: 0.0654
+final_within_success: 0.335
 sources:
 - {folder: ~/data/bc_data/gello_3plants, episodes: 206}
-generated: 2026-10-27 17:13
+generated: 2026-11-02 16:30

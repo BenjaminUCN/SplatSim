@@ -266,11 +266,18 @@ Press Ctrl+C to stop early; the current recording is closed and the arm is reset
 
 ## Grasp point and success
 
-`obs["state"]` is the pose of the arm's last link, not the gripper tip, so the raw end-effector–tomato distance never drops below ~13 cm, even in a perfect demo. What is consistent is where the tomato sits **in the end-effector frame** at the end of the demos (≈ 17 cm along the tool axis):
+`obs["state"]` is the pose of the arm's last link (`link_eef`), not the gripper, so the raw end-effector–tomato distance never drops below ~13 cm, even in a perfect demo. Success is measured instead by where the tomato sits **in the end-effector frame**: the **grasp point** in `configs/grasp_point.yaml` is where its center should be, and the **grasp error** of a frame is the distance between the two (`splatsim/utils/grasp_point.py`). `run_policy_trials.py` records the final and minimum grasp error of each trial, and a trial succeeds when it gets within 4 cm; the reviewer's automatic stop labels and `plan_trajectories.py`'s target use the same point.
 ```bash
-python scripts/xarm5/estimate_grasp_point.py --recordings ~/data/bc_data/gello_3plants   # writes configs/grasp_point.yaml
+python scripts/xarm5/estimate_grasp_point.py [--point gripper|demos]   # writes configs/grasp_point.yaml
 ```
-The **grasp error** of a frame is the distance between the tomato (in the end-effector frame) and that point (`splatsim/utils/grasp_point.py`). In the demos' last frames it is 1.9 cm (p50) and 3.4 cm (p90). `run_policy_trials.py` records the final and minimum grasp error of each trial, and a trial succeeds when it gets within 4 cm.
+- `--point gripper` (default): the middle of the space between the fingers, from the robot's URDF (the two finger links with the gripper open): [0, 0, 0.129], 4 cm before `link_tcp` (the fingertips).
+- `--point demos`: the median of where the tomato was in the demos' last frame, [-0.019, 0.003, 0.168] for `gello_3plants`: at fingertip height and 2 cm off the gripper axis, since those demos were recorded without a gripper. 97 % of them end within 4 cm of it, but only 34 % within 4 cm of the gripper center.
+
+Either way the file also keeps `demo_point` and how the demos end relative to the chosen point. Each row of `trials.csv` records the point its grasp errors were measured with (`grasp_point`); `compare_trials.py` recomputes, from the recorded `.pkl` files, the trials measured with another point (or before that column existed), so a comparison always uses the current point.
+
+In the sim the tomato's collision shape is 8.3 cm wide and the open gripper leaves 8.2 cm between the fingers, so the gripper base stops it ~1.7 cm before the gripper center: planned trajectories that aim there end ~1.7 cm short, and many positions are dropped by `--max-final-error`.
+
+The reviewer shows it: *View → Show grasp point* draws the success zone (a 4 cm sphere around the grasp point, green while the tomato is inside), the grasp point (green) and the gripper center (blue) at the playback frame, and *Playback* shows the frame's grasp error and tomato–gripper center distance.
 
 ## Comparing models
 

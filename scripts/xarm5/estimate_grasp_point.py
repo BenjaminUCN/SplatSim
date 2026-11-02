@@ -1,10 +1,14 @@
-"""Estima el punto de agarre (tomate en el marco del efector) con el último frame de las demos.
+"""Escribe el punto de agarre (dónde debe quedar el tomate en el marco del efector) en
+configs/grasp_point.yaml, que usan run_policy_trials.py, compare_trials.py, las etiquetas de parada
+de review_recordings.py y plan_trajectories.py.
 
-    python scripts/xarm5/estimate_grasp_point.py --recordings ~/data/bc_data/gello_3plants
+    python scripts/xarm5/estimate_grasp_point.py [--point gripper|demos] [--recordings ~/data/bc_data/gello_3plants]
 
-Usa el último .pkl legible de cada episodio (sin los descartados en selection.yaml), toma la
-mediana y escribe configs/grasp_point.yaml, que usan run_policy_trials.py, compare_trials.py
-y las etiquetas de parada de review_recordings.py.
+--point gripper (por defecto): el centro del espacio entre las pinzas, desde la URDF del robot
+(grasp_point.gripper_center, ≈ [0, 0, 0.129]). --point demos: la mediana de dónde quedó el tomate
+en el último frame de las demos (≈ [-0.019, 0.003, 0.168] en gello_3plants, a la altura de la
+punta de los dedos: se grabaron sin gripper). En los dos casos anota cómo terminan las demos
+respecto del punto elegido (último .pkl legible de cada episodio, sin los descartados).
 """
 import pickle
 import sys
@@ -18,15 +22,21 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.utils.episode_selection import load_discarded  # noqa: E402
-from splatsim.utils.grasp_point import GRASP_POINT_PATH, tomato_in_ee  # noqa: E402
-from splatsim.utils.paths import contract  # noqa: E402
+from typing import Literal  # noqa: E402
+
+from splatsim.utils.grasp_point import GRASP_POINT_PATH, SUCCESS_RADIUS, gripper_center, tomato_in_ee  # noqa: E402
+from splatsim.utils.paths import contract, expand, load_yaml  # noqa: E402
 
 APPLE_KEY = "plastic_apple_position"
 
 
 @dataclass
 class Args:
+    point: Literal["gripper", "demos"] = "gripper"
+    """gripper: centro entre las pinzas (URDF); demos: mediana del final de las demos"""
     recordings: tuple[str, ...] = ("~/data/bc_data/gello_3plants",)
+    robot_name: str = "xarm5_lite_plant_v3"
+    """robot de configs/object_configs/objects.yaml cuya URDF da el centro de la pinza"""
     out: str = GRASP_POINT_PATH
 
 
@@ -58,22 +68,35 @@ def main(args: Args):
     if not rels:
         raise SystemExit("Ningún episodio con posición del tomate")
     rels = np.array(rels)
-    point = np.median(rels, axis=0)
+    demo_point = np.median(rels, axis=0)
+    if args.point == "gripper":
+        urdf = expand(load_yaml("configs/object_configs/objects.yaml")[args.robot_name]["urdf_path"][0])
+        point = gripper_center(urdf)
+    else:
+        point = demo_point
     err = np.linalg.norm(rels - point, axis=1)
+    r = lambda v: [round(float(x), 4) + 0.0 for x in v]  # noqa: E731  (+0.0: sin -0.0)
     data = {
-        "point": [round(float(v), 4) for v in point],
-        "spread_std": [round(float(v), 4) for v in rels.std(axis=0)],
+        "point": r(point),
+        "point_source": "gripper_center" if args.point == "gripper" else "demos",
+        "demo_point": r(demo_point),
+        "demo_spread_std": r(rels.std(axis=0)),
+        # último frame de las demos respecto de point
         "final_error_p50": round(float(np.median(err)), 4),
         "final_error_p90": round(float(np.percentile(err, 90)), 4),
+        "final_within_success": round(float(np.mean(err <= SUCCESS_RADIUS)), 3),
         "sources": sources,
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
     with open(args.out, "w") as f:
-        f.write("# Tomato position in the end-effector frame at the end of the demos (m), and how far\n"
-                "# each demo's last frame is from it. Written by scripts/xarm5/estimate_grasp_point.py.\n")
+        f.write("# Where the tomato must be in the end-effector frame (m): point, from point_source\n"
+                "# (gripper_center: middle of the space between the fingers, from the URDF; demos: median\n"
+                "# of the demos' last frame, demo_point). final_*: the demos' last frame vs point.\n"
+                "# Written by scripts/xarm5/estimate_grasp_point.py.\n")
         yaml.safe_dump(data, f, sort_keys=False, default_flow_style=None)
-    print(f"punto de agarre {data['point']} m; error del último frame p50 {data['final_error_p50']} m, "
-          f"p90 {data['final_error_p90']} m → {args.out}")
+    print(f"punto de agarre {data['point']} m ({data['point_source']}); último frame de las demos: "
+          f"p50 {data['final_error_p50']} m, p90 {data['final_error_p90']} m, "
+          f"{data['final_within_success']:.0%} a ≤ {SUCCESS_RADIUS} m → {args.out}")
 
 
 if __name__ == "__main__":
