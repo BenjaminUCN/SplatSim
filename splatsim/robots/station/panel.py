@@ -328,9 +328,16 @@ class StationPanel:
 
     @staticmethod
     def _port_open(port: int) -> bool:
-        with socket.socket() as sock:
-            sock.settimeout(0.05)
-            return sock.connect_ex(("127.0.0.1", port)) == 0
+        """Si algo escucha en el puerto. Se pregunta a ss en vez de conectarse: una conexión vacía
+        hace que el servidor viser de la herramienta registre un 'opening handshake failed'."""
+        try:
+            out = subprocess.run(["ss", "-ltnH", f"sport = :{port}"], capture_output=True,
+                                 text=True, timeout=2).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            with socket.socket() as sock:
+                sock.settimeout(0.05)
+                return sock.connect_ex(("127.0.0.1", port)) == 0
+        return bool(out.strip())
 
     @staticmethod
     def _cmdline(pid: int) -> list[str]:
