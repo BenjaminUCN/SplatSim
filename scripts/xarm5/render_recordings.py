@@ -53,7 +53,8 @@ class Args:
     """solo estos episodios (por defecto todos)"""
     overwrite: bool = False
     workers: int = 1
-    """procesos en paralelo, cada uno con su parte de los episodios y su escena en la GPU (~3 GB)"""
+    """procesos en paralelo, cada uno con su parte de los episodios y su escena en la GPU
+    (~8 GB cada uno: en una GPU de 16 GB cabe solo uno)"""
 
 
 RENDER_INFO_FILE = "render_info.yaml"
@@ -105,14 +106,15 @@ def free_port() -> int:
         return s.getsockname()[1]
 
 
-def make_server(robot_name: str, cameras: list[str]):
-    """Servidor xArm5 en este proceso, sin ZMQ ni serve_loop: solo para renderizar."""
+def make_server(robot_name: str, cameras: list[str], **kwargs):
+    """Servidor xArm5 en este proceso, sin ZMQ ni serve_loop: solo para renderizar (o, sin
+    cámaras, para simular sin GPU). kwargs pasa al servidor, p.ej. control_hz."""
     from splatsim.robots.xarm.server import XArm5PybulletRobotServerCamera
     with open("configs/object_configs/objects.yaml") as f:
         use_gripper = yaml.safe_load(f)[robot_name].get("use_gripper", True)
     server = XArm5PybulletRobotServerCamera(
         port=free_port(), host="127.0.0.1", camera_names=cameras, robot_name=robot_name,
-        cam_i=347, use_gripper=use_gripper, gui="pybullet", show_apple_window=False)
+        cam_i=347, use_gripper=use_gripper, gui="pybullet", show_apple_window=False, **kwargs)
     server.setup_scene()
     return server
 

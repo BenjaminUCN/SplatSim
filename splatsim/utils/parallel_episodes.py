@@ -3,8 +3,12 @@
 render_recordings.py y mirror_recordings.py renderizan un episodio tras otro en un proceso, y su
 cuello de botella es la CPU (leer los .pkl, la física, comprimir los .png): la GPU queda a ~25 %.
 Con --workers N el proceso principal lanza N copias del mismo script, cada una con su parte de
-los episodios (--episodes ...) y su propia escena cargada en la GPU (~3 GB cada una), y reimprime
-su salida con el avance total ([k/total]) para que el panel de la cola lo siga como siempre.
+los episodios (--episodes ...) y su propia escena cargada en la GPU, y reimprime su salida con
+el avance total ([k/total]) para que el panel de la cola lo siga como siempre.
+
+Cada proceso ocupa ~8 GB de GPU (medido con xarm5_lite_plant_v3 y 2 cámaras): en una GPU de
+16 GB cabe uno solo, y con dos la memoria se desborda (en WSL, a la RAM) y va más lento que con
+uno. Sirve en una GPU con memoria para N escenas.
 """
 import re
 import subprocess

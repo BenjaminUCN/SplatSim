@@ -643,6 +643,17 @@ class TrainPanel:
     def _build_data_tab(self):
         gui = self.v.gui
         arrangements = list(self.arrangements)
+        with gui.add_folder("Generate (planner)", expand_by_default=False):
+            self.d_gen = gui.add_checkbox("Generate", False,
+                                          hint="plan_trajectories.py: synthetic demos instead of a recordings folder")
+            self.d_gen_name = gui.add_text("Folder", f"planned_{datetime.now():%y%m%d}",
+                                           hint=f"In {self.rec_root}; an existing one gets more episodes")
+            self.d_gen_n = gui.add_number("Episodes", 100, min=1, max=10000, step=1)
+            self.d_gen_pos = gui.add_dropdown("Positions", ["random", "grid"], initial_value="random",
+                                              hint="random: the saved range (hemisphere or box), away from the grid")
+            self.d_gen_seed = gui.add_number("Seed", -1, step=1, hint="-1 = random")
+            self.d_gen_perturb = gui.add_number("Perturb (rad)", 0.0, min=0.0, max=0.5, step=0.01,
+                                                hint="Smooth deviation on the way, corrected before arriving")
         self.d_source = gui.add_dropdown("Recordings", self._recording_folders() or ["-"],
                                          hint=f"Folders of {self.rec_root}")
         self.d_source_info = gui.add_markdown("")
@@ -651,7 +662,7 @@ class TrainPanel:
             self.d_render_fps = gui.add_number("Render fps", 10, min=1, max=60, step=1)
             self.d_render_cams = gui.add_dropdown("Render cameras", ["all", *arrangements], initial_value="all")
             self.d_render_workers = gui.add_number("Render workers", 1, min=1, max=8, step=1,
-                                                   hint="Parallel processes, each with the scene on the GPU")
+                                                   hint="Parallel processes, ~8 GB of GPU each: keep 1 on a 16 GB GPU")
         with gui.add_folder("Mirror"):
             self.d_mirror = gui.add_checkbox("Mirror", False,
                                              hint="mirror_recordings.py: add the mirror image of every episode")
@@ -660,7 +671,7 @@ class TrainPanel:
             self.d_mirror_cams = gui.add_dropdown("Mirror cameras", ["as recorded", *arrangements],
                                                   initial_value="as recorded")
             self.d_mirror_workers = gui.add_number("Mirror workers", 1, min=1, max=8, step=1,
-                                                   hint="Parallel processes, each with the scene on the GPU")
+                                                   hint="Parallel processes, ~8 GB of GPU each: keep 1 on a 16 GB GPU")
         with gui.add_folder("Convert to LeRobot"):
             self.d_convert = gui.add_checkbox("Convert", True)
             self.d_out = gui.add_text("Output folder", DEFAULT_DATASETS_DIR)
@@ -673,11 +684,12 @@ class TrainPanel:
         self.d_plan = gui.add_markdown("")
         refresh = gui.add_button("Refresh folders")
         add = gui.add_button("Add to queue", color="green", icon=viser.Icon.PLUS)
-        for h in (self.d_source, self.d_render, self.d_render_fps, self.d_render_cams, self.d_mirror,
+        for h in (self.d_gen, self.d_gen_name, self.d_gen_n, self.d_gen_pos, self.d_source, self.d_render, self.d_render_fps, self.d_render_cams, self.d_mirror,
                   self.d_mirror_orig, self.d_mirror_cams, self.d_convert, self.d_out, self.d_fps,
                   self.d_cams, self.d_suffix):
             h.on_update(lambda _: self._show_plan())
         self.d_source.on_update(lambda _: self._show_source())
+        self.d_gen.on_update(lambda _: self._show_source())
         refresh.on_click(lambda _: self._refresh_folders())
         add.on_click(lambda _: self._add_pipeline())
         self._show_source()
@@ -704,6 +716,12 @@ class TrainPanel:
         return ("images" if (episodes[0] / "image_1").is_dir() else "state"), fps
 
     def _show_source(self):
+        self.d_source.disabled = self.d_gen.value
+        if self.d_gen.value:     # las demos del planificador son de solo estado: hay que renderizarlas
+            self.d_source_info.content = "Source: the planner's folder (state only: rendered next)"
+            self.d_render.value = True
+            self._show_plan()
+            return
         folder = self.rec_root / self.d_source.value
         if not folder.is_dir():
             self.d_source_info.content = ""
@@ -722,10 +740,21 @@ class TrainPanel:
 
     def _pipeline(self) -> list[dict]:
         """Trabajos de la pestaña Data, validados (ValueError si algo no cuadra)."""
-        folder = self.rec_root / self.d_source.value
-        if not folder.is_dir():
-            raise ValueError("choose a recordings folder")
-        kind_, _ = self._source_kind(folder)
+        plan = None
+        if self.d_gen.value:
+            name = self.d_gen_name.value.strip()
+            if not re.fullmatch(r"[\w.-]+", name):
+                raise ValueError("planner folder: letters, digits, `_`, `-` or `.`")
+            folder = self.rec_root / name
+            seed = int(self.d_gen_seed.value)
+            plan = {"episodes": int(self.d_gen_n.value), "positions": self.d_gen_pos.value,
+                    "seed": seed if seed >= 0 else None, "perturb": float(self.d_gen_perturb.value)}
+            kind_ = "state"
+        else:
+            folder = self.rec_root / self.d_source.value
+            if not folder.is_dir():
+                raise ValueError("choose a recordings folder")
+            kind_, _ = self._source_kind(folder)
         if kind_ == "empty":
             raise ValueError("the folder has no episodes")
         if not (self.d_render.value or self.d_mirror.value or self.d_convert.value):
@@ -749,7 +778,7 @@ class TrainPanel:
                        "fps": int(self.d_render_fps.value) if render else int(self.d_fps.value),
                        "cameras": self.d_cams.value.split() or None, "suffix": suffix,
                        "ignore_selection": bool(self.d_discarded.value), "push": bool(self.d_push.value)}
-        jobs = plan_pipeline(str(folder), render, mirror, convert)
+        jobs = plan_pipeline(str(folder), render, mirror, convert, plan)
         with self.s.lock:
             queued = {j.get("output") for j in self.s.jobs if j["status"] != "done"}
         last = jobs[-1]
@@ -764,9 +793,11 @@ class TrainPanel:
         except ValueError as e:
             self.d_plan.content = f"**Can't add**: {e}"
             return
+        exists = {"plan": " (exists: new episodes are added)",
+                  "render": " (exists: finished episodes are skipped)",
+                  "mirror": " (exists: finished episodes are skipped)"}
         lines = [f"{i + 1}. **{j['kind']}** → `{j['output']}`"
-                 + (" (exists: finished episodes are skipped)"
-                    if j["kind"] != "convert" and Path(j["output"]).exists() else "")
+                 + (exists.get(j["kind"], "") if Path(j["output"]).exists() else "")
                  for i, j in enumerate(jobs)]
         if jobs[-1]["kind"] == "convert":
             lines.append("Then pick it in **New job** → Dataset (⏳) to train on it after it is made.")

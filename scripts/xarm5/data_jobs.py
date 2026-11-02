@@ -1,21 +1,24 @@
-"""Trabajos de datos para la cola de train_server.py: renderizar, espejar y convertir a LeRobot.
+"""Trabajos de datos para la cola de train_server.py: generar demos con el planificador,
+renderizar, espejar y convertir a LeRobot.
 
-Cada trabajo es un dict de jobs.yaml con kind ("render" | "mirror" | "convert"), args y output
-(la carpeta que deja, conocida al encolarlo). plan_pipeline arma la cadena render → mirror →
-convert: cada paso toma la salida del anterior y espera a que termine (depends_on), y el dataset
+Cada trabajo es un dict de jobs.yaml con kind ("plan" | "render" | "mirror" | "convert"), args y
+output (la carpeta que deja, conocida al encolarlo). plan_pipeline arma la cadena plan → render →
+mirror → convert: cada paso toma la salida del anterior y espera a que termine (depends_on), y el dataset
 resultante se puede elegir en el formulario de entrenamiento antes de que exista.
 
 Cada tipo usa un carril (LANES): entrenar, renderizar y espejar cargan la GPU (y no caben dos a la
-vez en su memoria); convertir usa solo CPU, así que puede correr al lado de uno de GPU.
+vez en su memoria); planificar (PyBullet sin cámaras) y convertir usan solo CPU, así que pueden
+correr al lado de uno de GPU.
 """
 from pathlib import Path
 
-DATA_KINDS = ("render", "mirror", "convert")
+DATA_KINDS = ("plan", "render", "mirror", "convert")
 SCRIPTS = {"train": "scripts/xarm5/train_diffusion.py",
+           "plan": "scripts/xarm5/plan_trajectories.py",
            "render": "scripts/xarm5/render_recordings.py",
            "mirror": "scripts/xarm5/mirror_recordings.py",
            "convert": "splatsim/utils/lerobot_conversion.py"}
-LANES = {"train": "gpu", "render": "gpu", "mirror": "gpu", "convert": "cpu"}
+LANES = {"train": "gpu", "plan": "cpu", "render": "gpu", "mirror": "gpu", "convert": "cpu"}
 ROBOT_TYPE = "xarm5_lite"      # --robot_type por defecto del convertidor, va en el nombre del dataset
 
 
@@ -36,7 +39,12 @@ def command(job: dict) -> list[str]:
     """Script y argumentos (sin el intérprete) de un trabajo de datos."""
     a, k = job["args"], kind(job)
     cmd = [SCRIPTS[k]]
-    if k == "render":
+    if k == "plan":
+        cmd += ["--out", job["output"], "--episodes", str(a["episodes"]), "--positions", a["positions"],
+                "--perturb", str(a.get("perturb", 0.0))]
+        if a.get("seed") is not None:
+            cmd += ["--seed", str(a["seed"])]
+    elif k == "render":
         cmd += [a["input"], "--fps", str(a["fps"]), "--out", job["output"]]
         if a.get("arrangement"):
             cmd += ["--arrangement", a["arrangement"]]
@@ -64,12 +72,17 @@ def command(job: dict) -> list[str]:
     return cmd
 
 
-def plan_pipeline(source: str, render: dict | None, mirror: dict | None, convert: dict | None) -> list[dict]:
+def plan_pipeline(source: str, render: dict | None, mirror: dict | None, convert: dict | None,
+                  plan: dict | None = None) -> list[dict]:
     """Trabajos encadenados (sin id; depends_on = índice del anterior en la lista).
 
+    plan: {episodes, positions, seed, perturb}: genera las demos en source primero;
     render: {fps, arrangement, workers}; mirror: {with_original, arrangement, workers};
     convert: {output_dir, fps, cameras, suffix, ignore_selection, push}. Los None se omiten."""
     jobs, current = [], str(Path(source).expanduser())
+    if plan:
+        jobs.append({"kind": "plan", "name": f"plan {Path(current).name}", "args": dict(plan),
+                     "output": current})
     if render:
         out = f"{current}_{render['fps']}hz"
         jobs.append({"kind": "render", "name": f"render {Path(current).name}",

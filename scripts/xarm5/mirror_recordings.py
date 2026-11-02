@@ -62,7 +62,8 @@ class Args:
     """solo estos episodios (por defecto todos)"""
     overwrite: bool = False
     workers: int = 1
-    """procesos en paralelo, cada uno con su parte de los episodios y su escena en la GPU (~3 GB)"""
+    """procesos en paralelo, cada uno con su parte de los episodios y su escena en la GPU
+    (~8 GB cada uno: en una GPU de 16 GB cabe solo uno)"""
 
 
 MIRROR_INFO_FILE = "mirror_info.yaml"
