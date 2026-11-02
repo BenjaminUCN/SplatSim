@@ -160,8 +160,9 @@ def to_uint8_image(img) -> np.ndarray:
     return img
 
 
-def save_frame(folder: str, index: int, obs: dict) -> None:
-    """Escribe <folder>/<index>.pkl y, si la observación trae cámaras, image_1/<cam>_<index>.png."""
+def save_frame(folder: str, index: int, obs: dict, images_in_pkl: bool = True) -> None:
+    """Escribe <folder>/<index>.pkl y, si la observación trae cámaras, image_1/<cam>_<index>.png
+    (images_in_pkl=False deja las imágenes solo en los .png)."""
     images = {name: img for name, img in obs.items() if name.endswith("_rgb") and img is not None}
     if images:
         image_dir = os.path.join(folder, "image_1")
@@ -172,5 +173,7 @@ def save_frame(folder: str, index: int, obs: dict) -> None:
         path = os.path.join(image_dir, f"{name}_{index:05d}.png")
         cv2.imwrite(path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
 
+    if not images_in_pkl:
+        obs = {k: v for k, v in obs.items() if k not in images}
     with open(os.path.join(folder, f"{index:05d}.pkl"), "wb") as f:
         pickle.dump(obs, f)

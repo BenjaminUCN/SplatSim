@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.robots.station.recorder import save_frame  # noqa: E402
 from splatsim.utils.camera_setup import arrangement_cameras  # noqa: E402
 from splatsim.utils.episode_selection import SELECTION_FILE  # noqa: E402
+from splatsim.utils.parallel_episodes import own_argv, run_workers  # noqa: E402
 
 
 @dataclass
@@ -51,6 +52,8 @@ class Args:
     episodes: tuple[str, ...] = ()
     """solo estos episodios (por defecto todos)"""
     overwrite: bool = False
+    workers: int = 1
+    """procesos en paralelo, cada uno con su parte de los episodios y su escena en la GPU (~3 GB)"""
 
 
 RENDER_INFO_FILE = "render_info.yaml"
@@ -129,6 +132,9 @@ def main(args: Args):
         yaml.safe_dump({"source": str(folder.resolve()), "fps": args.fps, "cameras": cameras,
                         "rendered": datetime.now().strftime("%Y-%m-%d %H:%M")}, f, sort_keys=False)
     print(f"{len(episodes)} episodios → {out_root} a {args.fps} fps, cámaras {cameras}")
+    if args.workers > 1:
+        sys.exit(run_workers(own_argv(sys.argv), [e.name for e in episodes], args.workers,
+                             total=len(episodes)))
 
     server = None
     for n, episode in enumerate(episodes, 1):
