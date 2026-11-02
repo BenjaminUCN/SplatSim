@@ -55,6 +55,43 @@ def gripper_center(urdf_path: str) -> np.ndarray:
         c.disconnect()
 
 
+POINT_HEADER = """\
+# Where the tomato must be in the end-effector frame (m): point, from point_source
+# (gripper_center: middle of the space between the fingers, from the URDF; demos: median
+# of the demos' last frame, demo_point; manual: set in review_recordings.py's Grasp point
+# folder). final_*: the demos' last frame vs point (estimate_grasp_point.py only).
+"""
+
+
+def save_grasp_point(point, source: str, path: str = GRASP_POINT_PATH) -> None:
+    """Cambia point (y point_source) conservando demo_point y el resto; quita las estadísticas
+    final_*, que eran respecto del punto anterior (estimate_grasp_point.py las recalcula)."""
+    import os
+    from datetime import datetime
+    data = {}
+    if os.path.exists(path):
+        with open(path) as f:
+            data = yaml.safe_load(f) or {}
+    data = {"point": [round(float(v), 4) + 0.0 for v in point], "point_source": source,
+            **{k: v for k, v in data.items() if k not in ("point", "point_source") and not k.startswith("final_")}}
+    data["generated"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+    with open(path, "w") as f:
+        f.write(POINT_HEADER)
+        yaml.safe_dump(data, f, sort_keys=False, default_flow_style=None)
+
+
+def load_demo_point(path: str = GRASP_POINT_PATH) -> np.ndarray | None:
+    """Mediana del final de las demos, si el archivo la tiene."""
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+    return np.asarray(data["demo_point"], dtype=float) if data.get("demo_point") else None
+
+
+def load_point_source(path: str = GRASP_POINT_PATH) -> str:
+    with open(path) as f:
+        return (yaml.safe_load(f) or {}).get("point_source", "demos")
+
+
 def load_grasp_point(path: str = GRASP_POINT_PATH) -> np.ndarray:
     with open(path) as f:
         return np.asarray(yaml.safe_load(f)["point"], dtype=float)

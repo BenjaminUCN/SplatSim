@@ -24,7 +24,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.utils.episode_selection import load_discarded  # noqa: E402
 from typing import Literal  # noqa: E402
 
-from splatsim.utils.grasp_point import GRASP_POINT_PATH, SUCCESS_RADIUS, gripper_center, tomato_in_ee  # noqa: E402
+from splatsim.utils.grasp_point import (  # noqa: E402
+    GRASP_POINT_PATH,
+    POINT_HEADER,
+    SUCCESS_RADIUS,
+    gripper_center,
+    tomato_in_ee,
+)
 from splatsim.utils.paths import contract, expand, load_yaml  # noqa: E402
 
 APPLE_KEY = "plastic_apple_position"
@@ -89,10 +95,7 @@ def main(args: Args):
         "generated": datetime.now().strftime("%Y-%m-%d %H:%M"),
     }
     with open(args.out, "w") as f:
-        f.write("# Where the tomato must be in the end-effector frame (m): point, from point_source\n"
-                "# (gripper_center: middle of the space between the fingers, from the URDF; demos: median\n"
-                "# of the demos' last frame, demo_point). final_*: the demos' last frame vs point.\n"
-                "# Written by scripts/xarm5/estimate_grasp_point.py.\n")
+        f.write(POINT_HEADER)
         yaml.safe_dump(data, f, sort_keys=False, default_flow_style=None)
     print(f"punto de agarre {data['point']} m ({data['point_source']}); último frame de las demos: "
           f"p50 {data['final_error_p50']} m, p90 {data['final_error_p90']} m, "

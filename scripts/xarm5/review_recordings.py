@@ -56,7 +56,11 @@ from splatsim.utils.grasp_point import (  # noqa: E402
     SUCCESS_RADIUS,
     grasp_error,
     gripper_center,
+    load_demo_point,
     load_grasp_point,
+    load_point_source,
+    save_grasp_point,
+    tomato_in_ee,
 )
 from splatsim.utils.stop_labels import (  # noqa: E402
     VALID_RADIUS,
@@ -271,6 +275,12 @@ class Reviewer:
         self._to_delete: list[str] = []   # episodios esperando confirmación para borrarse
         self._grasp_handles = {}          # "Show grasp point": zona, punto de agarre y centro de la pinza
         self._gripper_center = None       # en el marco del efector, desde la URDF (se calcula una vez)
+        # carpeta Grasp point: el punto que se está editando (se aplica a la vista al instante y a
+        # configs/grasp_point.yaml solo con Save); None = el del archivo
+        self._edit_point = None
+        self._edit_source = None
+        self._gizmo = None
+        self._ee_frame = None             # pose del efector en el frame actual (padre del gizmo)
 
         self.v = viser.ViserServer(port=port, label="Recordings review", verbose=False)
         set_page_title(self.v, "Recordings review")
@@ -343,6 +353,18 @@ class Reviewer:
             gui.add_markdown(f"Gradient: start → end (`{COLORMAP}`). Stop label: green = in position, "
                              "blue = not yet, gray = not used. Other trails: gray = kept, red = discarded")
 
+        with gui.add_folder("Grasp point", expand_by_default=False):
+            gui.add_markdown("Where the tomato's center must be in the end-effector frame for success "
+                             f"(≤ {SUCCESS_RADIUS * 100:.0f} cm). Edits show here at once; **Save** "
+                             f"writes `{GRASP_POINT_PATH}` (trials, stop labels, planner).")
+            self.gp_info = gui.add_markdown("")
+            self.gp_xyz = gui.add_vector3("Point (m)", (0.0, 0.0, 0.0), step=0.001,
+                                          hint="In the end-effector frame (link_eef): z = along the tool")
+            presets = gui.add_button_group("Set to", ["Gripper center", "Demos' end", "Tomato here"])
+            self.gp_gizmo = gui.add_checkbox("Move with gizmo", False,
+                                             hint="Drag the point in the 3D view (moves with the end effector)")
+            gp_save = gui.add_button_group("File", ["Save", "Revert"])
+
         self.resample_folder = gui.add_folder("Resampling", expand_by_default=True)
         with self.resample_folder:
             self.resample_info = gui.add_markdown("")
@@ -370,6 +392,10 @@ class Reviewer:
         self.show_all.on_update(lambda _: self._draw_background())
         self.show_robot.on_update(lambda _: self._toggle_robot())
         self.show_grasp.on_update(lambda _: self._show_frame(int(self.frame_slider.value)))
+        self.gp_xyz.on_update(lambda e: e.client and self._set_point(np.array(self.gp_xyz.value), "manual"))
+        presets.on_click(lambda e: self._preset_point(e.target.value))
+        self.gp_gizmo.on_update(lambda _: self._toggle_gizmo())
+        gp_save.on_click(lambda e: self._save_point() if e.target.value == "Save" else self._revert_point())
         self.robot_opacity.on_update(
             lambda _: self._robot is not None and setattr(self._robot, "opacity", self.robot_opacity.value))
         self.color_mode.on_update(lambda _: self.trail_data is not None and self._draw_trail())
@@ -516,6 +542,10 @@ class Reviewer:
     # ── carpeta ──────────────────────────────────────────────────────────────
     def open_folder(self, name: str):
         self.folder = RecordingFolder(self.root / name)
+        if self._edit_point is not None:     # el punto en edición sigue al cambiar de carpeta
+            self.folder.grasp_point = self._edit_point
+        elif self.folder.grasp_point is not None:
+            self._show_point_fields(self.folder.grasp_point, load_point_source())
         self.folder_select.value = name
         self._refresh_episode_list()
         visible = self._visible_names()
@@ -754,6 +784,83 @@ class Reviewer:
             h["center"] = add("/grasp/center", radius=0.006, color=CENTER_RGB)
         self._grasp_handles = h
 
+    # ── edición del punto de agarre ─────────────────────────────────────────
+    def _show_point_fields(self, point, source: str):
+        point = np.asarray(point, dtype=float) + 0.0     # sin -0.0
+        self.gp_xyz.value = tuple(float(v) for v in point)
+        saved = load_grasp_point() if os.path.exists(GRASP_POINT_PATH) else None
+        state = ("saved" if saved is not None and np.allclose(saved, point, atol=5e-5)
+                 else "**not saved**")
+        self.gp_info.content = (f"`[{point[0]:.4f}, {point[1]:.4f}, {point[2]:.4f}]` · {source} · {state}")
+        if self._gizmo is not None and self._gizmo.visible:
+            self._gizmo.position = tuple(float(v) for v in point)
+
+    def _set_point(self, point, source: str):
+        """Usa point en la vista (zona, error del frame, etiquetas automáticas) sin guardarlo."""
+        point = np.asarray(point, dtype=float)
+        self._edit_point, self._edit_source = point, source
+        if self.folder is not None:
+            self.folder.grasp_point = point
+        self._show_point_fields(point, source)
+        if self.trail_data is not None:
+            self._show_frame(int(self.frame_slider.value))
+            self._show_stop()
+            if self.color_mode.value == "stop label":
+                self._draw_trail()
+
+    def _preset_point(self, which: str):
+        if which == "Gripper center":
+            if self._gripper_center is None or self._gripper_center is False:
+                self.gp_info.content = "**No URDF** to compute the gripper center (--urdf or --robot_name)"
+                return
+            self._set_point(self._gripper_center, "gripper_center")
+        elif which == "Demos' end":
+            point = load_demo_point() if os.path.exists(GRASP_POINT_PATH) else None
+            if point is None:
+                self.gp_info.content = f"**No demo_point** in `{GRASP_POINT_PATH}` (estimate_grasp_point.py)"
+                return
+            self._set_point(point, "demos")
+        else:                    # donde está el tomate en el frame actual
+            d = self.trail_data
+            if d is None or d["apple"] is None:
+                self.gp_info.content = "**This episode has no tomato position**"
+                return
+            k = min(int(self.frame_slider.value), len(d["ee"]) - 1)
+            state = np.concatenate([d["ee"][k], d["rpy"][k]])
+            self._set_point(tomato_in_ee(state, d["apple"]), f"manual (tomato at {self.episode}, frame {k})")
+
+    def _toggle_gizmo(self):
+        if self._ee_frame is None:
+            self._ee_frame = self.v.scene.add_frame("/ee_frame", show_axes=False)
+        if self._gizmo is None:
+            point = self._edit_point if self._edit_point is not None else self.folder.grasp_point
+            self._gizmo = self.v.scene.add_transform_controls(
+                "/ee_frame/gizmo", scale=0.08, disable_rotations=True,
+                position=tuple(float(v) for v in point))
+
+            @self._gizmo.on_update
+            def _(_):
+                self._set_point(np.array(self._gizmo.position), "manual")
+        self._gizmo.visible = self.gp_gizmo.value
+        if self.trail_data is not None:
+            self._show_frame(int(self.frame_slider.value))
+
+    def _save_point(self):
+        point = self._edit_point if self._edit_point is not None else self.folder.grasp_point
+        source = self._edit_source or load_point_source()
+        save_grasp_point(point, source.split(" ")[0])
+        self._edit_point = None          # ahora el del archivo es este
+        self._show_point_fields(point, source)
+        print(f"[Review] Punto de agarre {np.round(point, 4).tolist()} ({source}) → {GRASP_POINT_PATH}")
+
+    def _revert_point(self):
+        point = load_grasp_point()
+        self._edit_point = None
+        if self.folder is not None:
+            self.folder.grasp_point = point
+        self._set_point(point, load_point_source())
+        self._edit_point = None
+
     def _update_grasp(self, k: int):
         """Mueve los marcadores al efector del frame k y escribe los errores del frame."""
         d, h = self.trail_data, self._grasp_handles
@@ -761,7 +868,11 @@ class Reviewer:
         for handle in h.values():
             handle.visible = show
         lines = []
-        rot = Rotation.from_euler("xyz", d["rpy"][k]).as_matrix()   # como getEulerFromQuaternion
+        rot_k = Rotation.from_euler("xyz", d["rpy"][k])             # como getEulerFromQuaternion
+        rot = rot_k.as_matrix()
+        if self._ee_frame is not None:   # el gizmo es hijo de este frame: se mueve con el efector
+            x, y, z, w = rot_k.as_quat()
+            self._ee_frame.position, self._ee_frame.wxyz = d["ee"][k], (w, x, y, z)
         for key, local in (("point", self.folder.grasp_point), ("center", self._gripper_center)):
             if key in h:
                 h[key].position = d["ee"][k] + rot @ local

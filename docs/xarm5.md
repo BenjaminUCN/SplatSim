@@ -279,6 +279,8 @@ In the sim the tomato's collision shape is 8.3 cm wide and the open gripper leav
 
 The reviewer shows it: *View → Show grasp point* draws the success zone (a 4 cm sphere around the grasp point, green while the tomato is inside), the grasp point (green) and the gripper center (blue) at the playback frame, and *Playback* shows the frame's grasp error and tomato–gripper center distance.
 
+The reviewer's *Grasp point* folder changes it, e.g. for another gripper whose target is not the tomato's center (a cut-and-hold gripper aiming at the stem has no model in the sim): **Set to** *Gripper center*, *Demos' end* (`demo_point`) or *Tomato here* (where the tomato is, in the end-effector frame, at the playback frame: play a demo to the pose the tool should end in and take it), type the coordinates (m, in the `link_eef` frame, z along the tool), or tick **Move with gizmo** and drag it in the 3D view (it moves with the end effector). Edits apply at once to the view (success zone, the frame's grasp error, automatic stop labels), also across folders, and only **Save** writes `configs/grasp_point.yaml` (`point_source: manual` for typed, dragged or *Tomato here* points), which then applies to trials, stop labels and the planner; **Revert** goes back to the saved one. Saving keeps `demo_point` and drops the `final_*` statistics, which referred to the previous point (`estimate_grasp_point.py` recomputes them).
+
 ## Comparing models
 
 After running trials for several models (panel *Trials* or `run_policy_trials.py`), compare them:
