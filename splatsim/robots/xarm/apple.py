@@ -62,8 +62,9 @@ class AppleController:
             return sample_hemisphere(self.hemisphere)
         return [np.random.uniform(*self.range[a]) for a in "xyz"]
 
-    def set_hemisphere(self, center, radius, facing, z) -> None:
-        self.hemisphere = normalize_hemisphere(center, radius, facing, z)
+    def set_hemisphere(self, center, radius, facing, z, x=None) -> None:
+        x = self.hemisphere.get("x") if x is None else x
+        self.hemisphere = normalize_hemisphere(center, radius, facing, z, x)
 
     def set_range(self, lo, hi) -> None:
         """Rango aleatorio entre las esquinas lo y hi (se ordenan; lado mínimo MIN_RANGE_SIZE)."""

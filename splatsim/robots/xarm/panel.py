@@ -8,6 +8,7 @@ from splatsim.robots.station.panel import StationPanel, wxyz_to_xyzw, xyzw_to_wx
 from splatsim.utils.apple_grid import (
     APPLE_GRID_PATH,
     RANGE_SHAPES,
+    NO_X_LIMIT,
     hemisphere_lines,
     in_hemisphere,
     load_grid,
@@ -148,6 +149,10 @@ class SimPanel(StationPanel):
                 hint="Horizontal direction of the hemisphere's axis: 180 = -x (towards the plant)")
             self._hemi_z = self.v.gui.add_vector2("Z min/max (m)", h["z"], step=0.01,
                                                   hint="Cuts the hemisphere at these heights")
+            self._hemi_x = self.v.gui.add_vector2(
+                "X min/max (m)", h["x"], step=0.01,
+                hint="Cuts the hemisphere along x (e.g. keep the tomato away from the robot or the wall); "
+                     "±1.5 = no cut")
             self._range_show = self.v.gui.add_checkbox("Show range", False, hint="The range in the 3D view")
             self._range_edit = self.v.gui.add_checkbox(
                 "Gizmos", False, hint="Drag the box corners or the hemisphere center in the 3D view (with Show range)")
@@ -164,7 +169,7 @@ class SimPanel(StationPanel):
         self._on_user(self._range_max, lambda _: self._set_range(self._range_min.value, self._range_max.value))
         for gizmo in self._range_gizmos:
             gizmo.on_update(lambda _: self._do(self._set_range, *(g.position for g in self._range_gizmos)))
-        for handle in (self._hemi_center, self._hemi_radius, self._hemi_facing, self._hemi_z):
+        for handle in (self._hemi_center, self._hemi_radius, self._hemi_facing, self._hemi_z, self._hemi_x):
             self._on_user(handle, lambda _: self._set_hemisphere())
         self._hemi_gizmo.on_update(
             lambda _: self._do(self._set_hemisphere, tuple(float(v) for v in self._hemi_gizmo.position)))
@@ -194,10 +199,10 @@ class SimPanel(StationPanel):
     def _set_hemisphere(self, center=None):
         apple = self.s.apple
         apple.set_hemisphere(center or self._hemi_center.value, self._hemi_radius.value,
-                             self._hemi_facing.value, self._hemi_z.value)
+                             self._hemi_facing.value, self._hemi_z.value, self._hemi_x.value)
         h = apple.hemisphere                         # ordenado y válido
         self._hemi_center.value, self._hemi_radius.value = h["center"], h["radius"]
-        self._hemi_facing.value, self._hemi_z.value = h["facing"], h["z"]
+        self._hemi_facing.value, self._hemi_z.value, self._hemi_x.value = h["facing"], h["z"], h["x"]
         if np.abs(np.subtract(self._hemi_gizmo.position, h["center"])).max() > 1e-4:
             self._hemi_gizmo.position = h["center"]
         self._draw_range()
@@ -213,7 +218,7 @@ class SimPanel(StationPanel):
         show = self._range_show.value
         for handle in (self._range_min, self._range_max):
             handle.visible = box
-        for handle in (self._hemi_center, self._hemi_radius, self._hemi_facing, self._hemi_z):
+        for handle in (self._hemi_center, self._hemi_radius, self._hemi_facing, self._hemi_z, self._hemi_x):
             handle.visible = not box
         lo, hi = (np.array(c) for c in apple.range_corners())
         center, size = tuple((lo + hi) / 2), tuple(hi - lo)
@@ -236,7 +241,9 @@ class SimPanel(StationPanel):
             h = apple.hemisphere
             inside = int(in_hemisphere(self._grid_positions, h).sum()) if self._grid_positions else 0
             text = (f"r ∈ [{h['radius'][0]:.2f}, {h['radius'][1]:.2f}] m facing {h['facing']:.0f}°, "
-                    f"z ∈ [{h['z'][0]:.2f}, {h['z'][1]:.2f}] m; {inside}/{len(self._grid_positions)} "
+                    f"z ∈ [{h['z'][0]:.2f}, {h['z'][1]:.2f}] m"
+                    + (f", x ∈ [{h['x'][0]:.2f}, {h['x'][1]:.2f}] m" if tuple(h["x"]) != NO_X_LIMIT else "")
+                    + f"; {inside}/{len(self._grid_positions)} "
                     "grid positions inside")
         saved = self._range_state() == self._range_saved
         self._range_info.content = text + ("" if saved else "  \n**not saved**: Random Position "

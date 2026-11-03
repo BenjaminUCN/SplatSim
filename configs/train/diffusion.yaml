@@ -32,3 +32,10 @@ log_freq: 1
 save_freq: 10000
 push_to_hub: true         # uploads to <hub_user>/robot_learning_tutorial_<model_name>
 hub_user: LuEduSoHu
+
+# ── Weights & Biases ─────────────────────────────────────────────────────────
+wandb: true               # one W&B run per training (needs `wandb login`; otherwise saved offline)
+wandb_project: splatsim-diffusion
+wandb_entity: null        # null -> the account's default entity
+wandb_mode: online        # online / offline / disabled
+wandb_log_freq: 10        # steps between logged points

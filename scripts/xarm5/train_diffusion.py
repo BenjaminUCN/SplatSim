@@ -5,10 +5,19 @@ Los parámetros se leen de un YAML y cualquiera se puede sobrescribir por CLI:
     python scripts/xarm5/train_diffusion.py --config configs/train/diffusion.yaml --horizon 32 --cameras base_rgb
 
 La configuración final se guarda en <output_root>/<model_name>/train_config.yaml.
+
+Con wandb: true (por defecto) cada entrenamiento es una corrida de Weights & Biases en
+--wandb-project: la config, la pérdida, el learning rate y la velocidad cada --wandb-log-freq pasos,
+y los checkpoints guardados. Hace falta haber hecho `wandb login` (o WANDB_API_KEY); si no, la
+corrida se guarda offline en <output_root>/<model_name>/wandb y se sube después con
+`wandb sync <esa carpeta>/offline-run-*`. La URL de la corrida queda en train_config.yaml.
 """
 
 import argparse
+import netrc
+import os
 import sys
+import time
 from dataclasses import asdict, dataclass, fields, replace
 from datetime import datetime
 from pathlib import Path
@@ -63,6 +72,12 @@ class TrainConfig:
     save_freq: int = 10000
     push_to_hub: bool = True
     hub_user: str = "LuEduSoHu"
+    # Weights & Biases
+    wandb: bool = True
+    wandb_project: str = "splatsim-diffusion"
+    wandb_entity: str | None = None     # None -> la entidad por defecto de la cuenta
+    wandb_mode: str = "online"          # online / offline / disabled
+    wandb_log_freq: int = 10            # pasos entre registros
 
 
 def load_config(argv: list[str]) -> TrainConfig:
@@ -144,6 +159,38 @@ def select_cameras(input_features: dict, cameras: tuple[str, ...] | None) -> dic
             if not k.startswith(prefix) or k.removeprefix(prefix) in cameras}
 
 
+def wandb_logged_in() -> bool:
+    """Hay API key de W&B (variable de entorno o ~/.netrc de `wandb login`)."""
+    if os.environ.get("WANDB_API_KEY"):
+        return True
+    try:
+        return netrc.netrc().authenticators("api.wandb.ai") is not None
+    except (FileNotFoundError, netrc.NetrcParseError):
+        return False
+
+
+def start_wandb(cfg: TrainConfig, model_name: str, output_directory: Path, extra: dict):
+    """Corrida de W&B o None (wandb: false o sin el paquete). Sin login pasa a offline."""
+    if not cfg.wandb or cfg.wandb_mode == "disabled":
+        return None
+    try:
+        import wandb
+    except ImportError:
+        print("[W&B] Falta el paquete wandb (pip install wandb); se entrena sin registrar")
+        return None
+    mode = cfg.wandb_mode
+    if mode == "online" and not wandb_logged_in():
+        mode = "offline"
+        print("[W&B] Sin `wandb login` (ni WANDB_API_KEY): la corrida se guarda offline en "
+              f"{output_directory / 'wandb'}; súbela después con `wandb sync`")
+    run = wandb.init(project=cfg.wandb_project, entity=cfg.wandb_entity, name=model_name,
+                     notes=cfg.description or None, tags=[cfg.name] if cfg.name else None,
+                     dir=str(output_directory), mode=mode,
+                     config={**asdict(cfg), "model_name": model_name, **extra})
+    print(f"[W&B] {run.url or f'offline: {run.dir}'}")
+    return run
+
+
 def main(cfg: TrainConfig):
     model_name = cfg.model_name or datetime.now().strftime("diffusion_%m%d_%H%M")
     output_directory = Path(cfg.output_root) / model_name
@@ -208,6 +255,13 @@ def main(cfg: TrainConfig):
         image_transforms=make_image_transforms() if cfg.image_augmentation else None,
     )
 
+    run = start_wandb(cfg, model_name, output_directory, {
+        "cameras_used": list(policy_cfg.image_features), "dataset_episodes": dataset.num_episodes,
+        "dataset_frames": dataset.num_frames, "fps": dataset_metadata.fps})
+    if run is not None:
+        with open(output_directory / "train_config.yaml", "a") as f:
+            yaml.safe_dump({"wandb_run": run.url or run.dir, "wandb_id": run.id}, f, sort_keys=False)
+
     # Create the optimizer and dataloader for offline training
     print("Creating optimizer and dataloader")
     optimizer = policy_cfg.get_optimizer_preset().build(policy.parameters())
@@ -231,6 +285,7 @@ def main(cfg: TrainConfig):
     print(f"[{start_time.strftime('%y%m%d %H:%M')}] Starting training loop")
     step = 0
     done = False
+    last_log = (time.monotonic(), 0)    # para la velocidad entre registros de W&B
     while not done:
         for batch in dataloader:
             batch = preprocessor(batch)
@@ -246,6 +301,12 @@ def main(cfg: TrainConfig):
 
             if step % cfg.log_freq == 0:
                 print(f"step: {step} loss: {loss.item():.3f}")
+            if run is not None and step % cfg.wandb_log_freq == 0:
+                now = time.monotonic()
+                rate = (step - last_log[1]) / max(now - last_log[0], 1e-6)
+                last_log = (now, step)
+                run.log({"train/loss": loss.item(), "train/lr": optimizer.param_groups[0]["lr"],
+                         "train/steps_per_s": rate}, step=step)
 
             # Save checkpoint
             if step > 0 and step % cfg.save_freq == 0:
@@ -256,6 +317,8 @@ def main(cfg: TrainConfig):
                 policy.save_pretrained(checkpoint_dir / "policy")
                 preprocessor.save_pretrained(checkpoint_dir / "preprocessor")
                 postprocessor.save_pretrained(checkpoint_dir / "postprocessor")
+                if run is not None:
+                    run.log({"checkpoint/loss": loss.item()}, step=step)
 
             step += 1
             if step >= cfg.training_steps:
@@ -277,6 +340,10 @@ def main(cfg: TrainConfig):
         policy.push_to_hub(repo_id)
         preprocessor.push_to_hub(repo_id)
         postprocessor.push_to_hub(repo_id)
+    if run is not None:
+        run.summary.update({"training_minutes": round((end_time - start_time).total_seconds() / 60, 1),
+                            "final_loss": loss.item(), "model_dir": str(output_directory)})
+        run.finish()
 
 
 if __name__ == "__main__":

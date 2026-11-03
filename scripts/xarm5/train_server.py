@@ -527,6 +527,7 @@ class TrainPanel:
         self.f_nums = {k: gui.add_number(k, 0, step=1) for k in FORM_FIELDS}
         self.f_aug = gui.add_checkbox("image_augmentation", True)
         self.f_hub = gui.add_checkbox("push_to_hub", False)
+        self.f_wandb = gui.add_checkbox("wandb", True, hint="Log to Weights & Biases (offline without `wandb login`)")
         self.f_extra = gui.add_text("Extra (YAML)", "", multiline=True,
                                     hint="Any other training field, e.g.  vision_backbone: resnet34")
         self.f_info = gui.add_markdown("")
@@ -564,6 +565,7 @@ class TrainPanel:
             h.value = int(cfg.get(k, 0) or 0)
         self.f_aug.value = bool(cfg.get("image_augmentation", True))
         self.f_hub.value = bool(cfg.get("push_to_hub", False))
+        self.f_wandb.value = bool(cfg.get("wandb", True))
         self._show_dataset()
 
     def _show_dataset(self):
@@ -602,6 +604,7 @@ class TrainPanel:
         values = {k: int(h.value) for k, h in self.f_nums.items()}
         values["image_augmentation"] = bool(self.f_aug.value)
         values["push_to_hub"] = bool(self.f_hub.value)
+        values["wandb"] = bool(self.f_wandb.value)
         cams = [c.strip() for c in self.f_cams.value.split(",") if c.strip()]
         if cams and self.f_arr.value != "(base config)":
             raise ValueError("use an arrangement or cameras, not both")
