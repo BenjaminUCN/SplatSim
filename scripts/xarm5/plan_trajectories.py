@@ -325,5 +325,12 @@ def main(args: Args):
 
 
 if __name__ == "__main__":
-    main(tyro.cli(Args))
-    os._exit(0)  # el servidor deja hilos (teclado, PyBullet) que no terminan solos
+    # el servidor deja hilos (teclado, PyBullet) que no terminan solos, y al salir con SystemExit
+    # Python intenta unirlos y falla: se sale con os._exit, con el código del error si lo hubo
+    try:
+        main(tyro.cli(Args))
+    except SystemExit as e:
+        if e.code not in (None, 0):
+            print(e.code if isinstance(e.code, str) else f"código {e.code}", flush=True)
+            os._exit(1 if isinstance(e.code, str) else int(e.code))
+    os._exit(0)
