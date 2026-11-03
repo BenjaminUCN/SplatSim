@@ -796,7 +796,7 @@ class TrainPanel:
         except ValueError as e:
             self.d_plan.content = f"**Can't add**: {e}"
             return
-        exists = {"plan": " (exists: new episodes are added)",
+        exists = {"plan": " (exists: episodes are added until it has the requested number)",
                   "render": " (exists: finished episodes are skipped)",
                   "mirror": " (exists: finished episodes are skipped)"}
         lines = [f"{i + 1}. **{j['kind']}** → `{j['output']}`"

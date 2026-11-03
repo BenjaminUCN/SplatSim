@@ -51,7 +51,8 @@ ARM_JOINTS = 5
 @dataclass
 class Args:
     episodes: int = 50
-    """episodios a generar (se agregan a los que ya tenga la carpeta)"""
+    """episodios que debe tener la carpeta: cuenta los que ya hay y genera solo los que faltan,
+    así relanzar una corrida cortada la completa (para agregar N a una carpeta con M, pide M + N)"""
     out: str = "~/data/bc_data/planned"
     seed: int | None = None
     positions: Literal["random", "grid"] = "random"
@@ -81,10 +82,14 @@ class Args:
     """rad: amplitud de la desviación suave de la ida (0 = sin desviación)"""
     gripper: float = 0.0
     """comando del gripper durante todo el episodio (0 = cerrado, como en las demos)"""
-    max_final_error: float = 0.02
-    """m: error de agarre final sobre el que se descarta el episodio"""
+    max_final_error: float = 0.03
+    """m: error de agarre final sobre el que se descarta el episodio. Con el centro de la pinza
+    como punto de agarre, el tomate choca con la base de la pinza y la deja a ~1.7 cm (1.2–2 cm),
+    así que bajo ~2.5 cm se descartan muchas posiciones; sigue bajo el radio de éxito (4 cm)"""
     max_attempts: int = 30
-    """posiciones a probar por episodio antes de rendirse"""
+    """posiciones a probar por episodio antes de saltárselo"""
+    max_failed_in_row: int = 3
+    """episodios seguidos sin trayectoria tras los que se rinde (el rango no sirve)"""
 
 
 # ── cinemática ───────────────────────────────────────────────────────────────
@@ -268,17 +273,22 @@ def execute(server, plan: dict, tomato, gripper: float, folder: Path) -> np.ndar
 def main(args: Args):
     out = Path(args.out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
-    rng = np.random.default_rng(args.seed)
+    existing = [int(e.name) for e in out.iterdir() if e.is_dir() and e.name.isdigit()]
+    # con semilla fija, completar una carpeta no repite las posiciones de los que ya tiene
+    rng = np.random.default_rng(args.seed if args.seed is None or not existing else [args.seed, len(existing)])
     point = load_grasp_point()
     positions = Positions(args, rng)
-    existing = [int(e.name) for e in out.iterdir() if e.is_dir() and e.name.isdigit()]
     first = max(existing, default=-1) + 1
+    todo = args.episodes - len(existing)
+    if todo <= 0:
+        print(f"{out} ya tiene {len(existing)} episodios (pedidos {args.episodes}): nada que generar", flush=True)
+        return
     info = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"), "grasp_point": point.tolist(),
             **asdict(args)}
     runs = []
     if (out / PLAN_INFO_FILE).exists():
         runs = (yaml.safe_load((out / PLAN_INFO_FILE).read_text()) or {}).get("runs", [])
-    runs.append({**info, "first_episode": first})
+    runs.append({**info, "first_episode": first, "existing": len(existing)})
     with open(out / PLAN_INFO_FILE, "w") as f:
         yaml.safe_dump({"runs": runs}, f, sort_keys=False, allow_unicode=True)
 
@@ -286,12 +296,14 @@ def main(args: Args):
     server.reset_robot()
     q0 = np.asarray(server.state_observation()["joint_positions"][:ARM_JOINTS])
     kin = Kinematics(server.urdf_path)
-    print(f"{args.episodes} episodios → {out} (desde {first:03d}), posiciones {args.positions}"
+    print(f"{todo} episodios → {out} (desde {first:03d}"
+          + (f"; ya tenía {len(existing)}, total {args.episodes}" if existing else "")
+          + f"), posiciones {args.positions}"
           + (f" ({positions.shape})" if args.positions == "random" else ""), flush=True)
 
-    rejected = 0
-    for n in range(args.episodes):
-        name = f"{first + n:03d}"
+    rejected, saved, failed_in_row, skipped = 0, 0, 0, 0
+    while saved < todo:
+        name = f"{first + saved:03d}"
         start = time.time()
         for attempt in range(args.max_attempts):
             tomato = positions.sample()
@@ -314,14 +326,20 @@ def main(args: Args):
                            "phases": plan["phases"], "final_grasp_error": round(float(err[-1]), 4),
                            "seed": args.seed}, f, indent=2)
             os.rename(tmp, out / name)
-            print(f"[{n + 1}/{args.episodes}] {name}: {len(states)} frames "
+            saved, failed_in_row = saved + 1, 0
+            print(f"[{saved}/{todo}] {name}: {len(states)} frames "
                   f"({len(states) / args.control_hz:.1f} s), inclinación {plan['pitch_deg']:.0f}°, "
                   f"error final {err[-1] * 100:.1f} cm, {time.time() - start:.1f} s", flush=True)
             break
         else:
-            raise SystemExit(f"{name}: ninguna de {args.max_attempts} posiciones dio una trayectoria; "
-                             "revisa el rango del tomate o --pitch-deg")
-    print(f"Listo: {args.episodes} episodios en {out} ({rejected} posiciones descartadas)", flush=True)
+            failed_in_row, skipped = failed_in_row + 1, skipped + 1
+            print(f"{name}: ninguna de {args.max_attempts} posiciones dio una trayectoria; se prueba de nuevo "
+                  f"({failed_in_row}/{args.max_failed_in_row} seguidos)", flush=True)
+            if failed_in_row >= args.max_failed_in_row:
+                raise SystemExit(f"{failed_in_row} episodios seguidos sin trayectoria ({saved} guardados); "
+                                 "revisa el rango del tomate, --pitch-deg o --max-final-error")
+    print(f"Listo: {todo} episodios nuevos, {len(existing) + todo} en {out} ({rejected} posiciones descartadas, "
+          f"{skipped} rondas de {args.max_attempts} sin trayectoria)", flush=True)
 
 
 if __name__ == "__main__":
