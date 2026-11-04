@@ -42,6 +42,7 @@ class XArm5RealServer(OperatorMixin):
         """robot: el driver XArmRobot (o algo con su interfaz); cameras: nombre -> cliente de
         cámara con read() -> (imagen RGB HxWx3, profundidad), p.ej. gello ZMQClientCamera."""
         self.robot = robot
+        self.external_gripper = getattr(robot, "external_gripper", None)  # el panel lo controla
         self._cameras = cameras
         self.camera_names = list(cameras)
         self.control_hz = control_hz
