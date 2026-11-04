@@ -6,6 +6,7 @@ How this fork uses SplatSim with a **uFactory xArm5 Lite** for robotic tomato ha
 - [Run the simulation server](#run-the-simulation-server)
 - [Control modes](#control-modes)
 - [Real xArm5 station](#real-xarm5-station)
+- [hand_held_XL330 gripper](#hand_held_xl330-gripper)
 - [Replay recordings in each control mode](#replay-recordings-in-each-control-mode)
 - [Teleoperate and record with GELLO](#teleoperate-and-record-with-gello)
 - [Record demonstrations](#record-demonstrations)
@@ -108,6 +109,52 @@ python scripts/launch_nodes.py --robot xarm5_lite --hz 10 [--control_mode interp
 - If a camera node is not running, observations fail with a message naming its port, and the server keeps serving.
 - **Trials on the real arm** use the same panel buttons as in the sim (*Run Trials*, or *Run* with *Record as trial*). Since there is no tomato position, `run_policy_trials.py` asks the operator through an *Operator* box in the Policy folder: before each trial, after Reset Robot, "place the tomato at grid position #k" (**Start** / **Skip** / **Stop trials**; with *Record as trial*, wherever you want it), and after it "result?" (**Success** / **Fail** / **Discard**). The answer goes to the `manual_success` column of `trials.csv` (Discard writes no row, the recording stays), the trial is paced at the server's `--hz` on the wall clock, and `compare_trials.py` counts the operator's mark as the success of those trials. The grid positions are in sim world coordinates: mark where each one falls on the real plant before running trials.
 - `--robot_ip` overrides the IP in the file. Test new settings with low speeds and the emergency stop at hand.
+
+## hand_held_XL330 gripper
+
+The hand-held pruner replaces the xArm gripper. Its Dynamixel XL330 is driven from the PC by USB through an OpenRB-150, not through the arm's controller. The command keeps the same meaning in the sim and on the real arm: **0 = open, 1 = closed**.
+
+### Real gripper
+
+1. **Firmware:** upload *File → Examples → OpenRB-150 → usb_to_dynamixel* to the board. It only passes bytes between USB and the servo, and the PC talks to it with the DynamixelSDK.
+2. **Power:** over USB the board's fuse limits current to 500 mA, which is not enough to cut. Feed the board's terminal with a **5 V** supply and set the power jumper to match. Do not use 12 V: the XL330's voltage limit is 7 V.
+3. **Calibrate and test**, first without the blade:
+   ```bash
+   python scripts/xarm5/xl330_gripper.py status
+   python scripts/xarm5/xl330_gripper.py calibrate   # by hand: open, then closed; saved in configs/xarm5_real.yaml
+   python scripts/xarm5/xl330_gripper.py move 0.5
+   ```
+4. **Run** the station as usual. `gripper.type: xl330` in `configs/xarm5_real.yaml` selects this gripper (`xarm` selects the old one). GELLO, the policy and the recorder need no changes, and the panel gets a *Gripper* folder with its state, Open, Close, Torque off and Recover.
+
+Behavior:
+- Starting the server does not move the servo: it holds where it is until the first command.
+- Serial traffic runs in its own thread, so a slow or unplugged servo does not delay the arm's 30 Hz loop. If the gripper fails, the arm keeps working and the panel shows why.
+- If the servo pushes without advancing for `stall_seconds`, it stops pushing until the command changes by more than 10 %.
+- After a servo error or a lost USB connection, commands are ignored until **Recover**, so the blade does not move by itself when the connection returns.
+- While the arm is stopped, the gripper holds and ignores commands, and it does not resume the earlier command after Enable arm. **The arm's emergency stop does not cut the servo's power**: the software only notices through the arm's state. Give the servo its own power switch.
+
+Check these on the station:
+- `/dev/ttyACM0` is in `PORT_CONFIG_MAP`, and the OpenRB-150 may also get that name. The gripper finds its board by USB identity and the panel hides that port from the GELLO list, but the GELLO may then appear as `ttyACM1`. Add the GELLO's `/dev/serial/by-id/...` path to `PORT_CONFIG_MAP`.
+- Under WSL, *Tools → USB* looks for "OpenRB" in `usbipd list`. If Windows shows the board with another name, attach it by hand.
+- Set the tool's mass and center of gravity in uFactory Studio: they are not those of the old gripper.
+
+### Simulator
+
+```bash
+python scripts/xarm5/build_hand_held_urdf.py                 # xarm5_hand_held.urdf, next to xarm5.urdf
+python scripts/xarm5/hand_held_splat.py --scene xarm5_lite_plant_v3   # adds xarm5_lite_plant_v3_hand_held
+python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3_hand_held --hz 10
+python scripts/xarm5/estimate_grasp_point.py                 # the grasp point becomes the middle of the blade edge
+```
+Edit `urdf_path` in `configs/object_configs/objects.yaml` or pass `--urdf` if your URDF is elsewhere. For the real station's 3D view, set `urdf` in `configs/xarm5_real.yaml` to the new file.
+
+- **URDF:** removes `xarm_gripper_base_link` and everything below it, and attaches the tool at the same place. `wrist_camera_link` keeps its pose, so the wrist camera is unchanged; the GoPro in the CAD is only geometry. The default orientation puts the GoPro towards the link's +x; if your mount differs, use `--roll-deg`.
+- **Actuated joint:** `gripper_drive_joint` is the XL330 horn. Its travel is `HAND_HELD_TRAVEL_RAD` in `splatsim/robots/station/urdf_view.py` (107.6°, RoboHarvest's value); set it to the travel printed by `calibrate`.
+- **Moving jaw:** the CAD has no part that moves with the horn, and the horn is hidden under the cover, so the motion does not show in the images yet. When the part exists, pass `--moving-part jaw.stl` (mm, assembly frame) and regenerate the scene.
+- **Splat:** `hand_held_splat.py` needs no new scan. It removes the old gripper's Gaussians, adds flat-colored ones sampled on the CAD meshes, remaps the per-link labels and writes a new scene; the original is untouched. It looks like CAD, not like a photo. For a policy meant for the real robot, prefer a new scan ([Adding a new robot](../README.md#adding-a-new-robot)) with the same URDF and `gripper: hand_held_xl330`; if the jaw was not open in the scan, also set `splat_gripper_value` (fraction of the travel).
+- **Mirrored recordings:** the tool is not symmetric across its axis (the blade edge is about 9 mm off it), so `mirror_recordings.py` produces motions the real tool would not make with the same grasp.
+
+`python -m unittest tests/test_hand_held_xl330.py` tests the driver, the URDF and the splat merge without hardware, PyBullet or GPU. `scripts/xarm5/export_hand_held_meshes.py` regenerates the meshes when the CAD changes.
 
 ## Replay recordings in each control mode
 
