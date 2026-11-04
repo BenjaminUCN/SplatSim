@@ -29,6 +29,7 @@ def tomato_in_ee(state, tomato_pos) -> np.ndarray:
 
 FINGER_LINKS = ("left_finger", "right_finger")
 EE_LINK = "link_eef"          # el link de obs["state"]
+CENTER_LINK = "gripper_center_link"   # hand_held_XL330: mitad del filo del pruner
 
 
 def gripper_center(urdf_path: str) -> np.ndarray:
@@ -45,6 +46,9 @@ def gripper_center(urdf_path: str) -> np.ndarray:
         links = {c.getJointInfo(body, i)[12].decode(): i for i in range(c.getNumJoints(body))}
         ee = c.getLinkState(body, links[EE_LINK], computeForwardKinematics=True)
         rot = np.array(c.getMatrixFromQuaternion(ee[5])).reshape(3, 3)
+        if CENTER_LINK in links:     # gripper sin dedos: el URDF marca el punto
+            center = c.getLinkState(body, links[CENTER_LINK], computeForwardKinematics=True)
+            return rot.T @ (np.array(center[4]) - ee[4])
         centers = []
         for name in FINGER_LINKS:
             lo, hi = c.getAABB(body, links[name])

@@ -23,6 +23,7 @@ class XArm5Gripper:
         self.parent_id = None
         self.children = {}
         self._patched = False
+        self.splat_pose = SPLAT_GRIPPER_POSE
 
     # ── setup (lo llama setup_gripper de la base) ────────────────────────────
     def setup(self) -> None:
@@ -80,6 +81,10 @@ class XArm5Gripper:
         angle = s.pybullet_client.getJointState(s.dummy_robot, self.parent_id)[0]
         return float(np.clip(angle / GRIPPER_MAX_ANGLE, 0.0, 1.0))
 
+    def base_state(self) -> float:
+        """Lo que la base divide por 0.8 para obs["state"] (get_current_gripper_state)."""
+        return self.s.pybullet_client.getJointState(self.s.dummy_robot, self.parent_id)[0]
+
     # ── parche del splat ─────────────────────────────────────────────────────
     def patch_for_splat(self) -> None:
         """
@@ -95,7 +100,7 @@ class XArm5Gripper:
         arm = [c.getJointState(s.dummy_robot, i)[0] for i in range(1, 6)]
 
         for jid in [self.parent_id, *self.children]:
-            c.resetJointState(s.dummy_robot, jid, SPLAT_GRIPPER_POSE)
+            c.resetJointState(s.dummy_robot, jid, self.splat_pose)
         for _ in range(50):
             c.stepSimulation()
 
@@ -107,3 +112,48 @@ class XArm5Gripper:
             c.resetJointState(s.dummy_robot, i + 1, val)
         for _ in range(50):
             c.stepSimulation()
+
+
+class HandHeldGripper(XArm5Gripper):
+    """Gripper hand_held_XL330: una sola articulación, el horn del XL330. Misma convención que el
+    real: 0 = abierto, 1 = cerrado. El recorrido sale del límite del joint en el URDF."""
+    PARENT = "gripper_drive_joint"
+    CHILDREN = {}
+    SPEED = 0.942     # rad/s: 9 rpm, el profile_velocity de configs/xarm5_real.yaml
+
+    def setup(self) -> None:
+        super().setup()
+        s = self.s
+        self.travel = s.pybullet_client.getJointInfo(s.dummy_robot, self.parent_id)[9]
+        if self.travel <= 0:
+            raise ValueError(f"{self.PARENT} needs a positive upper limit in the URDF")
+        # fracción del recorrido en que estaba el gripper en el splat: 0 en el splat generado desde
+        # el CAD; en un escaneo real, splat_gripper_value en objects.yaml
+        value = s.object_config[s.robot_name].get("splat_gripper_value", 0.0)
+        self.splat_pose = value * self.travel
+        self._patched = value == 0.0
+
+    def move(self, open_length: float, velocity: float = SPEED) -> None:
+        s = self.s
+        if not s.use_gripper:
+            return
+        fraction = np.clip(open_length / GRIPPER_RANGE[1], 0.0, 1.0)
+        s.pybullet_client.setJointMotorControl2(
+            s.dummy_robot, self.parent_id, s.pybullet_client.POSITION_CONTROL,
+            targetPosition=fraction * self.travel,
+            force=s.joints[self.parent_id].maxForce,
+            maxVelocity=self.SPEED,
+        )
+
+    def get_state(self) -> float:
+        s = self.s
+        if not s.use_gripper:
+            return 0.0
+        angle = s.pybullet_client.getJointState(s.dummy_robot, self.parent_id)[0]
+        return float(np.clip(angle / self.travel, 0.0, 1.0))
+
+    def base_state(self) -> float:
+        return self.get_state() * 0.8
+
+
+GRIPPERS = {"xarm": XArm5Gripper, "hand_held_xl330": HandHeldGripper}

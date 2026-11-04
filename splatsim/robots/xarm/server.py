@@ -39,7 +39,7 @@ from .debug_ui import (
     ResetJointsButton,
     SaveCameraPosesButton,
 )
-from .gripper import XArm5Gripper
+from .gripper import GRIPPERS
 from .preview import PreviewStream
 from splatsim.robots.station.operator import OperatorMixin, OperatorPrompt
 from splatsim.robots.station.recorder import TrajectoryRecorder, to_uint8_image
@@ -156,11 +156,16 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
 
     # ── métodos que llama la base: delegadores de una línea ──────────────────
     def setup_gripper(self):
-        self.gripper = XArm5Gripper(self)
+        # gripper de la escena en objects.yaml: xarm (por defecto) o hand_held_xl330
+        kind = self.object_config[self.robot_name].get("gripper", "xarm")
+        self.gripper = GRIPPERS[kind](self)
         self.gripper.setup()
 
     def move_gripper(self, open_length, velocity=2):
         self.gripper.move(open_length, velocity)
+
+    def get_current_gripper_state(self):
+        return self.gripper.base_state()
 
     def num_dofs(self) -> int:
         return NUM_DOFS

@@ -11,6 +11,8 @@ JOINT_EPS = 1e-4   # rad: cambios menores no se envían al navegador
 GRIPPER_MAX_ANGLE = 0.85 # rad del drive_joint con el gripper normalizado en 1 (igual que el sim)
 GRIPPER_JOINTS = ("drive_joint", "left_finger_joint", "left_inner_knuckle_joint",
                   "right_outer_knuckle_joint", "right_finger_joint", "right_inner_knuckle_joint")
+HAND_HELD_JOINT = "gripper_drive_joint"  # horn del XL330 en el gripper hand_held_XL330
+HAND_HELD_TRAVEL_RAD = 1.878             # recorrido abierto-cerrado (107.6°, el de RoboHarvest): mide el tuyo
 
 
 def xarm5_urdf_joints(q) -> dict:
@@ -19,6 +21,7 @@ def xarm5_urdf_joints(q) -> dict:
     q = np.asarray(q, dtype=float)
     joints = {f"joint{i + 1}": q[i] for i in range(5)}
     joints.update({name: q[5] * GRIPPER_MAX_ANGLE for name in GRIPPER_JOINTS})
+    joints[HAND_HELD_JOINT] = q[5] * HAND_HELD_TRAVEL_RAD
     return joints
 
 

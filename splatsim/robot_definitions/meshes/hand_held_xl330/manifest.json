@@ -1,0 +1,159 @@
+{
+ "source": "hand_held_assembly_XL330.step + mount_xarm5.FCStd",
+ "units": "mm",
+ "parts": [
+  {
+   "name": "mount",
+   "file": "mount.stl",
+   "link": "base",
+   "rgb": [
+    0.5,
+    0.5,
+    0.55
+   ],
+   "collision": true,
+   "volume_mm3": 61726.8,
+   "com_mm": [
+    0.029,
+    -52.141,
+    -16.03
+   ]
+  },
+  {
+   "name": "mount_xarm5",
+   "file": "mount_xarm5.stl",
+   "link": "base",
+   "rgb": [
+    0.35,
+    0.35,
+    0.38
+   ],
+   "collision": true,
+   "volume_mm3": 35312.4,
+   "com_mm": [
+    -0.01,
+    -67.29,
+    -16.011
+   ]
+  },
+  {
+   "name": "bottom_plate",
+   "file": "bottom_plate.stl",
+   "link": "base",
+   "rgb": [
+    0.85,
+    0.35,
+    0.1
+   ],
+   "collision": true,
+   "volume_mm3": 57440.3,
+   "com_mm": [
+    -0.289,
+    -5.017,
+    -16.983
+   ]
+  },
+  {
+   "name": "top_cover",
+   "file": "top_cover.stl",
+   "link": "base",
+   "rgb": [
+    0.2,
+    0.5,
+    0.85
+   ],
+   "collision": true,
+   "volume_mm3": 15437.3,
+   "com_mm": [
+    0.0,
+    -0.104,
+    -1.162
+   ]
+  },
+  {
+   "name": "gopro",
+   "file": "gopro.stl",
+   "link": "base",
+   "rgb": [
+    0.7,
+    0.7,
+    0.7
+   ],
+   "collision": true,
+   "volume_mm3": 98977.1,
+   "com_mm": [
+    20.795,
+    3.621,
+    46.519
+   ]
+  },
+  {
+   "name": "pruner",
+   "file": "pruner.stl",
+   "link": "base",
+   "rgb": [
+    0.2,
+    0.7,
+    0.3
+   ],
+   "collision": true,
+   "volume_mm3": 16230.4,
+   "com_mm": [
+    -7.636,
+    74.766,
+    -17.8
+   ]
+  },
+  {
+   "name": "xl330",
+   "file": "xl330.stl",
+   "link": "base",
+   "rgb": [
+    0.14,
+    0.15,
+    0.17
+   ],
+   "collision": true,
+   "volume_mm3": 15218.6,
+   "com_mm": [
+    12.705,
+    6.629,
+    -24.103
+   ]
+  },
+  {
+   "name": "tornillos_m2",
+   "file": "tornillos_m2.stl",
+   "link": "base",
+   "rgb": [
+    0.15,
+    0.35,
+    0.75
+   ],
+   "collision": false,
+   "volume_mm3": 150.6,
+   "com_mm": [
+    12.7,
+    6.365,
+    -13.455
+   ]
+  },
+  {
+   "name": "horn",
+   "file": "horn.stl",
+   "link": "horn",
+   "rgb": [
+    0.62,
+    0.64,
+    0.68
+   ],
+   "collision": false,
+   "volume_mm3": 645.9,
+   "com_mm": [
+    12.7,
+    13.862,
+    -11.315
+   ]
+  }
+ ]
+}
