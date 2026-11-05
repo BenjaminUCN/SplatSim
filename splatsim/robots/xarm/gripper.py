@@ -3,6 +3,8 @@ import numpy as np
 
 from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 
+from splatsim.utils.hand_held import JAW_JOINT
+
 from .config import (
     GRIPPER_RANGE, GRIPPER_MAX_ANGLE, SPLAT_GRIPPER_POSE,
 )
@@ -85,6 +87,9 @@ class XArm5Gripper:
         """Lo que la base divide por 0.8 para obs["state"] (get_current_gripper_state)."""
         return self.s.pybullet_client.getJointState(self.s.dummy_robot, self.parent_id)[0]
 
+    def _splat_poses(self) -> dict:
+        return {jid: self.splat_pose for jid in [self.parent_id, *self.children]}
+
     # ── parche del splat ─────────────────────────────────────────────────────
     def patch_for_splat(self) -> None:
         """
@@ -99,13 +104,13 @@ class XArm5Gripper:
         s, c = self.s, self.s.pybullet_client
         arm = [c.getJointState(s.dummy_robot, i)[0] for i in range(1, 6)]
 
-        for jid in [self.parent_id, *self.children]:
-            c.resetJointState(s.dummy_robot, jid, self.splat_pose)
+        for jid, pose in self._splat_poses().items():
+            c.resetJointState(s.dummy_robot, jid, pose)
         for _ in range(50):
             c.stepSimulation()
 
         new_states = get_curr_link_states(s.dummy_robot, s.use_link_centers)
-        for jid in [self.parent_id, *self.children]:
+        for jid in self._splat_poses():
             s.initial_link_states[jid] = new_states[jid]
 
         for i, val in enumerate(arm):
@@ -131,6 +136,10 @@ class HandHeldGripper(XArm5Gripper):
         # el CAD; en un escaneo real, splat_gripper_value en objects.yaml
         value = s.object_config[s.robot_name].get("splat_gripper_value", 0.0)
         self.splat_pose = value * self.travel
+        # la mandíbula sigue al horn por una varilla: aquí, proporcional a su ángulo
+        jaws = [j for j in s.joints if j.name == JAW_JOINT]
+        self.jaw_id = jaws[0].id if jaws else None
+        self.jaw_travel = s.pybullet_client.getJointInfo(s.dummy_robot, self.jaw_id)[9] if jaws else 0.0
         self._patched = value == 0.0
 
     def move(self, open_length: float, velocity: float = SPEED) -> None:
@@ -144,6 +153,19 @@ class HandHeldGripper(XArm5Gripper):
             force=s.joints[self.parent_id].maxForce,
             maxVelocity=self.SPEED,
         )
+        if self.jaw_id is not None:
+            s.pybullet_client.setJointMotorControl2(
+                s.dummy_robot, self.jaw_id, s.pybullet_client.POSITION_CONTROL,
+                targetPosition=fraction * self.jaw_travel,
+                force=s.joints[self.jaw_id].maxForce,
+                maxVelocity=self.SPEED * self.jaw_travel / self.travel,
+            )
+
+    def _splat_poses(self) -> dict:
+        poses = super()._splat_poses()
+        if self.jaw_id is not None:
+            poses[self.jaw_id] = self.splat_pose / self.travel * self.jaw_travel
+        return poses
 
     def get_state(self) -> float:
         s = self.s

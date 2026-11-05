@@ -25,7 +25,6 @@ PARTS = {
     "mount_xarm5": ("base", (0.35, 0.35, 0.38), True, None),
     "bottom_plate": ("base", (0.85, 0.35, 0.10), True, ["bottom_plate"]),
     "top_cover": ("base", (0.20, 0.50, 0.85), True, ["top_cover"]),
-    "pruner": ("base", (0.20, 0.70, 0.30), True, ["pruner"]),
     "xl330": ("base", (0.14, 0.15, 0.17), True,
               ["Cuerpo_central", "Tapa_frontal", "Tapa_trasera", "Pieza_trasera", "Horn_idler",
                "Buje_idler", "Tornillo_idler", "Conector_1", "Conector_2", "Tornillo_carcasa_1",
@@ -56,7 +55,10 @@ def main():
     shapes = {o.Label: o.Shape for o in doc.Objects if o.TypeId == "Part::Feature"}
     disc = mount_xarm5_shape()
 
-    manifest = []
+    # el pruner está trazado desde fotos, no sale del STEP: se conservan sus piezas
+    with open(os.path.join(OUT, "manifest.json")) as f:
+        old = json.load(f)
+    manifest = [p for p in old["parts"] if p.get("traced")]
     for name, (link, rgb, collision, solids) in PARTS.items():
         shape = disc if solids is None else Part.makeCompound([shapes[s] for s in solids])
         Mesh.Mesh(shape.tessellate(TOL)).write(os.path.join(OUT, name + ".stl"))
@@ -69,11 +71,11 @@ def main():
             name, link, shape.Volume, bb.XMin, bb.XMax, bb.YMin, bb.YMax, bb.ZMin, bb.ZMax,
             os.path.getsize(os.path.join(OUT, name + ".stl")) / 1000))
     with open(os.path.join(OUT, "manifest.json"), "w") as f:
-        json.dump({"source": "hand_held_assembly_XL330.step + mount_xarm5.FCStd", "units": "mm",
+        json.dump({"source": old["source"], "units": "mm",
                    "parts": manifest}, f, indent=1)
 
     # el disco solo debe tocar a bottom_plate por la cara, sin penetrar nada
-    for other in ("bottom_plate", "top_cover", "pruner", "xl330"):
+    for other in ("bottom_plate", "top_cover", "xl330"):
         print("EXP disco vs %s: comun %.4f mm3, distancia %.4f mm" % (
             other, disc.common(shapes[other]).Volume, disc.distToShape(shapes[other])[0]))
 

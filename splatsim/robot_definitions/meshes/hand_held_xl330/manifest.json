@@ -1,5 +1,5 @@
 {
- "source": "hand_held_assembly_XL330.step + mount_xarm5.FCStd",
+ "source": "hand_held_assembly_XL330.step + mount_xarm5.FCStd + pruner traced from photos",
  "units": "mm",
  "parts": [
   {
@@ -54,23 +54,6 @@
    ]
   },
   {
-   "name": "pruner",
-   "file": "pruner.stl",
-   "link": "base",
-   "rgb": [
-    0.2,
-    0.7,
-    0.3
-   ],
-   "collision": true,
-   "volume_mm3": 16230.4,
-   "com_mm": [
-    -7.636,
-    74.766,
-    -17.8
-   ]
-  },
-  {
    "name": "xl330",
    "file": "xl330.stl",
    "link": "base",
@@ -120,6 +103,114 @@
     13.862,
     -11.315
    ]
+  },
+  {
+   "name": "fixed_steel",
+   "file": "fixed_steel.stl",
+   "link": "base",
+   "rgb": [
+    0.35,
+    0.38,
+    0.4
+   ],
+   "collision": false,
+   "volume_mm3": 9692.3,
+   "com_mm": [
+    -10.398,
+    50.761,
+    -17.8
+   ],
+   "traced": true
+  },
+  {
+   "name": "anvil",
+   "file": "anvil.stl",
+   "link": "base",
+   "rgb": [
+    0.95,
+    0.62,
+    0.15
+   ],
+   "collision": true,
+   "volume_mm3": 6246.4,
+   "com_mm": [
+    -14.695,
+    92.466,
+    -11.85
+   ],
+   "traced": true
+  },
+  {
+   "name": "anvil_lip",
+   "file": "anvil_lip.stl",
+   "link": "base",
+   "rgb": [
+    0.95,
+    0.62,
+    0.15
+   ],
+   "collision": true,
+   "volume_mm3": 977.9,
+   "com_mm": [
+    -10.397,
+    98.186,
+    -6.2
+   ],
+   "traced": true
+  },
+  {
+   "name": "pivot_bolt",
+   "file": "pivot_bolt.stl",
+   "link": "base",
+   "rgb": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "collision": false,
+   "volume_mm3": 1118.2,
+   "com_mm": [
+    9.66,
+    58.967,
+    -18.7
+   ],
+   "traced": true
+  },
+  {
+   "name": "moving_jaw",
+   "file": "moving_jaw.stl",
+   "link": "jaw",
+   "rgb": [
+    0.75,
+    0.75,
+    0.72
+   ],
+   "collision": true,
+   "volume_mm3": 6651.3,
+   "com_mm": [
+    0.473,
+    96.533,
+    -10.9
+   ],
+   "traced": true
+  },
+  {
+   "name": "moving_plate",
+   "file": "moving_plate.stl",
+   "link": "jaw",
+   "rgb": [
+    0.08,
+    0.08,
+    0.09
+   ],
+   "collision": false,
+   "volume_mm3": 3410.5,
+   "com_mm": [
+    -0.849,
+    79.578,
+    -20.8
+   ],
+   "traced": true
   }
  ]
 }

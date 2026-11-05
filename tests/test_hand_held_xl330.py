@@ -2,6 +2,7 @@
 
     python -m unittest tests/test_hand_held_xl330.py        (desde la raíz del repositorio)
 """
+import math
 import importlib.util
 import os
 import shutil
@@ -15,7 +16,7 @@ import numpy as np
 
 from splatsim.robots.xl330_gripper import ALERT_BIT, XL330Gripper
 from splatsim.utils.hand_held import (
-    FLANGE_CENTER_MM, MESH_DIR, build_urdf, in_box, load_manifest, merge_splat, origin_matrix, read_ply, read_stl, sample_surface, write_ply,
+    FLANGE_CENTER_MM, GRIPPER_CENTER_MM, JAW_JOINT, JAW_TRAVEL_RAD, MESH_DIR, PIVOT_MM, build_urdf, in_box, load_manifest, merge_splat, origin_matrix, read_ply, read_stl, sample_surface, write_ply,
 )
 
 OPEN, CLOSED = 1000, 2224
@@ -425,9 +426,34 @@ class TestUrdf(unittest.TestCase):
         center = (horn.reshape(-1, 3).min(0) + horn.reshape(-1, 3).max(0)) / 2
         np.testing.assert_allclose(center[:2], (12.7, 13.865), atol=0.02)
 
+    def test_jaw_opens_at_zero_and_closes_on_the_meshes(self):
+        self.build()
+        root = ET.parse(self.dst).getroot()
+        joint = [j for j in root.findall("joint") if j.get("name") == JAW_JOINT][0]
+        self.assertEqual((joint.find("parent").get("link"), joint.find("child").get("link")),
+                         ("hand_held_base", "hand_held_jaw"))
+        self.assertEqual(joint.find("axis").get("xyz"), "0 0 1")
+        self.assertAlmostEqual(float(joint.find("limit").get("upper")), JAW_TRAVEL_RAD)
+        T0 = origin_matrix(joint.find("origin"))
+        np.testing.assert_allclose(T0[:2, 3], np.array(PIVOT_MM) / 1000, atol=1e-6)
+        shift = np.array([-PIVOT_MM[0], -PIVOT_MM[1], 0, 0]) / 1000
+        tip_mm = read_stl(os.path.join(MESH_DIR, "moving_jaw.stl")).reshape(-1, 3)
+        tip_mm = tip_mm[np.argmax(tip_mm[:, 1])]
+        tip_link = np.array([*tip_mm / 1000, 1]) + shift
+        a = JAW_TRAVEL_RAD
+        Rz = np.array([[math.cos(a), -math.sin(a), 0, 0], [math.sin(a), math.cos(a), 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
+        closed, opened = (T0 @ Rz @ tip_link)[:3] * 1000, (T0 @ tip_link)[:3] * 1000
+        np.testing.assert_allclose(closed, tip_mm, atol=1e-2)       # cerrada: donde está la malla
+        anvil_x = read_stl(os.path.join(MESH_DIR, "anvil.stl")).reshape(-1, 3)[:, 0].max()
+        self.assertGreater(opened[0] - anvil_x, 30)                 # abierta: lejos del yunque
+
+    def test_grasp_point_is_on_the_real_jaw_edge(self):
+        jaw = read_stl(os.path.join(MESH_DIR, "moving_jaw.stl")).reshape(-1, 3)
+        self.assertLess(np.linalg.norm(jaw - np.array(GRIPPER_CENTER_MM), axis=1).min(), 6)
+
     def test_moving_part_and_missing_gripper(self):
         extra = os.path.join(self.dir, "hoja.stl")
-        shutil.copy2(os.path.join(MESH_DIR, "pruner.stl"), extra)
+        shutil.copy2(os.path.join(MESH_DIR, "moving_jaw.stl"), extra)
         self.build(extra_horn_mesh=extra)
         self.assertTrue(os.path.exists(os.path.join(self.dir, "hand_held_xl330", "hoja.stl")))
         with open(self.dst, encoding="utf-8") as f:
@@ -449,7 +475,7 @@ class TestMeshes(unittest.TestCase):
             self.assertAlmostEqual(volume / part["volume_mm3"], 1.0, delta=0.05, msg=part["name"])
 
     def test_sampling_stays_on_the_part(self):
-        t = read_stl(os.path.join(MESH_DIR, "pruner.stl"))
+        t = read_stl(os.path.join(MESH_DIR, "moving_jaw.stl"))
         pts = sample_surface(t, 1.5, np.random.default_rng(0))
         v = t.reshape(-1, 3)
         self.assertGreater(len(pts), 1000)

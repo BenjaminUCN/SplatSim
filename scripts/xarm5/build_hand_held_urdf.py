@@ -30,7 +30,7 @@ def main() -> None:
     print(f"Wrote {dst}")
     print(f"Removed links: {', '.join(info['removed'])}")
     print(f"Kept and moved to {info['parent']}: {', '.join(info['reparented']) or '-'}")
-    print(f"Estimated gripper mass: {info['mass_kg']:.3f} kg (solid PLA, not weighed)")
+    print(f"Estimated gripper mass: {info['mass_kg']:.3f} kg (not weighed)")
 
 
 if __name__ == "__main__":

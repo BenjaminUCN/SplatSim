@@ -16,7 +16,7 @@ import pybullet as p
 import yaml
 from pybullet_utils.bullet_client import BulletClient
 
-from splatsim.utils.hand_held import MESH_DIR, load_manifest, merge_splat, read_ply, read_stl, sample_surface, write_ply
+from splatsim.utils.hand_held import MESH_DIR, PIVOT_MM, load_manifest, merge_splat, read_ply, read_stl, sample_surface, write_ply
 from splatsim.utils.paths import load_yaml
 
 OBJECTS = "configs/object_configs/objects.yaml"
@@ -74,7 +74,11 @@ def main() -> None:
     xyz, rgb, labels = [], [], []
     for part in load_manifest():
         points = sample_surface(read_stl(os.path.join(MESH_DIR, part["file"])), args.spacing_mm, rng) / 1000
-        world = points @ base[:3, :3].T + base[:3, 3]
+        if part["link"] == "jaw":   # las mallas están cerradas; el link en q = 0 está abierto
+            frame = link_pose("hand_held_jaw")
+            world = (points - np.array([*PIVOT_MM, 0.0]) / 1000) @ frame[:3, :3].T + frame[:3, 3]
+        else:
+            world = points @ base[:3, :3].T + base[:3, 3]
         xyz.append(world)
         rgb.append(np.tile(part["rgb"], (len(world), 1)))
         labels.append(np.full(len(world), new_links["hand_held_" + part["link"]]))

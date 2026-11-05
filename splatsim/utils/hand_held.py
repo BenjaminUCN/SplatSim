@@ -18,13 +18,18 @@ GRIPPER_BASE_LINK = "xarm_gripper_base_link"
 KEEP_LINKS = ("wrist_camera_link",)
 HORN_AXIS_MM = (12.7, 13.86524)
 FLANGE_CENTER_MM = (0.0, -51.63, -15.8)
-# mitad del filo del pruner, entre (-2, 158.27) y (20.5, 48.27)
-GRIPPER_CENTER_MM = (9.25, 103.27, -17.8)
+# el pruner real está trazado desde fotos sobre una cuadrícula (±1-2 mm); su mandíbula móvil gira alrededor del perno
+PIVOT_MM = (9.66, 58.97)
+JAW_JOINT = "hand_held_jaw_joint"
+JAW_TRAVEL_RAD = 0.615          # 35.3°, medido entre las fotos abierta y cerrada
+# mitad del borde dentado del yunque, a media altura de la mandíbula
+GRIPPER_CENTER_MM = (-9.9, 97.0, -10.9)
 # ensamble -> marco del gripper viejo: la punta sobre z (herramienta) y la z del ensamble sobre x, que apunta
 # hacia arriba con la herramienta horizontal y joint5 = 0
 R_FLANGE_ASSEMBLY = np.array([[0.0, 0, 1], [1, 0, 0], [0, 1, 0]])
 PLASTIC_KG_PER_MM3 = 1.24e-6                # PLA macizo: estimación, sin pesar la pieza
-PART_MASS_KG = {"xl330": 0.018, "horn": 0.003, "tornillos_m2": 0.002}
+PART_MASS_KG = {"fixed_steel": 0.078, "moving_plate": 0.032, "moving_jaw": 0.035, "pivot_bolt": 0.008,
+                "xl330": 0.018, "horn": 0.003, "tornillos_m2": 0.002}
 
 
 def _rot_rpy(rpy) -> np.ndarray:
@@ -165,6 +170,7 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
         shutil.copy2(os.path.join(mesh_dir, part["file"]), out_dir)
     base_parts = [p for p in parts if p["link"] == "base"]
     horn_parts = [p for p in parts if p["link"] == "horn"]
+    jaw_parts = [p for p in parts if p["link"] == "jaw"]
     if extra_horn_mesh:
         shutil.copy2(extra_horn_mesh, out_dir)
         horn_parts.append({"name": "horn_extra", "file": os.path.basename(extra_horn_mesh), "link": "horn",
@@ -182,6 +188,22 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
     for part in horn_parts:
         _add_part(horn, part, -horn_origin_m, prefix)
     _inertial(horn, PART_MASS_KG["horn"], (0, 0, -0.011), 1e-6)
+
+    if jaw_parts:
+        # las mallas están con la mandíbula cerrada; q = 0 es abierta, como el horn
+        pivot_m = np.array([*PIVOT_MM, 0.0]) / 1000
+        jaw = ET.SubElement(root, "link", name="hand_held_jaw")
+        for part in jaw_parts:
+            _add_part(jaw, part, -pivot_m, prefix)
+        jaw_masses = np.array([_part_mass(p) for p in jaw_parts])
+        jaw_com = sum(m * np.array(p["com_mm"]) for m, p in zip(jaw_masses, jaw_parts)) / jaw_masses.sum() / 1000
+        _inertial(jaw, float(jaw_masses.sum()), jaw_com - pivot_m, 1e-4)
+        jaw_joint = ET.SubElement(root, "joint", name=JAW_JOINT, type="revolute")
+        ET.SubElement(jaw_joint, "origin", xyz=" ".join(f"{v:.6f}" for v in pivot_m), rpy=f"0 0 {-JAW_TRAVEL_RAD:.5f}")
+        ET.SubElement(jaw_joint, "parent", link="hand_held_base")
+        ET.SubElement(jaw_joint, "child", link="hand_held_jaw")
+        ET.SubElement(jaw_joint, "axis", xyz="0 0 1")
+        ET.SubElement(jaw_joint, "limit", lower="0", upper=f"{JAW_TRAVEL_RAD:.5f}", effort="5", velocity="5")
 
     center = ET.SubElement(root, "link", name="gripper_center_link")
     _inertial(center, 0.001, (0, 0, 0), 1e-8)
@@ -207,7 +229,8 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
     ET.indent(tree)
     tree.write(dst, encoding="utf-8", xml_declaration=True)
     return {"removed": removed, "reparented": reparented, "parent": new_parent,
-            "mass_kg": float(masses.sum()), "parts": [*base_parts, *horn_parts]}
+            "mass_kg": float(masses.sum() + sum(_part_mass(p) for p in jaw_parts)),
+            "parts": [*base_parts, *horn_parts, *jaw_parts]}
 
 
 # ── splat ────────────────────────────────────────────────────────────────────

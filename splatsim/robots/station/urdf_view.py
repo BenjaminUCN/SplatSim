@@ -7,6 +7,8 @@ Necesita yourdfpy (viser.extras.ViserUrdf).
 """
 import numpy as np
 
+from splatsim.utils.hand_held import JAW_JOINT, JAW_TRAVEL_RAD
+
 JOINT_EPS = 1e-4   # rad: cambios menores no se envían al navegador
 GRIPPER_MAX_ANGLE = 0.85 # rad del drive_joint con el gripper normalizado en 1 (igual que el sim)
 GRIPPER_JOINTS = ("drive_joint", "left_finger_joint", "left_inner_knuckle_joint",
@@ -22,6 +24,7 @@ def xarm5_urdf_joints(q) -> dict:
     joints = {f"joint{i + 1}": q[i] for i in range(5)}
     joints.update({name: q[5] * GRIPPER_MAX_ANGLE for name in GRIPPER_JOINTS})
     joints[HAND_HELD_JOINT] = q[5] * HAND_HELD_TRAVEL_RAD
+    joints[JAW_JOINT] = q[5] * JAW_TRAVEL_RAD
     return joints
 
 
