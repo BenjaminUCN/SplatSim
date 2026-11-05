@@ -67,6 +67,11 @@ def run_name_for(checkpoint: str) -> str:
     return model_label(*found) if found else os.path.basename(checkpoint.rstrip("/"))
 
 
+def policy_cameras(agent) -> list[str]:
+    """Cámaras con que se entrenó la política, las únicas que se renderizan y graban en un ensayo."""
+    return [key.removeprefix("observation.images.") for key in agent.policy.config.image_features]
+
+
 def reset_policy(agent) -> None:
     agent.policy.reset()             # vacía las colas de observaciones y acciones
     agent.make_new_prediction = True
@@ -93,7 +98,7 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
 
     obs = robot.get_observations()
     folder = call(robot, "start_recording", max_seconds=trial_seconds,
-                  metadata=metadata, root=root)
+                  metadata=metadata, root=root, images_in_pkl=False, cameras=policy_cameras(agent))
 
     # robot real (trae control_hz): un comando por periodo de reloj; en el sim cada comando ya
     # vale 1/hz de tiempo simulado y no hace falta esperar
@@ -142,8 +147,14 @@ def main(args: Args) -> None:
     agent = LeRobotDiffusionAgent(checkpoint=args.checkpoint, dataset_root=args.dataset_root,
                                   device="cuda")
 
+    first_obs = robot.get_observations()
+    missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
+    if missing:
+        raise SystemExit(f"La política usa {missing}, pero el servidor no las tiene: "
+                         "relanza launch_nodes.py con esas cámaras.")
+
     # robot real: sin posición del tomate, el operador lo pone y marca el resultado
-    manual = APPLE_KEY not in robot.get_observations()
+    manual = APPLE_KEY not in first_obs
     if manual:
         print("[Trials] Sin posición del tomate (robot real): ensayos con el operador, en el panel")
     here = None

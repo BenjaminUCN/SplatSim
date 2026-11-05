@@ -405,6 +405,9 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         obs["sim_joint_positions"] = np.array(
             [c.getJointState(self.dummy_robot, i)[0] for i in range(c.getNumJoints(self.dummy_robot))])
 
+    def active_camera_names(self) -> list[str]:
+        return self.recorder.cameras_to_capture(self.camera_names)
+
     def get_observations(self):
         with self.lock, self.render_lock:
             obs = super().get_observations()
@@ -450,9 +453,10 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             self._holding = True         # el próximo comando parte de esta pose
 
     def start_recording(self, max_seconds: float | None = None, metadata: dict | None = None,
-                        root: str | None = None) -> str | None:
+                        root: str | None = None, images_in_pkl: bool = True,
+                        cameras: list[str] | None = None) -> str | None:
         with self.lock:
-            return self.recorder.start(max_seconds, metadata, root)
+            return self.recorder.start(max_seconds, metadata, root, images_in_pkl, cameras)
 
     def stop_recording(self) -> None:
         with self.lock:
