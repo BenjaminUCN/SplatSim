@@ -26,6 +26,7 @@ batch_size: 32
 num_workers: 12           # 16 caused OOM with 56 GB in WSL
 prefetch_factor: 3
 image_augmentation: true  # brightness, contrast, random erasing, gaussian noise
+torch_compile: false      # compile the U-Net and image encoders (slower start, maybe faster steps)
 
 # ── Logging / saving ─────────────────────────────────────────────────────────
 log_freq: 1
