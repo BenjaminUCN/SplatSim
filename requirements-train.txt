@@ -96,7 +96,6 @@ sympy==1.14.0
 termcolor==3.3.0
 toml==0.10.2
 torch==2.10.0+cu128
-torchcodec==0.10.0+cu128
 torchvision==0.25.0+cu128
 tqdm==4.67.1
 trimesh==5.2.0

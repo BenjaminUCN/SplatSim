@@ -11,9 +11,13 @@ REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORKDIR="${WORKDIR:-/workspace}"
 VENV="${VENV:-$WORKDIR/venv}"
 
-if ! command -v ffmpeg >/dev/null; then    # torchcodec usa las bibliotecas de FFmpeg del sistema
+if ! ldconfig -p | grep -q libavcodec; then    # torchcodec usa las bibliotecas de FFmpeg del sistema
     apt-get update -qq
     apt-get install -y -qq ffmpeg
+fi
+if ! command -v gcc >/dev/null; then       # torch_compile compila con el compilador de C
+    apt-get update -qq
+    apt-get install -y -qq gcc
 fi
 if ! command -v uv >/dev/null; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -22,6 +26,9 @@ fi
 
 uv venv --allow-existing --python 3.12 "$VENV"
 uv pip install --python "$VENV/bin/python" --index-strategy unsafe-best-match -r "$REPO/requirements-train.txt"
+# de PyPI, como en el lab: la variante +cu128 del otro índice exige las bibliotecas NPP de CUDA
+uv pip install --python "$VENV/bin/python" --no-deps --reinstall-package torchcodec \
+    --index-url https://pypi.org/simple torchcodec==0.10.0
 uv pip install --python "$VENV/bin/python" --no-deps -e "$REPO"
 
 for name in data lerobot; do
