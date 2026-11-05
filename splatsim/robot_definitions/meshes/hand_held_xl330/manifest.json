@@ -3,23 +3,6 @@
  "units": "mm",
  "parts": [
   {
-   "name": "mount",
-   "file": "mount.stl",
-   "link": "base",
-   "rgb": [
-    0.5,
-    0.5,
-    0.55
-   ],
-   "collision": true,
-   "volume_mm3": 61726.8,
-   "com_mm": [
-    0.029,
-    -52.141,
-    -16.03
-   ]
-  },
-  {
    "name": "mount_xarm5",
    "file": "mount_xarm5.stl",
    "link": "base",
@@ -32,7 +15,7 @@
    "volume_mm3": 35312.4,
    "com_mm": [
     -0.01,
-    -67.29,
+    -46.59,
     -16.011
    ]
   },
@@ -68,23 +51,6 @@
     0.0,
     -0.104,
     -1.162
-   ]
-  },
-  {
-   "name": "gopro",
-   "file": "gopro.stl",
-   "link": "base",
-   "rgb": [
-    0.7,
-    0.7,
-    0.7
-   ],
-   "collision": true,
-   "volume_mm3": 98977.1,
-   "com_mm": [
-    20.795,
-    3.621,
-    46.519
    ]
   },
   {

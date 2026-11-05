@@ -15,7 +15,7 @@ import numpy as np
 
 from splatsim.robots.xl330_gripper import ALERT_BIT, XL330Gripper
 from splatsim.utils.hand_held import (
-    MESH_DIR, build_urdf, in_box, load_manifest, merge_splat, origin_matrix, read_ply, read_stl, sample_surface, write_ply,
+    FLANGE_CENTER_MM, MESH_DIR, build_urdf, in_box, load_manifest, merge_splat, origin_matrix, read_ply, read_stl, sample_surface, write_ply,
 )
 
 OPEN, CLOSED = 1000, 2224
@@ -394,16 +394,25 @@ class TestUrdf(unittest.TestCase):
         rel = np.linalg.inv(T_flange) @ T_base
         def in_flange(mm):
             return (rel @ np.array([*np.array(mm) / 1000, 1]))[:3]
-        np.testing.assert_allclose(in_flange((0, -72.33, -15.8)), (0, 0, 0), atol=1e-7)  # centro de la brida
-        np.testing.assert_allclose(in_flange((-2, 158.27, -15.8)), (0, -0.002, 0.2306), atol=1e-7)  # punta
-        np.testing.assert_allclose(in_flange((0, -72.33, 50)), (0.0658, 0, 0), atol=1e-7)  # GoPro hacia +x
+        np.testing.assert_allclose(in_flange((0, -51.63, -15.8)), (0, 0, 0), atol=1e-7)  # centro de la brida
+        np.testing.assert_allclose(in_flange((-2, 158.27, -15.8)), (0, -0.002, 0.2099), atol=1e-7)  # punta
+        np.testing.assert_allclose(in_flange((0, -51.63, 50)), (0.0658, 0, 0), atol=1e-7)  # z del ensamble hacia +x
         self.assertAlmostEqual(np.linalg.det(rel[:3, :3]), 1.0)
+
+    def test_disc_is_bolted_to_the_plate(self):
+        disc = read_stl(os.path.join(MESH_DIR, "mount_xarm5.stl")).reshape(-1, 3)
+        plate = read_stl(os.path.join(MESH_DIR, "bottom_plate.stl")).reshape(-1, 3)
+        # sin hueco: la cara del disco toca la de la placa, y la otra cara es la de la brida
+        self.assertAlmostEqual(disc[:, 1].max(), plate[:, 1].min(), delta=0.01)
+        self.assertAlmostEqual(disc[:, 1].min(), FLANGE_CENTER_MM[1], delta=0.01)
+        self.assertAlmostEqual((disc[:, 0].max() + disc[:, 0].min()) / 2, FLANGE_CENTER_MM[0], delta=0.02)
+        self.assertAlmostEqual((disc[:, 2].max() + disc[:, 2].min()) / 2, FLANGE_CENTER_MM[2], delta=0.02)
 
     def test_roll_rotates_about_the_tool_axis(self):
         self.build(roll_deg=180)
         T_flange = fk(self.src, "xarm_gripper_base_link")
         rel = np.linalg.inv(T_flange) @ fk(self.dst, "hand_held_base")
-        np.testing.assert_allclose((rel @ np.array([0, -0.07233, 0.05, 1]))[:3], (-0.0658, 0, 0), atol=1e-7)
+        np.testing.assert_allclose((rel @ np.array([0, -0.05163, 0.05, 1]))[:3], (-0.0658, 0, 0), atol=1e-7)
 
     def test_horn_joint(self):
         self.build()

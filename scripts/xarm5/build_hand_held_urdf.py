@@ -20,7 +20,7 @@ def main() -> None:
     parser.add_argument("--src", default=DEFAULT_SRC)
     parser.add_argument("--dst", help="default: xarm5_hand_held.urdf next to --src")
     parser.add_argument("--roll-deg", type=float, default=0.0,
-                        help="rotation about the tool axis; default: GoPro towards the link's +x")
+                        help="rotation about the tool axis; default: the assembly's +z towards the link's +x")
     parser.add_argument("--moving-part", help="STL in mm, in the CAD assembly's frame")
     args = parser.parse_args()
 

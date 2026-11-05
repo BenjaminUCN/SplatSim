@@ -2,7 +2,8 @@
 
 Solo numpy y la biblioteca estándar; los scripts son scripts/xarm5/build_hand_held_urdf.py y
 scripts/xarm5/hand_held_splat.py. Las mallas están en mm, en el marco del ensamble CAD: y hacia la
-punta del pruner, z hacia la GoPro, cara de la brida del brazo en y = -72.33.
+punta del pruner, z hacia arriba de la tapa, cara de la brida del brazo en y = -51.63
+(el disco mount_xarm5 va atornillado directo a bottom_plate).
 """
 import json
 import math
@@ -16,14 +17,14 @@ MESH_DIR = "splatsim/robot_definitions/meshes/hand_held_xl330"
 GRIPPER_BASE_LINK = "xarm_gripper_base_link"
 KEEP_LINKS = ("wrist_camera_link",)
 HORN_AXIS_MM = (12.7, 13.86524)
-FLANGE_CENTER_MM = (0.0, -72.33, -15.8)
+FLANGE_CENTER_MM = (0.0, -51.63, -15.8)
 # mitad del filo del pruner, entre (-2, 158.27) y (20.5, 48.27)
 GRIPPER_CENTER_MM = (9.25, 103.27, -17.8)
-# ensamble -> marco del gripper viejo: la punta sobre z (herramienta) y la GoPro sobre x, que apunta
+# ensamble -> marco del gripper viejo: la punta sobre z (herramienta) y la z del ensamble sobre x, que apunta
 # hacia arriba con la herramienta horizontal y joint5 = 0
 R_FLANGE_ASSEMBLY = np.array([[0.0, 0, 1], [1, 0, 0], [0, 1, 0]])
 PLASTIC_KG_PER_MM3 = 1.24e-6                # PLA macizo: estimación, sin pesar la pieza
-PART_MASS_KG = {"gopro": 0.153, "xl330": 0.018, "horn": 0.003, "tornillos_m2": 0.002}
+PART_MASS_KG = {"xl330": 0.018, "horn": 0.003, "tornillos_m2": 0.002}
 
 
 def _rot_rpy(rpy) -> np.ndarray:

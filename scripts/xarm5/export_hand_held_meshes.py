@@ -22,11 +22,9 @@ TOL = 0.3    # mm: desviación de la malla
 
 # parte -> (link, color, colisión, sólidos del STEP)
 PARTS = {
-    "mount": ("base", (0.50, 0.50, 0.55), True, ["mount"]),
     "mount_xarm5": ("base", (0.35, 0.35, 0.38), True, None),
     "bottom_plate": ("base", (0.85, 0.35, 0.10), True, ["bottom_plate"]),
     "top_cover": ("base", (0.20, 0.50, 0.85), True, ["top_cover"]),
-    "gopro": ("base", (0.70, 0.70, 0.70), True, ["gopro"]),
     "pruner": ("base", (0.20, 0.70, 0.30), True, ["pruner"]),
     "xl330": ("base", (0.14, 0.15, 0.17), True,
               ["Cuerpo_central", "Tapa_frontal", "Tapa_trasera", "Pieza_trasera", "Horn_idler",
@@ -39,12 +37,13 @@ PARTS = {
 
 
 def mount_xarm5_shape():
-    """El disco de mount_xarm5 detrás de mount: sus agujeros (±20, 8.7) calzan con los de mount
-    (x = ±20, z = -7.1), con el centro en z = -15.8 y su cara z = 0 contra y = -62.33."""
+    """El disco de mount_xarm5, atornillado directo a bottom_plate: sus agujeros ciegos (±20, 8.7)
+    calzan con los de la placa (x = ±20, z = -7.1), con el centro en z = -15.8 y su cara z = 0
+    contra la cara y = -41.63 de la placa."""
     doc = App.openDocument(os.path.join(CAD, "mount_xarm5.FCStd"))
     disc = doc.getObject("Body001").Shape.copy()
     m = App.Matrix(1, 0, 0, 0,
-                   0, 0, -1, -62.33,
+                   0, 0, -1, -41.63,
                    0, 1, 0, -15.8,
                    0, 0, 0, 1)
     return disc.transformGeometry(m)
@@ -73,8 +72,8 @@ def main():
         json.dump({"source": "hand_held_assembly_XL330.step + mount_xarm5.FCStd", "units": "mm",
                    "parts": manifest}, f, indent=1)
 
-    # el disco solo debe tocar a mount por la cara, sin penetrar nada
-    for other in ("mount", "bottom_plate", "top_cover"):
+    # el disco solo debe tocar a bottom_plate por la cara, sin penetrar nada
+    for other in ("bottom_plate", "top_cover", "pruner", "xl330"):
         print("EXP disco vs %s: comun %.4f mm3, distancia %.4f mm" % (
             other, disc.common(shapes[other]).Volume, disc.distToShape(shapes[other])[0]))
 
