@@ -5,6 +5,10 @@ import numpy as np
 
 
 class EETrail:
+    # segmentos del trazo anterior borrados por tick: borrarlos todos de una vez (hasta
+    # max_segments, con la GUI de PyBullet) frenaba el arranque de la grabación con el lock tomado
+    REMOVE_PER_TICK = 100
+
     def __init__(self, server, color=(1, 0, 0), width=3, min_dist=0.002, max_segments=10000):
         self.s = server
         self.color = list(color)
@@ -12,9 +16,12 @@ class EETrail:
         self.min_dist = min_dist                  # no dibuja si se movió menos de esto (m)
         self._ids = deque(maxlen=max_segments)    # límite para no saturar el visor
         self._prev = None
+        self._stale = deque()                     # ids del trazo anterior aún por borrar
 
     def update(self, active: bool = True) -> None:
         """Llamar cada tick. Con active=False corta el trazo pero conserva lo dibujado."""
+        for _ in range(min(self.REMOVE_PER_TICK, len(self._stale))):
+            self.s.pybullet_client.removeUserDebugItem(self._stale.popleft())
         if not active:
             self._prev = None
             return
@@ -36,6 +43,6 @@ class EETrail:
         self._prev = pos
 
     def clear(self) -> None:
-        for i in self._ids:
-            self.s.pybullet_client.removeUserDebugItem(i)
+        """Borra el trazo de a poco, REMOVE_PER_TICK segmentos por update()."""
+        self._stale.extend(self._ids)
         self._ids.clear()

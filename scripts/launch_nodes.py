@@ -39,6 +39,8 @@ class Args:
     # sim xArm5: hojas recortadas del splat en la escena (configs/occluders.yaml; si no existe, el
     # panel lo crea). Sin este flag no se carga ninguna.
     occluders: str | None = None
+    # sim xArm5: dibuja en PyBullet el recorrido del efector durante cada grabación
+    trail: bool = False
 
 
 def launch_robot_server(args: Args):
@@ -228,6 +230,7 @@ def launch_robot_server(args: Args):
             control_mode=args.control_mode,
             sim_clock=args.sim_clock,
             occluders=args.occluders,
+            trail=args.trail,
         )
 
     elif args.robot == "xarm5_lite":

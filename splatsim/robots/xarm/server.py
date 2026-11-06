@@ -57,7 +57,8 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
                  gui: str = "viser", panel_port: int = 8080, control_mode: str = "position",
-                 sim_clock: str = "fixed", occluders: str | None = None, **kwargs):
+                 sim_clock: str = "fixed", occluders: str | None = None, trail: bool = False,
+                 **kwargs):
         """gui: "viser" (panel web en http://localhost:<panel_port>) o "pybullet"
         (sliders y botones de PyBullet; --move_apple agrega los de la manzana).
         control_mode: position / interp / velocity (ver splatsim/robots/joint_controller.py),
@@ -69,7 +70,8 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         un frame por comando, y las imágenes se renderizan después con
         scripts/xarm5/render_recordings.py.
         occluders: archivo con hojas recortadas del splat que se agregan a la escena (ver
-        splatsim/robots/xarm/occluders.py); None = ninguna."""
+        splatsim/robots/xarm/occluders.py); None = ninguna.
+        trail: dibuja el recorrido del efector durante cada grabación (líneas de PyBullet)."""
         if sim_clock not in SIM_CLOCKS:
             raise ValueError(f"sim_clock debe ser uno de {SIM_CLOCKS}, no {sim_clock!r}")
         self.sim_clock = sim_clock
@@ -140,7 +142,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         else:
             raise ValueError(f"gui debe ser 'viser' o 'pybullet', no {gui!r}")
         self.apple_window = AppleWindow(show_apple_window)
-        self.trail = EETrail(self)
+        self.trail = EETrail(self) if trail else None
         self.recorder.start_keyboard_listener()
 
     # ── escena ───────────────────────────────────────────────────────────────
@@ -510,7 +512,8 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             for control in self.controls:
                 control.update()
             self.recorder.tick()
-            self.trail.update(active=self.recorder.active)
+            if self.trail is not None:
+                self.trail.update(active=self.recorder.active)
             now = time.monotonic()
             elapsed = min(now - self._rt_last, MAX_REALTIME_STEP)
             self._rt_last = now
