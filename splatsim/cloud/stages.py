@@ -9,8 +9,6 @@ from pathlib import Path
 
 import yaml
 
-import yaml
-
 from scripts.xarm5.data_jobs import SCRIPTS, command, dataset_path
 from splatsim.cloud.estimate import PNG_GB, Workload, convert_workload, render_workload, train_workload
 from splatsim.utils.episode_selection import load_discarded

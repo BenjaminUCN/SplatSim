@@ -36,5 +36,8 @@ RUN uv pip install --python /opt/venv/bin/python --index-strategy unsafe-best-ma
     && rm -rf /wheels
 
 COPY . .
+# Con un hilo. torch toma los núcleos del servidor (64 hilos) aunque el contenedor pueda usar 16, y el
+# render son miles de operaciones diminutas en CPU: una RTX 5090 tardó 43 s por episodio en vez de 13.
 ENV SPLATSIM_HEADLESS=1 \
+    OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
     PYTHONPATH=/app:/app/submodules/gaussian-splatting-wrapper:/app/submodules/gaussian-splatting-wrapper/gaussian_splatting:/app/submodules/pybullet-URDF-models

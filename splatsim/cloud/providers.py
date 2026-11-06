@@ -3,10 +3,13 @@ otro proveedor basta otra clase con los mismos métodos."""
 import json
 import os
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
 os.environ["PATH"] = f"{os.environ.get('PATH', '')}:{Path.home() / '.local/bin'}"
+READ_ATTEMPTS = 3
+READ_RETRY_S = float(os.environ.get("SPLATSIM_API_RETRY_S", 5))
 
 
 @dataclass
@@ -57,8 +60,18 @@ class VastProvider:
                                f"{(done.stderr or done.stdout).strip()[-400:]}")
         return done.stdout
 
+    def _read(self, *args: str):
+        """Una consulta se puede repetir: la API a veces responde vacío o con un error pasajero."""
+        for attempt in range(READ_ATTEMPTS):
+            try:
+                return json.loads(self._cli(*args))
+            except (RuntimeError, json.JSONDecodeError) as e:
+                if attempt == READ_ATTEMPTS - 1:
+                    raise RuntimeError(f"vastai {args[0]} {args[1] if len(args) > 1 else ''}: {e}") from e
+                time.sleep(READ_RETRY_S)
+
     def balance(self) -> float:
-        return float(json.loads(self._cli("show", "user"))["credit"])
+        return float(self._read("show", "user")["credit"])
 
     def search(self, req: Requirements, disk_gb: int) -> list[Offer]:
         query = (f"num_gpus=1 rentable=true verified=true "
@@ -69,7 +82,7 @@ class VastProvider:
             query += f" gpu_name={req.gpu_name.replace(' ', '_')} cuda_max_good>=12.8"
         if req.min_pcie_gbps:
             query += f" pcie_bw>={req.min_pcie_gbps}"
-        raw = json.loads(self._cli("search", "offers", query, "-o", "dph_total", "--storage", str(disk_gb)))
+        raw = self._read("search", "offers", query, "-o", "dph_total", "--storage", str(disk_gb))
         return [Offer(id=o["id"], machine_id=o["machine_id"], gpu_name=o["gpu_name"], cpu_name=o["cpu_name"],
                       cores=o["cpu_cores_effective"], ram_gb=round(o["cpu_ram"] / 1024, 1),
                       pcie_gbps=o.get("pcie_bw") or 0.0, dph=o["dph_total"],
@@ -82,15 +95,19 @@ class VastProvider:
                label: str) -> int:
         """Lanza la imagen tal cual con su ENTRYPOINT: al terminar, la instancia se detiene."""
         env_arg = " ".join(f"-e {k}={v}" for k, v in env.items())
-        out = json.loads(self._cli("create", "instance", str(offer.id), "--image", image, "--disk", str(disk_gb),
-                                   "--label", label, "--cancel-unavail", "--env", env_arg, "--args", *args))
+        reply = self._cli("create", "instance", str(offer.id), "--image", image, "--disk", str(disk_gb),
+                          "--label", label, "--cancel-unavail", "--env", env_arg, "--args", *args)
+        try:                 # no se repite: podría crear dos pods
+            out = json.loads(reply)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(f"vastai create instance: respuesta inválida {reply[:200]!r}") from e
         if not out.get("success"):
             raise RuntimeError(f"vastai create instance: {out}")
         return int(out["new_contract"])
 
     def instances(self) -> list[Instance]:
         return [Instance(id=i["id"], status=i.get("actual_status") or "loading", label=i.get("label") or "")
-                for i in json.loads(self._cli("show", "instances"))]
+                for i in self._read("show", "instances")]
 
     def destroy(self, instance_id: int) -> None:
         self._cli("destroy", "instance", str(instance_id), "-y")

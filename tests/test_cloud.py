@@ -14,6 +14,7 @@ import time
 import unittest
 from dataclasses import asdict
 from pathlib import Path
+from unittest import mock
 
 os.environ["SPLATSIM_HEARTBEAT_S"] = "0.05"
 os.environ["SPLATSIM_RESULT_RETRY_S"] = "0.01"
@@ -772,6 +773,44 @@ class TestRestart(Base):
         self.submit()
         data = yaml.safe_load((self.tmp / "queue/jobs.yaml").read_text())
         self.assertEqual(data["jobs"][0]["name"], "m")
+
+
+class TestVastReplies(unittest.TestCase):
+    """La API a veces responde vacío: una consulta se repite; crear un pod, no."""
+
+    def provider(self, replies):
+        p, calls = VastProvider(), []
+
+        def cli(*args):
+            calls.append(args)
+            reply = replies.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+        p._cli, p.calls = cli, calls
+        return p
+
+    def setUp(self):
+        patcher = mock.patch("splatsim.cloud.providers.READ_RETRY_S", 0)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_a_query_survives_an_empty_reply_and_an_error(self):
+        p = self.provider(["", RuntimeError("429"), '{"credit": 3.5}'])
+        self.assertEqual(p.balance(), 3.5)
+        self.assertEqual(len(p.calls), 3)
+
+    def test_a_query_gives_up_with_a_clear_error(self):
+        p = self.provider(["", "", ""])
+        with self.assertRaisesRegex(RuntimeError, "vastai show user"):
+            p.balance()
+
+    def test_create_is_not_repeated(self):
+        p = self.provider(["", '{"success": true, "new_contract": 7}'])
+        offer = Offer(1, 1, "g", "c", 16, 64, 50, 0.5, 0, 0, 500, 500, 0.99)
+        with self.assertRaisesRegex(RuntimeError, "respuesta inválida"):
+            p.create(offer, "img", ["k"], {}, 40, "l")
+        self.assertEqual(len(p.calls), 1)
 
 
 class TestEstimate(unittest.TestCase):

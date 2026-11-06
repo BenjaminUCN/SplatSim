@@ -9,8 +9,8 @@ from splatsim.cloud.providers import Offer
 
 IMAGE_GB = 4.82               # splatsim-train comprimida: lo que cada pod descarga y paga
 IMAGE_DISK_GB = 9.06          # lo que ocupa ya extraída
-RENDER_IMAGE_GB = 6.0         # splatsim-render comprimida: a corregir con la imagen publicada
-RENDER_IMAGE_DISK_GB = 12.0
+RENDER_IMAGE_GB = 5.12        # splatsim-render comprimida
+RENDER_IMAGE_DISK_GB = 9.71
 ASSETS_GB = 1.1               # escena mínima, URDF y tomate
 PNG_GB = 0.44e-3              # 53 GB / 122264 PNG de planned_261103_10hz
 RENDER_STARTUP_S = 120        # cargar la escena en la GPU
@@ -33,6 +33,8 @@ SEED_HISTORY = [
      "cpu": "AMD EPYC 7502 32-Core Processor", "rate": 7.96},    # pod, 790 frames incluido el arranque
     {"kind": "render", "profile": "render-cam4-w1", "gpu": "RTX 5080",
      "cpu": "AMD Ryzen 9 9950X 16-Core Processor", "rate": 4.25},    # lab, 117 frames sin pantalla
+    {"kind": "render", "profile": "render-cam4-w1", "gpu": "RTX 5090",
+     "cpu": "AMD EPYC 9355 32-Core Processor", "rate": 7.0},    # pod, 91 frames con un hilo
 ]
 
 
