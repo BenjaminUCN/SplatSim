@@ -66,6 +66,17 @@ def measure_camera(render: Callable, gaussian, target: slice, camera, background
             "cut_by_frame": bool(border.max() > 0.5)}
 
 
+def fit_message(fit: dict, camera: str) -> str:
+    """El resultado de fit_lateral_offset para el panel."""
+    if fit["status"] == OUT_OF_VIEW:
+        return f"The tomato isn't in view of {camera}."
+    return {
+        "ok": "{:.0f}% in {}.",
+        "too_small": "At most {:.0f}% in {}: move it closer to the camera or use a bigger leaf.",
+        "already_covered": "The rest of the scene already covers {:.0f}% in {}.",
+    }[fit["status"]].format(fit["occlusion"], camera)
+
+
 def fit_lateral_offset(measure: Callable[[float], float | None], target: float,
                        max_offset: float = 0.3, iterations: int = 10) -> dict:
     """Corrimiento lateral con que un oclusor tapa target %: 0 = centrado en el tomate (lo máximo

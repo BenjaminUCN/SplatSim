@@ -13,6 +13,7 @@ from splatsim.utils.occlusion import (
     LEVELS,
     OUT_OF_VIEW,
     fit_lateral_offset,
+    fit_message,
     measure_camera,
     occlusion_level,
 )
@@ -121,6 +122,13 @@ class FitTest(unittest.TestCase):
 
     def test_out_of_view(self):
         self.assertEqual(fit_lateral_offset(lambda _: None, 20.0)["status"], OUT_OF_VIEW)
+
+    def test_message_for_every_result(self):
+        cases = {"in view": (self.leaf(), 40.0), "small": (self.leaf(top=30.0), 60.0),
+                 "covered": (self.leaf(floor=50.0), 20.0), "not in view": (lambda _: None, 20.0)}
+        for name, (leaf, target) in cases.items():
+            with self.subTest(name):
+                self.assertIn("cam", fit_message(fit_lateral_offset(leaf, target), "cam"))
 
 
 class SummaryTest(unittest.TestCase):

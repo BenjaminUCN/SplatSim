@@ -17,6 +17,7 @@ La salida (por defecto <carpeta>_<fps>hz) sirve para review_recordings.py y el c
 origen, el fps y las cámaras: con eso review_recordings.py superpone la trayectoria original
 (~30 Hz) a la remuestreada.
 """
+import json
 import os
 import pickle
 import shutil
@@ -36,6 +37,12 @@ from splatsim.robots.station.recorder import save_frame  # noqa: E402
 from splatsim.utils.camera_setup import arrangement_cameras  # noqa: E402
 from splatsim.utils.episode_selection import SELECTION_FILE  # noqa: E402
 from splatsim.utils.leaf_segmentation import load_occluder_config  # noqa: E402
+from splatsim.utils.leaf_variation import (  # noqa: E402
+    DEFAULT_TARGETS,
+    arm_path,
+    draw_episode,
+    place_episode_leaf,
+)
 from splatsim.utils.parallel_episodes import own_argv, run_workers  # noqa: E402
 
 
@@ -52,6 +59,15 @@ class Args:
     robot_name: str = "xarm5_lite_plant_v3"
     occluders: str | None = None
     """hojas recortadas del splat que se agregan a todos los episodios (configs/occluders.yaml)"""
+    leaf_dir: str | None = None
+    """carpeta de hojas recortadas: cada episodio lleva una al azar, ajustada a un objetivo de
+    --occlusion_targets (~/data/occluders/<escena>). Se anota en el meta.json de cada episodio"""
+    occlusion_targets: tuple[float, ...] = DEFAULT_TARGETS
+    """porcentajes objetivo que se sortean por episodio; 0 = sin hoja"""
+    leaf_cameras: tuple[str, ...] = ()
+    """cámaras en que se ajusta la hoja (por defecto las que no son de muñeca)"""
+    seed: int = 0
+    """semilla del sorteo de hojas"""
     episodes: tuple[str, ...] = ()
     """solo estos episodios (por defecto todos)"""
     overwrite: bool = False
@@ -122,6 +138,12 @@ def make_server(robot_name: str, cameras: list[str], **kwargs):
     return server
 
 
+def write_leaf_meta(path: Path, entries: list[dict], leaf_fit: dict) -> None:
+    """Agrega la hoja al meta.json del episodio (measure_occlusion.py la vuelve a poner desde ahí)."""
+    meta = json.loads(path.read_text()) if path.exists() else {}
+    path.write_text(json.dumps({**meta, "occluders": entries, "leaf_fit": leaf_fit}, indent=2))
+
+
 def main(args: Args):
     folder = Path(args.folder).expanduser()
     out_root = Path(args.out).expanduser() if args.out else folder.with_name(f"{folder.name}_{args.fps}hz")
@@ -130,12 +152,19 @@ def main(args: Args):
                       and (not args.episodes or e.name in args.episodes))
     if not episodes:
         raise SystemExit(f"No hay episodios en {folder}")
+    leaves = sorted(Path(args.leaf_dir).expanduser().glob("*.ply")) if args.leaf_dir else []
+    if args.leaf_dir and not leaves:
+        raise SystemExit(f"No hay hojas en {args.leaf_dir}: recorta alguna con segment_leaf.py")
+    leaf_cameras = list(args.leaf_cameras) or [c for c in cameras if "wrist" not in c]
     out_root.mkdir(parents=True, exist_ok=True)
     if (folder / SELECTION_FILE).exists():
         shutil.copy(folder / SELECTION_FILE, out_root / SELECTION_FILE)
     with open(out_root / RENDER_INFO_FILE, "w") as f:
         yaml.safe_dump({"source": str(folder.resolve()), "fps": args.fps, "cameras": cameras,
                         "occluders": load_occluder_config(args.occluders) if args.occluders else [],
+                        "leaf_variation": {"leaves": [str(p) for p in leaves],
+                                           "targets": list(args.occlusion_targets),
+                                           "cameras": leaf_cameras, "seed": args.seed} if leaves else None,
                         "rendered": datetime.now().strftime("%Y-%m-%d %H:%M")}, f, sort_keys=False)
     print(f"{len(episodes)} episodios → {out_root} a {args.fps} fps, cámaras {cameras}")
     if args.workers > 1:
@@ -164,17 +193,30 @@ def main(args: Args):
         tmp.mkdir()
         if (episode / "meta.json").exists():
             shutil.copy(episode / "meta.json", tmp / "meta.json")
+        entries, leaf_fit = [], None
+        if leaves:
+            path = arm_path(server, frames)
+            server.restore_state(frames[0])
+            draw = draw_episode(episode.name, leaves, args.occlusion_targets, args.seed)
+            entries, leaf_fit = place_episode_leaf(server, draw, leaf_cameras, path)
         for k, point in enumerate(points, 1):
             obs = interpolated_obs(server, frames, *point)
             images = server.render_cameras(cameras)
             obs.update({name: img.cpu() for name, img in images.items()})
             save_frame(str(tmp), k, obs)
+        if leaf_fit:
+            write_leaf_meta(tmp / "meta.json", entries, leaf_fit)
         shutil.rmtree(target, ignore_errors=True)
         os.rename(tmp, target)
         gaps = np.diff(times)
+        leaf_note = ""
+        if leaf_fit:
+            leaf_note = f" | objetivo {leaf_fit['target']:.0f}%: {leaf_fit['status']}"
+            if entries:
+                leaf_note += f", {leaf_fit['leaf']} en {leaf_fit['camera']} → {leaf_fit['occlusion']:.0f}%"
         print(f"[{n}/{len(episodes)}] {episode.name}: {len(frames)} frames grabados "
               f"({times[-1] - times[0]:.1f} s, dt máx {gaps.max() * 1000:.0f} ms) → "
-              f"{len(points)} a {args.fps} fps, {time.time() - start:.0f} s")
+              f"{len(points)} a {args.fps} fps, {time.time() - start:.0f} s{leaf_note}")
 
 
 if __name__ == "__main__":

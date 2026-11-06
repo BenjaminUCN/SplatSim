@@ -385,6 +385,14 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             cameras = {name: self.cameras[name].get() for name in camera_names}
         return data, cached, cameras
 
+    def set_episode_occluders(self, entries: list[dict]) -> list[str]:
+        """Las hojas de este episodio, además de las de --occluders. Devuelve sus nombres."""
+        if self.occluders is None:
+            if not entries:
+                return []
+            self.occluders = OccluderSet(self)
+        return self.occluders.set_episode(entries)
+
     def measure_occlusion(self, camera_names=None) -> dict:
         """Cuánto del tomate tapa la escena en cada cámara (splatsim/utils/occlusion.py), con el
         brazo y los oclusores como estén ahora. Por defecto, las cámaras del servidor."""

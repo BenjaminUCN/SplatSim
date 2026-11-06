@@ -40,13 +40,16 @@ class Occluder:
 
 
 class OccluderSet:
-    def __init__(self, server, path: str):
+    def __init__(self, server, path: str | None = None):
+        """path: el archivo de las hojas fijas. None: sin archivo, solo hojas por episodio."""
         self.s = server
-        self.path = Path(path).expanduser()
+        self.path = Path(path).expanduser() if path else None
         self.items: dict[str, Occluder] = {}
-        for entry in load_occluder_config(self.path):
-            self.add(**entry)
-        print(f"[xArm5] {len(self.items)} oclusores de {self.path}")
+        self._episode_names: list[str] = []
+        if self.path:
+            for entry in load_occluder_config(self.path):
+                self.add(**entry)
+            print(f"[xArm5] {len(self.items)} oclusores de {self.path}")
 
     def add(self, name: str, ply: str, position=None, wxyz=(1.0, 0.0, 0.0, 0.0), enabled: bool = True) -> Occluder:
         """Sin position queda donde estaba en la planta."""
@@ -60,6 +63,13 @@ class OccluderSet:
 
     def remove(self, name: str) -> None:
         self.items.pop(name)
+
+    def set_episode(self, entries: list[dict]) -> list[str]:
+        """Reemplaza las hojas del episodio anterior (las fijas quedan). Devuelve sus nombres."""
+        for name in self._episode_names:
+            self.items.pop(name, None)
+        self._episode_names = [self.add(**{**e, "name": self.free_name(e["name"])}).name for e in entries]
+        return self._episode_names
 
     def free_name(self, base: str) -> str:
         name, n = base, 2

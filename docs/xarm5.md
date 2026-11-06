@@ -245,6 +245,24 @@ It works on state-only and old recordings, with the current camera poses (not th
 
 **In trials:** `run_policy_trials.py` measures each trial right after placing the tomato, before the arm moves, and adds `occlusion_<camera>` to `trials.csv` and `meta.json`. On the real arm it isn't measured. `compare_trials.py` doesn't group by these columns yet.
 
+**A different leaf per episode:** when rendering a state-only recording, each episode can get a random leaf fitted to a random occlusion target:
+
+```bash
+python scripts/xarm5/render_recordings.py ~/data/bc_data/<folder> --fps 10 --leaf_dir ~/data/occluders/<scene> [--occlusion_targets 0 25 50 75] [--leaf_cameras base_rgb base_left_rgb base_right_rgb] [--seed 0]
+```
+
+The draw (target, leaf, camera, direction, roll) depends only on the seed and the episode name, so it doesn't change with `--workers` or when resuming. The leaf is fitted on the first frame and stays fixed in the world for the whole episode. It is fitted in one camera, drawn among those that see the whole tomato, so the other cameras get whatever coverage results from that pose.
+
+Each episode's `meta.json` records `occluders` (the leaf, which `measure_occlusion.py` puts back when measuring that folder) and `leaf_fit`, whose `status` is one of:
+
+- `ok`: reached the target.
+- `too_small`: the leaf can't reach it, even near the camera; `occlusion` says how far it got.
+- `no_leaf`: the target was 0.
+- `already_covered`: the scene already covers the target, so no leaf is added.
+- `no_camera`: no camera sees the whole tomato, so no leaf is added.
+
+The leaf has no collisions, so the fit looks for a distance that keeps its center at least 10 cm from where the arm passes during the episode, moving it toward the camera if needed. `arm_distance` records what was left. Only recordings with `sim_joint_positions` can be rendered this way (`gello_3plants` can't).
+
 ## Train the diffusion policy
 
 Parameters (dataset, cameras, `n_obs_steps`, `horizon`, `n_action_steps`, steps, batch size, Hub upload…) live in `configs/train/diffusion.yaml`. Copy it per experiment, or override any field from the CLI:

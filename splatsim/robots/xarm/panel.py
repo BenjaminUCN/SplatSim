@@ -14,7 +14,7 @@ from splatsim.utils.apple_grid import (
     load_grid,
 )
 from splatsim.utils.leaf_segmentation import place_between, saved_leaves
-from splatsim.utils.occlusion import OUT_OF_VIEW, fit_lateral_offset
+from splatsim.utils.occlusion import fit_lateral_offset, fit_message
 
 from .config import BASE_CAM_FOV, SIM_CLOCKS
 
@@ -176,12 +176,7 @@ class SimPanel(StationPanel):
 
         fit = fit_lateral_offset(occlusion_at, float(self._occ_target.value))
         self._move_occluder(center + fit["offset"] * right)
-        self._occ_info.content = {
-            "ok": f"{fit['occlusion']:.0f}% in {cam.name}.",
-            "too_small": f"At most {fit['occlusion']:.0f}% in {cam.name}: move it closer to the camera or use a bigger leaf.",
-            "already_covered": f"The rest of the scene already covers {fit['occlusion']:.0f}% in {cam.name}.",
-            OUT_OF_VIEW: f"The tomato isn't in view of {cam.name}.",
-        }[fit["status"]]
+        self._occ_info.content = fit_message(fit, cam.name)
         self._measure_occlusion()
 
     def _build_occlusion_gui(self):

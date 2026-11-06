@@ -3,7 +3,8 @@
     python scripts/xarm5/measure_occlusion.py ~/data/bc_data/gello_3plants [--frames 8] [--arrangement 2cam]
 
 Por episodio mide --frames instantes repartidos entre el primero y el último, con las poses de cámara
-actuales (configs/camera_poses.yaml) y las hojas de --occluders, y escribe en la carpeta (o en --out):
+actuales (configs/camera_poses.yaml), las hojas de --occluders y la que cada episodio tenga en su
+meta.json (render_recordings.py --leaf_dir), y escribe en la carpeta (o en --out):
 
 - occlusion.csv: episode, frame, camera, occlusion (%, vacío si el tomate no está en cuadro), level,
   silhouette_px, cut_by_frame.
@@ -15,6 +16,7 @@ actuales (configs/camera_poses.yaml) y las hojas de --occluders, y escribe en la
 Sirve para grabaciones sin imágenes y antiguas. Cuesta 3 renders por cámara e instante.
 """
 import csv
+import json
 import os
 import pickle
 import sys
@@ -69,6 +71,12 @@ def episode_summary(values: list[float | None], cut: list[bool] | None = None) -
             "level": occlusion_level(numbers[0]), "start_cut": seen[0][1]}
 
 
+def episode_leaves(episode: Path) -> list[dict]:
+    """La hoja que render_recordings.py --leaf_dir le puso a este episodio."""
+    path = episode / "meta.json"
+    return json.loads(path.read_text()).get("occluders", []) if path.exists() else []
+
+
 def restore_frame(server, frame: dict, rest_q: np.ndarray) -> None:
     """Grabaciones actuales: sim_joint_positions. Antiguas: all_joint_positions es la pose del brazo."""
     if "sim_joint_positions" in frame:
@@ -105,6 +113,7 @@ def main(args: Args) -> None:
             values = {cam: [] for cam in cameras}
             cuts = {cam: [] for cam in cameras}
             measured = 0
+            server.set_episode_occluders(episode_leaves(episode))
             for i in spaced_frames(paths, args.frames) if paths else []:
                 try:
                     with open(paths[i], "rb") as f:
