@@ -304,6 +304,9 @@ class Reviewer:
         gui = self.v.gui
         with gui.add_folder("Recordings"):
             self.folder_select = gui.add_dropdown("Folder", ["-"])
+            refresh = gui.add_button("Refresh", icon=viser.Icon.REFRESH,
+                                     hint="Re-read the folders and open the newest episode "
+                                          "(e.g. the one just recorded, to delete it)")
             self.load_progress = gui.add_progress_bar(0.0)
             self.load_status = gui.add_markdown("")
         self._build_dataset_gui()
@@ -380,6 +383,7 @@ class Reviewer:
         cams.set_width(340)
 
         self.folder_select.on_update(lambda e: e.client and self.open_folder(self.folder_select.value))
+        refresh.on_click(lambda _: self._refresh())
         self.filter_select.on_update(lambda e: e.client and self._refresh_episode_list())
         self.episode_select.on_update(
             lambda e: e.client and self.open_episode(self.episode_select.value.split(" ")[0]))
@@ -540,7 +544,21 @@ class Reviewer:
             self.job_status.content = f"**Rendered** into `{name}`, now open: review it and Convert"
 
     # ── carpeta ──────────────────────────────────────────────────────────────
-    def open_folder(self, name: str):
+    def _refresh(self):
+        """Vuelve a leer las carpetas y la actual (episodios nuevos o borrados afuera) y abre el
+        último episodio."""
+        folders = self._folders()
+        self.folder_select.options = folders or ["-"]
+        name = self.folder.path.name if self.folder is not None else None
+        if name not in folders:
+            name = folders[0] if folders else None
+        if name is None:
+            self.episode_select.options = ["-"]
+            return
+        self.open_folder(name, newest=True)
+        self.load_status.content = f"Refreshed: {len(self.folder.names)} episodes"
+
+    def open_folder(self, name: str, newest: bool = False):
         self.folder = RecordingFolder(self.root / name)
         if self._edit_point is not None:     # el punto en edición sigue al cambiar de carpeta
             self.folder.grasp_point = self._edit_point
@@ -550,7 +568,7 @@ class Reviewer:
         self._refresh_episode_list()
         visible = self._visible_names()
         if visible:
-            self.open_episode(visible[0])
+            self.open_episode(visible[-1 if newest else 0])
         self._loader_gen += 1
         threading.Thread(target=self._load_all, args=(self.folder, self._loader_gen), daemon=True).start()
         self._show_dataset()
