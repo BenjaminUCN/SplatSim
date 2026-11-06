@@ -38,7 +38,8 @@ WARMUP_S = float(os.environ.get("SPLATSIM_WARMUP_S", 180))   # torch.compile: no
 RESULT_ATTEMPTS = 20          # result.json es lo único imprescindible: unos minutos de reintentos
 RESULT_RETRY_S = float(os.environ.get("SPLATSIM_RESULT_RETRY_S", 15))
 STEP = re.compile(r"step: (\d+)\b")
-EPISODES = re.compile(r"episodes:\s+\d+%.*?(\d+)/(\d+)")   # la barra de lerobot_conversion.py, no las de LeRobot
+# la barra de lerobot_conversion.py (no las de LeRobot) y el [n/total] de render y mirror
+EPISODES = re.compile(r"(?:episodes:\s+\d+%.*?|\[)(\d+)/(\d+)")
 
 
 def expand(path: str) -> Path:

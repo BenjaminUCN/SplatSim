@@ -1,5 +1,5 @@
 """Panel del orquestador en la nube: cada trabajo levanta su propio pod, en paralelo. Convierte
-grabaciones a LeRobot y entrena; un entrenamiento puede esperar a una conversión en cola.
+grabaciones, las renderiza y espeja sin pasar por este PC, y entrena; cada etapa espera a la anterior.
 
     python scripts/xarm5/cloud_server.py            # http://localhost:8083
 
@@ -24,7 +24,9 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from splatsim.cloud.orchestrator import ACTIVE, DATASETS_ROOT, DEFAULT_IMAGE, Orchestrator, train_config  # noqa: E402
+from scripts.xarm5.data_jobs import plan_pipeline  # noqa: E402
+from splatsim.cloud.orchestrator import (ACTIVE, DATASETS_ROOT, DEFAULT_IMAGE, DEFAULT_RENDER_IMAGE,  # noqa: E402
+                                         Orchestrator, train_config)
 from splatsim.cloud.providers import Requirements, VastProvider  # noqa: E402
 from splatsim.cloud.storage import SECRETS_FILE, Storage, load_secrets, storage_env  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
@@ -43,6 +45,7 @@ class Args:
     queue_dir: str = "~/data/cloud_queue"
     port: int = 8083
     image: str = DEFAULT_IMAGE
+    render_image: str = DEFAULT_RENDER_IMAGE
     secrets: str = SECRETS_FILE
 
 
@@ -60,8 +63,8 @@ class Panel:
             self._build_queue()
         with tabs.add_tab("New job", viser.Icon.PLUS):
             self._build_new_job()
-        with tabs.add_tab("Convert", viser.Icon.TRANSFORM):
-            self._build_convert()
+        with tabs.add_tab("Data", viser.Icon.DATABASE):
+            self._build_data()
         with tabs.add_tab("Limits", viser.Icon.COIN):
             self._build_limits()
 
@@ -234,66 +237,84 @@ class Panel:
         max_cost.value = math.ceil(known * 1.5 * 10) / 10 if known else 0.0
         queue.disabled = False
 
-    # ── convertir ────────────────────────────────────────────────────────────
+    # ── datos: render → mirror → convert ─────────────────────────────────────
     @staticmethod
     def _recordings() -> tuple[str, ...]:
-        """Carpetas con imágenes: las que solo tienen el estado aún hay que renderizarlas."""
         root = Path(RECORDINGS_ROOT).expanduser()
-        names = []
-        for folder in sorted(root.iterdir()) if root.exists() else []:
-            episode = next((p for p in folder.iterdir() if p.is_dir()), None) if folder.is_dir() else None
-            if episode and any((episode / d).is_dir() for d in ("image_1", "images")):
-                names.append(folder.name)
+        names = sorted(p.name for p in root.iterdir() if p.is_dir()) if root.exists() else []
         return tuple(names) or ("—",)
 
-    def _build_convert(self):
+    def _build_data(self):
         gui = self.v.gui
-        self.c_source = gui.add_dropdown("Recordings", self._recordings())
-        self.c_fps = gui.add_number("FPS", 10, min=1, step=1)
-        self.c_cameras = gui.add_text("Cameras", "", hint="Space separated; empty = all that the recordings have")
-        self.c_suffix = gui.add_text("Name suffix", datetime.now().strftime("%y%m%d_%H%M"))
-        self.c_discarded = gui.add_checkbox("Include discarded", False)
-        gui.add_button("Estimate cost").on_click(lambda _: self._estimate_convert())
-        self.c_offers = gui.add_markdown("Press *Estimate cost* to see what has to be uploaded and the machines.")
-        self.c_offer = gui.add_dropdown("Machine offer", (AUTO,))
-        self.c_max = gui.add_number("Max cost ($)", 0.0, min=0.0, step=0.1,
-                                    hint="The pod stops at this cost, even if this PC is off")
-        self.c_queue = gui.add_button("Add to queue", disabled=True)
-        self.c_queue.on_click(lambda _: self._submit_convert())
+        self.d_source = gui.add_dropdown("Recordings", self._recordings())
+        self.d_render = gui.add_checkbox("Render", True, hint="For state-only recordings")
+        self.d_mirror = gui.add_checkbox("Mirror", False)
+        self.d_with_original = gui.add_checkbox("Keep originals", True, hint="Mirror: originals + mirrors, twice the frames")
+        self.d_convert = gui.add_checkbox("Convert to LeRobot", True)
+        self.d_fps = gui.add_number("FPS", 10, min=1, step=1)
+        self.d_arrangement = gui.add_text("Arrangement", "2cam", hint="From configs/camera_poses.yaml; empty = all cameras")
+        self.d_workers = gui.add_number("Workers", 3, min=1, step=1, hint="~8 GB of GPU memory each")
+        self.d_suffix = gui.add_text("Dataset suffix", datetime.now().strftime("%y%m%d_%H%M"))
+        self.d_discarded = gui.add_checkbox("Include discarded", False)
+        self.d_gpu = gui.add_text("GPU", "RTX 5090", hint="Render and mirror; conversion uses any machine")
+        gui.add_button("Estimate cost").on_click(lambda _: self._estimate_data())
+        self.d_plan = gui.add_markdown("Press *Estimate cost* to see each stage and what it costs.")
+        self.d_max = gui.add_number("Max cost per stage ($)", 0.0, min=0.0, step=0.1,
+                                    hint="Each pod stops at this cost, even if this PC is off")
+        self.d_queue = gui.add_button("Add to queue", disabled=True)
+        self.d_queue.on_click(lambda _: self._submit_data())
 
-    def _convert_args(self) -> tuple[dict, Requirements]:
-        suffix = self.c_suffix.value.strip()
-        if not suffix or self.c_source.value == "—":
+    def _data_plan(self) -> tuple[list[dict], Requirements, Requirements]:
+        suffix, arrangement = self.d_suffix.value.strip(), self.d_arrangement.value.strip() or None
+        if self.d_source.value == "—" or (self.d_convert.value and not suffix):
             raise ValueError("Faltan las grabaciones o el sufijo")
-        cameras = self.c_cameras.value.split() or None
-        args = {"input": f"{RECORDINGS_ROOT}/{self.c_source.value}", "fps": int(self.c_fps.value), "suffix": suffix,
-                "cameras": cameras, "ignore_selection": self.c_discarded.value}
-        return args, Requirements(gpu_name="", **CONVERT_REQUIREMENTS)
+        fps, workers = int(self.d_fps.value), int(self.d_workers.value)
+        render = {"fps": fps, "arrangement": arrangement, "workers": workers} if self.d_render.value else None
+        mirror = ({"with_original": self.d_with_original.value, "arrangement": arrangement, "workers": workers}
+                  if self.d_mirror.value else None)
+        convert = ({"output_dir": DATASETS_ROOT, "fps": fps, "suffix": suffix, "cameras": None,
+                    "ignore_selection": self.d_discarded.value, "push": False} if self.d_convert.value else None)
+        if not (render or mirror or convert):
+            raise ValueError("Elige al menos una etapa")
+        plan = plan_pipeline(f"{RECORDINGS_ROOT}/{self.d_source.value}", render, mirror, convert)
+        return plan, Requirements(gpu_name=self.d_gpu.value.strip()), Requirements(gpu_name="", **CONVERT_REQUIREMENTS)
 
-    def _estimate_convert(self):
+    def _estimate_data(self):
         try:
-            args, req = self._convert_args()
-            self.c_offers.content = "Reading the recordings and searching…"
-            scan, ranked = self.orch.estimate_convert(args, req)
+            plan, gpu, cpu = self._data_plan()
+            self.d_plan.content = "Reading the recordings and searching…"
+            stages = self.orch.estimate_pipeline(plan, gpu, cpu)
         except Exception as e:  # noqa: BLE001  se muestra en el panel
-            self.c_offers.content = f"**Error:** {e}"
-            self.c_queue.disabled = True
+            self.d_plan.content = f"**Error:** {e}"
+            self.d_queue.disabled = True
             return
-        intro = (f"{scan['episodes']} episodes · {scan['frames']:,} frames · {' '.join(scan['cameras'])} · "
-                 f"**{scan['gb']:.1f} GB to upload**\n\n")
-        self._show_offers(ranked, self.c_offers, self.c_offer, self.c_max, self.c_queue, intro)
+        rows = ["| Stage | Frames | Cameras | Download GB | Upload GB | Best offer | Speed | Hours | Total | Confidence |",
+                "|---|---|---|---|---|---|---|---|---|---|"]
+        totals = []
+        for stage, ranked in stages:
+            work = self.orch.workload(stage)
+            best = ranked[0] if ranked else None
+            rows.append(f"| {stage['kind']} | {stage['frames']:,} | {len(stage['cameras'])} | {work.down_gb - work.image_gb:.1f} | "
+                        f"{work.up_gb:.1f} | {f'{best.offer.gpu_name} ${best.offer.dph:.2f}/h' if best else 'none'} | "
+                        f"{f'{best.rate:.1f}/s' if best and best.rate else '—'} | {f'{best.hours:.2f}' if best and best.hours else '—'} | "
+                        f"{money(best.total) if best else '—'} | {best.confidence if best else '—'} |")
+            totals.append(best.total if best else None)
+        known = None not in totals
+        self.d_plan.content = "\n".join(rows) + "\n\nOnly the last stage comes down to this PC; the rest stays in the bucket." + (
+            "" if known else "\n\n**No speed measured for some stage: set the max cost yourself.**")
+        # un máximo sacado solo de las otras etapas cortaría a medias la que no tiene estimación
+        self.d_max.value = math.ceil(max(totals) * 1.5 * 10) / 10 if known else 0.0
+        self.d_queue.disabled = False
 
-    def _submit_convert(self):
+    def _submit_data(self):
         try:
-            args, req = self._convert_args()
-            offer_id = None if self.c_offer.value == AUTO else int(self.c_offer.value)
-            name = f"convert {self.c_source.value} {args['suffix']}"
-            self.orch.submit_convert(name, args, req, float(self.c_max.value), offer_id)
+            plan, gpu, cpu = self._data_plan()
+            self.orch.submit_pipeline(plan, gpu, cpu, float(self.d_max.value))
         except Exception as e:  # noqa: BLE001  se muestra en el panel
-            self.c_offers.content = f"**Error:** {e}"
+            self.d_plan.content = f"**Error:** {e}"
             return
-        self.c_queue.disabled = True
-        self.c_offers.content = f"Queued. Its dataset now shows in *New job → Dataset* as {PENDING_DATASET}…"
+        self.d_queue.disabled = True
+        self.d_plan.content = f"Queued {len(plan)} stage(s). A queued dataset shows in *New job → Dataset* as {PENDING_DATASET}…"
         self.refresh()
 
     # ── límites ──────────────────────────────────────────────────────────────
@@ -333,7 +354,7 @@ def main(args: Args):
     if "WANDB_API_KEY" in secrets:
         pod_env["WANDB_API_KEY"] = secrets["WANDB_API_KEY"]
     orch = Orchestrator(args.queue_dir, VastProvider(), Storage(env["SPLATSIM_REMOTE"], env), pod_env,
-                        image=args.image, on_ready=update_registry)
+                        image=args.image, render_image=args.render_image, on_ready=update_registry)
     panel = Panel(orch, args.port, "WANDB_API_KEY" in secrets)
 
     def worker():

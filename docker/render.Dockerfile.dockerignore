@@ -1,0 +1,26 @@
+# Solo entra lo que usa la imagen. La escena, el URDF y las configs del lab llegan por el bucket.
+*
+!requirements-render.txt
+!requirements-train.txt
+!scripts/xarm5/render_recordings.py
+!scripts/xarm5/mirror_recordings.py
+!configs/camera_poses.yaml
+!configs/object_configs/objects.yaml
+!configs/folder_configs.yaml
+!configs/apple_grid.yaml
+!configs/grasp_point.yaml
+!splatsim/**
+!submodules/simple-knn/**
+!submodules/gaussian-splatting-wrapper/setup.py
+!submodules/gaussian-splatting-wrapper/gaussian_splatting/__init__.py
+!submodules/gaussian-splatting-wrapper/gaussian_splatting/arguments/**
+!submodules/gaussian-splatting-wrapper/gaussian_splatting/gaussian_renderer/**
+!submodules/gaussian-splatting-wrapper/gaussian_splatting/scene/**
+!submodules/gaussian-splatting-wrapper/gaussian_splatting/utils/**
+!submodules/gaussian-splatting-wrapper/gaussian_splatting/submodules/diff-gaussian-rasterization/**
+!submodules/pybullet-URDF-models/urdf_models/__init__.py
+!submodules/pybullet-URDF-models/urdf_models/models_data.py
+!submodules/pybullet-URDF-models/urdf_models/models/plastic_apple/**
+**/__pycache__
+**/build
+**/*.egg-info

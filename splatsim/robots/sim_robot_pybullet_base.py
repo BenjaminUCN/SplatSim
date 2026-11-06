@@ -187,7 +187,8 @@ class PybulletRobotServerBase:
         self.pybullet_client = p
         self.object_config_path = object_config_path
         self.grasp_poses = {}
-        self.pybullet_client.connect(p.GUI)
+        # sin pantalla (pods): la cinemática es la misma, las imágenes vienen de los splats
+        self.pybullet_client.connect(p.DIRECT if os.environ.get("SPLATSIM_HEADLESS") else p.GUI)
         self.pybullet_client.setAdditionalSearchPath(
             "./submodules/pybullet-playground-wrapper/pybullet_playground/urdf/pybullet_ur5_gripper/urdf"
         )

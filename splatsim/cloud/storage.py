@@ -14,6 +14,8 @@ os.environ["PATH"] = f"{os.environ.get('PATH', '')}:{Path.home() / '.local/bin'}
 
 SECRETS_FILE = "~/.config/splatsim/cloud.env"
 REMOTE_NAME = "r2"
+# Las grabaciones son ~100k archivos pequeños: con pocas transferencias, la latencia manda sobre el ancho de banda.
+FOLDER_FLAGS = ("--transfers", "32", "--checkers", "32", "--checksum")
 
 
 def load_secrets(path: str = SECRETS_FILE) -> dict[str, str]:
@@ -75,17 +77,17 @@ class Storage:
     def upload(self, local: str | Path, key: str, exclude: list[str] | None = None) -> None:
         """Copia una carpeta; lo que ya está igual (tamaño y hash) no se vuelve a subir."""
         filters = [arg for pattern in exclude or [] for arg in ("--exclude", pattern)]
-        self._checked("copy", str(local), self._path(key), "--transfers", "8", "--checksum", *filters)
+        self._checked("copy", str(local), self._path(key), *FOLDER_FLAGS, *filters)
 
     def upload_file(self, local: str | Path, key: str) -> None:
         self._checked("copyto", str(local), self._path(key))
 
     def download(self, key: str, local: str | Path) -> None:
-        self._checked("copy", self._path(key), str(local), "--transfers", "8", "--checksum")
+        self._checked("copy", self._path(key), str(local), *FOLDER_FLAGS)
 
     def copy(self, source_key: str, target_key: str) -> None:
         """Copia dentro del bucket, sin pasar por este PC."""
-        self._checked("copy", self._path(source_key), self._path(target_key), "--transfers", "8", "--checksum")
+        self._checked("copy", self._path(source_key), self._path(target_key), *FOLDER_FLAGS)
 
     def delete(self, key: str) -> None:
         self._checked("purge", self._path(key))

@@ -5,6 +5,7 @@ bucket en una carpeta local.
 """
 import json
 import os
+import pickle
 import shutil
 import sys
 import tempfile
@@ -25,7 +26,9 @@ from splatsim.cloud.orchestrator import Orchestrator, Settings, train_config  # 
 from splatsim.cloud.providers import Instance, Offer, Requirements, VastProvider  # noqa: E402
 from splatsim.cloud import runner  # noqa: E402
 from splatsim.cloud.runner import Run, run_stage  # noqa: E402
-from splatsim.cloud.stages import scan_recordings  # noqa: E402
+from scripts.xarm5.data_jobs import plan_pipeline  # noqa: E402
+from splatsim.cloud import stages  # noqa: E402
+from splatsim.cloud.stages import describe_pipeline, scan_recordings, scan_states  # noqa: E402
 from splatsim.cloud.storage import Storage  # noqa: E402
 
 CPU = "AMD Ryzen 9 7950X 16-Core Processor"
@@ -61,6 +64,22 @@ out.mkdir(parents=True)     # como LeRobot: falla si ya existe
 time.sleep(0.2)
 print("episodes:  50%|#####     | 1/2 [00:01<00:01,  1.00it/s]", flush=True)
 (out / "data.bin").write_text("dataset")
+"""
+FAKE_RENDER = """
+import argparse, pickle
+from pathlib import Path
+p = argparse.ArgumentParser()
+p.add_argument("input"); p.add_argument("--out"); p.add_argument("--fps"); p.add_argument("--arrangement")
+p.add_argument("--workers"); p.add_argument("--no-with-original", action="store_true")
+a = p.parse_args()
+source = sorted(q for q in Path(a.input).iterdir() if q.is_dir())
+assert source
+print("[1/1] 000: 3 frames", flush=True)
+for episode in source:
+    images = Path(a.out, episode.name, "image_1"); images.mkdir(parents=True)
+    for frame in ("00001", "00002"):
+        (images.parent / f"{frame}.pkl").write_bytes(pickle.dumps({"action": 1}))
+        (images / f"base_rgb_{frame}.png").write_bytes(b"png")
 """
 
 
@@ -393,6 +412,145 @@ class TestChain(Base):
             self.orch.submit("m", self.cfg(), str(self.tmp / "otro"), Requirements(), 1.0, depends_on=parent["id"])
 
 
+def make_states(root: Path, episodes=("000", "001"), seconds=1.0):
+    for episode in episodes:
+        (root / episode).mkdir(parents=True)
+        for i, t in enumerate((0.0, seconds / 2, seconds), 1):
+            frame = {"sim_time": t, "sim_joint_positions": [0.0] * 19, "state": [0.0]}
+            (root / episode / f"{i:05d}.pkl").write_bytes(pickle.dumps(frame))
+
+
+class TestRenderChain(Base):
+    def setUp(self):
+        super().setUp()
+        self.addCleanup(setattr, stages, "scene_assets", stages.scene_assets)
+        self.addCleanup(setattr, stages, "pod_files", stages.pod_files)
+        scene = self.tmp / "scene"
+        scene.mkdir()
+        (scene / "point_cloud.ply").write_text("splat")
+        stages.scene_assets = lambda: ([{"local": str(scene), "key": "assets/scene"}],
+                                       [{"key": "assets/scene", "path": str(self.tmp / "pod/scene")}])
+        stages.pod_files = lambda: {}
+        self.addCleanup(self.drain)     # corre antes que lo anterior: ningún hilo debe ver la escena real
+        self.render_script = self.tmp / "fake_render.py"
+        self.render_script.write_text(FAKE_RENDER)
+        self.orch.scripts.update(render=str(self.render_script), mirror=str(self.render_script))
+        self.orch.settings = Settings(max_pods=2, budget_usd=100)
+        self.source = self.tmp / "gello_x"
+        make_states(self.source)
+        self.datasets = self.tmp / "datasets"
+
+    def drain(self):
+        self.orch.settings.paused = True
+        end = time.time() + 10
+        while self.orch.busy and time.time() < end:
+            time.sleep(0.02)
+
+    def plan(self, mirror=True, convert=True):
+        return plan_pipeline(str(self.source), {"fps": 10, "arrangement": None, "workers": 1},
+                             {"with_original": True, "arrangement": None, "workers": 1} if mirror else None,
+                             {"output_dir": str(self.datasets), "fps": 10, "suffix": "x", "cameras": None,
+                              "ignore_selection": False, "push": False} if convert else None)
+
+    def submit_plan(self, **kwargs):
+        return self.orch.submit_pipeline(self.plan(**kwargs), Requirements(), Requirements(gpu_name=""), 1.0)
+
+    def test_stages_chain_through_the_bucket_and_only_the_last_comes_down(self):
+        render, mirror, convert = self.submit_plan()
+        self.run_until(lambda: convert["status"] in ("done", "failed"), timeout=40)
+        self.assertEqual(convert["status"], "done", convert.get("error"))
+        self.assertEqual((self.datasets / "splatsim_xarm5_lite_10fps_x/data.bin").read_text(), "dataset")
+        self.assertFalse(Path(render["output"]).exists(), "lo intermedio no baja al lab")
+        self.assertFalse(Path(mirror["output"]).exists())
+        self.assertEqual(sorted(p.name for p in (self.tmp / "bucket/recordings").iterdir()), [],
+                         "lo intermedio tampoco se queda en el bucket")
+        self.assertEqual(self.storage.read("assets/scene/point_cloud.ply"), "splat", "la escena sí queda")
+        self.assertEqual(self.provider.live, {})
+
+    def test_render_alone_comes_down_verified(self):
+        render, = self.submit_plan(mirror=False, convert=False)
+        self.run_until(lambda: render["status"] in ("done", "failed"))
+        self.assertEqual(render["status"], "done", render.get("error"))
+        self.assertTrue((Path(render["output"]) / "000/image_1/base_rgb_00001.png").exists())
+        self.assertEqual(render["output_dir"], render["output"])
+        self.assertEqual(list((self.tmp / "bucket/recordings").iterdir()), [])
+
+    def test_stages_use_their_own_image(self):
+        images = []
+        create = self.provider.create
+
+        def spy(chosen, image, *args):
+            images.append(image)
+            return create(chosen, image, *args)
+
+        self.provider.create = spy
+        _, _, convert = self.submit_plan()
+        self.run_until(lambda: convert["status"] == "done", timeout=40)
+        self.assertEqual([i.split("/")[-1].split(":")[0] for i in images],
+                         ["splatsim-render", "splatsim-render", "splatsim-train"])
+
+    def test_output_stays_until_the_child_finishes(self):
+        render, mirror = self.submit_plan(convert=False)
+        self.run_until(lambda: render["status"] == "done")
+        self.assertTrue((self.tmp / "bucket" / f"recordings/{Path(render['output']).name}").exists())
+        self.run_until(lambda: mirror["status"] in ("done", "failed"))
+        self.assertEqual(mirror["status"], "done", mirror.get("error"))
+        self.assertFalse((self.tmp / "bucket" / f"recordings/{Path(render['output']).name}").exists())
+
+    def test_existing_output_is_rejected(self):
+        Path(self.plan()[0]["output"]).mkdir()
+        with self.assertRaisesRegex(ValueError, "Ya existe"):
+            self.submit_plan()
+
+    def test_chained_training_waits_for_the_whole_chain(self):
+        *_, convert = self.submit_plan()
+        cfg = self.cfg("m")
+        child = self.orch.submit("m", cfg, convert["output"], Requirements(), 1.0, depends_on=convert["id"])
+        self.assertEqual(child["status"], "pending")
+        self.run_until(lambda: child["status"] in ("done", "failed"), timeout=60)
+        self.assertEqual(child["status"], "done", child.get("error"))
+
+
+class TestPipelinePlan(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.source = self.tmp / "gello"
+        make_states(self.source, seconds=1.0)
+
+    def test_frames_match_the_resampling_of_render_recordings(self):
+        self.assertEqual(scan_states(self.source, 10)["frames"], 2 * 11)
+
+    def test_recording_without_joint_state_is_rejected(self):
+        (self.tmp / "old" / "000").mkdir(parents=True)
+        (self.tmp / "old" / "000" / "00001.pkl").write_bytes(pickle.dumps({"state": 1}))
+        with self.assertRaisesRegex(ValueError, "realtime"):
+            scan_states(self.tmp / "old", 10)
+
+    def test_mirror_doubles_and_sizes_carry_over(self):
+        plan = plan_pipeline(str(self.source), {"fps": 10, "workers": 3},
+                             {"with_original": True, "workers": 3},
+                             {"output_dir": "/d", "fps": 10, "suffix": "s"})
+        render, mirror, convert = describe_pipeline(plan)
+        self.assertEqual((render["frames"], mirror["frames"], convert["frames"]), (22, 44, 44))
+        self.assertEqual(len(render["cameras"]), 4)
+        self.assertAlmostEqual(mirror["input_gb"], 22 * 4 * 0.44e-3)
+        self.assertAlmostEqual(convert["recordings_gb"], 44 * 4 * 0.44e-3)
+        self.assertEqual(convert["exclude"], [])
+        self.assertEqual(convert["args"]["input"], mirror["output"])
+
+    def test_real_scene_assets_are_minimal(self):
+        if not Path(stages.OBJECTS_FILE).exists() or not (Path.home() / "data/Colmaps/260729_2003").exists():
+            self.skipTest("sin la escena del lab")
+        uploads, inputs = stages.scene_assets()
+        keys = [u["key"] for u in uploads]
+        self.assertIn("assets/Colmaps/260729_2003/images/0348.jpg", keys)
+        self.assertEqual(sum("/images/" in k for k in keys), 2)
+        self.assertTrue(all(Path(u["local"]).expanduser().exists() for u in uploads), uploads)
+        self.assertIn({"key": "assets/xarm5_lite_urdf", "path": "~/data/xarm5_lite_urdf"}, inputs)
+        self.assertIn({"key": "assets/output/plastic_apple", "path": "~/data/output/plastic_apple"}, inputs)
+
+
 class TestRecordings(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -528,6 +686,7 @@ class TestPodLifecycle(Base):
         run = Run(self.storage, "runs/w")
         run._track("Casting the dataset: 100%|####| 300/300 [00:01<00:00]")
         run._track("/data/12/34 svt 1/2")
+        run._track("[w0] Loading 3/4")
         self.assertNotIn("done", run.status)
         run._track("episodes:  40%|####      | 2/5 [00:01<00:02,  1.00it/s]")
         self.assertEqual((run.status["done"], run.status["total"]), (2, 5))

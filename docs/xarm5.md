@@ -231,6 +231,25 @@ Jobs use one of two lanes: trainings, renders and mirrors use the GPU and run on
 
 The queue is saved in `~/data/train_queues/live/jobs.yaml` with each job's config and log. Each job runs in its own session: closing the panel does not stop them, and reopening it picks them up again (each log ends with the job's exit code). A job that depends on another starts only when that one is done; if it fails, the next steps wait until it is retried or removed. After each finished training or conversion the registry is regenerated, so the model or dataset appears in the simulator panel.
 
+## Cloud queue
+
+`scripts/xarm5/cloud_server.py` (http://localhost:8083) runs data and training jobs on rented GPUs instead of this PC, each job in its own Vast pod, several at once. It doesn't replace the training queue.
+
+```bash
+python scripts/xarm5/cloud_server.py
+```
+
+It needs `~/.config/splatsim/cloud.env` (copy `configs/cloud.env.example`, `chmod 600`), `rclone` and the `vastai` CLI logged in. Data travels through a Cloudflare R2 bucket.
+
+- *Data*: chains **Render** → **Mirror** → **Convert** for a folder of `~/data/bc_data`. It shows each stage's frames, transfers and estimated cost before queuing. Intermediate images stay in the bucket: only the last stage comes down to this PC, and what was used is then deleted from the bucket. To review a render before converting it, queue Render alone.
+- *New job*: trains a model, on a dataset of this PC or on one still queued (`⏳ #<job> <name>`), and waits for it.
+- *Queue*: progress, cost and log of each job, with Stop, Retry and Remove.
+- *Limits*: pods at once, the budget of the whole queue and a pause.
+
+Each pod stops itself when it finishes or reaches its *Max cost*, even if this PC is off, and a closed panel picks its pods up again when reopened (`~/data/cloud_queue/`). Speeds come from `history.yaml`, so a job with no comparable measurement has no estimate and you set its maximum yourself. The cost shown in the queue is an estimate that assumes the whole image is downloaded and charged; the balance can drop less.
+
+Pods render from the images `splatsim-train` and `splatsim-render`, built by `.github/workflows/images.yml`. Render and mirror receive this PC's camera poses and scene config with each job, and upload only the scene files needed (about 1.1 GB: COLMAP `sparse`, the trained splat, two photos, the URDF, the tomato). With `SPLATSIM_HEADLESS=1`, PyBullet runs without a window; the images are identical to rendering with one. Use `--workers` on a GPU with about 8 GB per worker.
+
 ## Registry of recordings, datasets and models
 
 `configs/registry.yaml` links each model to the dataset it was trained on, and each dataset to the GELLO recordings it was converted from. Regenerate it after recording, converting or training:

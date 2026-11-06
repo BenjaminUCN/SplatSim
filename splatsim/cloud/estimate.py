@@ -9,6 +9,11 @@ from splatsim.cloud.providers import Offer
 
 IMAGE_GB = 4.82               # splatsim-train comprimida: lo que cada pod descarga y paga
 IMAGE_DISK_GB = 9.06          # lo que ocupa ya extraída
+RENDER_IMAGE_GB = 6.0         # splatsim-render comprimida: a corregir con la imagen publicada
+RENDER_IMAGE_DISK_GB = 12.0
+ASSETS_GB = 1.1               # escena mínima, URDF y tomate
+PNG_GB = 0.44e-3              # 53 GB / 122264 PNG de planned_261103_10hz
+RENDER_STARTUP_S = 120        # cargar la escena en la GPU
 STARTUP_S = 260               # GPU, dataset, carga y torch.compile, medidos en la prueba de 500 pasos
 CHECKPOINT_GB = 1.1           # model.safetensors del modelo de 2 cámaras
 CONVERT_STARTUP_S = 60        # sin GPU ni torch.compile
@@ -26,6 +31,8 @@ SEED_HISTORY = [
     {"kind": "convert", "profile": "convert-cam2", "gpu": "", "cpu": "AMD Ryzen 9 9950X 16-Core Processor", "rate": 15.1},    # lab, 3 episodios; usa ~1.5 núcleos
     {"kind": "convert", "profile": "convert-cam2", "gpu": "RTX 4060",
      "cpu": "AMD EPYC 7502 32-Core Processor", "rate": 7.96},    # pod, 790 frames incluido el arranque
+    {"kind": "render", "profile": "render-cam4-w1", "gpu": "RTX 5080",
+     "cpu": "AMD Ryzen 9 9950X 16-Core Processor", "rate": 4.25},    # lab, 117 frames sin pantalla
 ]
 
 
@@ -38,6 +45,8 @@ class Workload:
     up_gb: float         # salidas
     startup_s: float = STARTUP_S
     uses_gpu: bool = True
+    image_gb: float = IMAGE_GB
+    image_disk_gb: float = IMAGE_DISK_GB
 
 
 @dataclass
@@ -77,6 +86,13 @@ def convert_workload(frames: int, cameras: int, recordings_gb: float) -> Workloa
                     predicted_dataset_gb(frames, cameras), CONVERT_STARTUP_S, uses_gpu=False)
 
 
+def render_workload(kind: str, frames: int, cameras: int, workers: int, input_gb: float) -> Workload:
+    """work = frames que deja la etapa; un espejo con originales renderiza el doble."""
+    return Workload(kind, f"{kind}-cam{cameras}-w{workers}", frames, RENDER_IMAGE_GB + ASSETS_GB + input_gb,
+                    frames * cameras * PNG_GB, RENDER_STARTUP_S, image_gb=RENDER_IMAGE_GB,
+                    image_disk_gb=RENDER_IMAGE_DISK_GB)
+
+
 def predicted_dataset_gb(frames: int, cameras: int) -> float:
     return frames * cameras * DATASET_GB_PER_FRAME_CAMERA
 
@@ -97,7 +113,7 @@ def lookup_rate(history: list[dict], work: Workload, offer: Offer) -> tuple[floa
 def estimate(history: list[dict], work: Workload, offer: Offer) -> Estimate:
     rate, confidence, source = lookup_rate(history, work, offer)
     # la descarga de la imagen se cobra por GB, no por hora: la instancia aún no corre
-    transfer_s = ((work.down_gb - IMAGE_GB) * 8000 / max(offer.inet_down_mbps, 1)
+    transfer_s = ((work.down_gb - work.image_gb) * 8000 / max(offer.inet_down_mbps, 1)
                   + work.up_gb * 8000 / max(offer.inet_up_mbps, 1))
     transfer_cost = work.down_gb * offer.down_cost_gb + work.up_gb * offer.up_cost_gb
     if rate is None:

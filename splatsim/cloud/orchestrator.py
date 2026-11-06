@@ -23,11 +23,10 @@ from pathlib import Path
 import yaml
 
 from scripts.xarm5.data_jobs import dataset_path
-from splatsim.cloud.estimate import (IMAGE_DISK_GB, IMAGE_GB, SEED_HISTORY, Estimate, Workload, convert_workload, rank,
-                                     train_workload)
+from splatsim.cloud.estimate import SEED_HISTORY, Estimate, Workload, convert_workload, rank, train_workload
 from splatsim.cloud.providers import Offer, Requirements
 from splatsim.cloud.runner import MAX_BOOTS, sha256
-from splatsim.cloud.stages import DEFAULT_SCRIPTS, STAGES, scan_recordings
+from splatsim.cloud.stages import DEFAULT_SCRIPTS, STAGES, describe_pipeline, scan_recordings
 from splatsim.cloud.storage import Storage
 
 ACTIVE = ("preparing", "starting", "running", "finishing")
@@ -43,6 +42,7 @@ POD_PYTHON = "/opt/venv/bin/python"
 GPU_CHECK = [POD_PYTHON, "-c",     # 1 GB en la GPU: detecta hosts como el del "out of memory" en RunPod
              "import torch; x = torch.ones(1024, 1024, 256, device='cuda'); assert (x * 2).sum() > 0"]
 DEFAULT_IMAGE = "ghcr.io/benjaminucn/splatsim-train:latest"
+DEFAULT_RENDER_IMAGE = "ghcr.io/benjaminucn/splatsim-render:latest"
 POD_ROOT = "/workspace"
 DATASETS_ROOT = "~/lerobot/splatsim_test_data"
 
@@ -72,12 +72,12 @@ def folder_gb(path: Path) -> float:
 
 
 def disk_for(work: Workload) -> int:
-    return math.ceil(work.down_gb - IMAGE_GB + IMAGE_DISK_GB + work.up_gb + DISK_MARGIN_GB)
+    return math.ceil(work.down_gb - work.image_gb + work.image_disk_gb + work.up_gb + DISK_MARGIN_GB)
 
 
 class Orchestrator:
     def __init__(self, qdir: str | Path, provider, storage: Storage, pod_env: dict[str, str] | None = None,
-                 image: str = DEFAULT_IMAGE, health: list[str] | None = GPU_CHECK,
+                 image: str = DEFAULT_IMAGE, render_image: str = DEFAULT_RENDER_IMAGE, health: list[str] | None = GPU_CHECK,
                  on_ready=None, python: str = POD_PYTHON, scripts: dict[str, str] | None = None,
                  pod_root: str = POD_ROOT):
         self.qdir = Path(qdir).expanduser()
@@ -86,7 +86,8 @@ class Orchestrator:
         self.scripts = {**DEFAULT_SCRIPTS, **(scripts or {})}
         # cada cola solo responde por sus pods: otra cola o una prueba aparte no son huérfanos suyos
         self.label_prefix = f"splatsim-{hashlib.sha1(str(self.qdir).encode()).hexdigest()[:6]}-"
-        self.provider, self.storage, self.image, self.health = provider, storage, image, health
+        self.provider, self.storage, self.health = provider, storage, health
+        self.images = {"train": image, "render": render_image}
         self.pod_env = pod_env or {}
         self.on_ready = on_ready
         self.lock = threading.RLock()
@@ -141,6 +142,25 @@ class Orchestrator:
         scan = scan_recordings(args["input"], args.get("cameras"), args.get("ignore_selection", False))
         work = convert_workload(scan["frames"], len(scan["cameras"]), scan["gb"])
         return scan, self.rank_offers(work, req)
+
+    def estimate_pipeline(self, plan: list[dict], gpu: Requirements, cpu: Requirements) -> list[tuple[dict, list[Estimate]]]:
+        """Por cada etapa de plan_pipeline (data_jobs.py), lo que hará y sus ofertas."""
+        return [(s, self.rank_offers(self.workload(s), gpu if STAGES[s["kind"]].needs_gpu else cpu))
+                for s in describe_pipeline(plan)]
+
+    def submit_pipeline(self, plan: list[dict], gpu: Requirements, cpu: Requirements, max_cost: float) -> list[dict]:
+        """Encola las etapas encadenadas. Lo intermedio queda solo en el bucket: al lab baja lo último."""
+        stages = describe_pipeline(plan)
+        for stage in stages:
+            if Path(stage["output"]).expanduser().exists() or any(
+                    j.get("output") == stage["output"] and j["status"] not in RETRYABLE for j in self.jobs):
+                raise ValueError(f"Ya existe o está en cola {stage['output']}")
+        jobs: list[dict] = []
+        for i, stage in enumerate(stages):
+            req = gpu if STAGES[stage["kind"]].needs_gpu else cpu
+            jobs.append(self._add({**stage, "description": "", "depends_on": jobs[-1]["id"] if jobs else None,
+                                   "download": i == len(stages) - 1}, req, max_cost, None))
+        return jobs
 
     def _dataset_gb(self, dataset: str, depends_on: int | None) -> float:
         """El dataset de una cadena aún no existe: se usa el tamaño previsto por la conversión."""
@@ -280,7 +300,11 @@ class Orchestrator:
         stage.refresh(job, folder_gb)
         job["phase"] = "uploading inputs"
         for item in stage.uploads(job):       # lo que ya está en el bucket no se vuelve a subir
-            self.storage.upload(Path(item["local"]).expanduser(), item["key"], item["exclude"])
+            local = Path(item["local"]).expanduser()
+            if local.is_file():
+                self.storage.upload_file(local, item["key"])
+            else:
+                self.storage.upload(local, item["key"], item.get("exclude"))
 
         candidates = self._pick_offers(job)
         if not candidates:
@@ -296,7 +320,7 @@ class Orchestrator:
         for candidate in candidates[:OFFERS_TO_TRY]:
             self.storage.write(f"{run_key}/spec.json", json.dumps(self._spec(job, candidate, run_key)))
             try:
-                instance = self.provider.create(candidate.offer, self.image, [run_key], env,
+                instance = self.provider.create(candidate.offer, self.images[stage.image], [run_key], env,
                                                 disk_for(self.workload(job)), label)
             except RuntimeError as e:          # la oferta ya no está: la siguiente
                 error = e
@@ -408,31 +432,36 @@ class Orchestrator:
         self.save()
         stage = STAGES[job["kind"]]
         key, target = stage.output_key(job), stage.target(job)
-        need = self.workload(job).up_gb
-        free = shutil.disk_usage(Path.home()).free / 1e9
-        if free < need + 5:
-            raise RuntimeError(f"solo hay {free:.0f} GB libres en el lab; la salida sigue en el bucket: {key}")
-        self.storage.download(key, target)
-        bad = [name for name, digest in job["result"]["outputs"][key].items() if sha256(target / name) != digest]
-        if bad:
-            raise RuntimeError(f"sha256 distinto en {bad[:3]}; la salida sigue en el bucket: {key}")
+        if job.get("download", True):
+            need = self.workload(job).up_gb
+            free = shutil.disk_usage(Path.home()).free / 1e9
+            if free < need + 5:
+                raise RuntimeError(f"solo hay {free:.0f} GB libres en el lab; la salida sigue en el bucket: {key}")
+            self.storage.download(key, target)
+            bad = [name for name, digest in job["result"]["outputs"][key].items() if sha256(target / name) != digest]
+            if bad:
+                raise RuntimeError(f"sha256 distinto en {bad[:3]}; la salida sigue en el bucket: {key}")
         if publish := stage.publish_key(job):
             self.storage.copy(key, publish)
-        self._clean_bucket(job, key)
+        # con una etapa esperándola, la salida es su entrada: la borra esa etapa al terminar
+        has_child = stage.output_feeds_children and any(j.get("depends_on") == job["id"] for j in self.jobs)
+        self._clean_bucket(job, None if has_child else key)
         with self.lock:
             self._record_history(job)
-            job.update(status="done", phase="done", output_dir=str(target),
+            if job.get("download", True):
+                job["output_dir"] = str(target)
+            job.update(status="done", phase="done",
                        finished=datetime.now().strftime("%Y-%m-%d %H:%M"))
             self.save()
         if self.on_ready:
             self.on_ready(job)
 
-    def _clean_bucket(self, job: dict, output_key: str) -> None:
+    def _clean_bucket(self, job: dict, output_key: str | None) -> None:
         """Lo que ya llegó verificado no sigue cobrando. Si falla, solo queda el aviso."""
         stage = STAGES[job["kind"]]
         others = {key for j in self.jobs if j is not job and j["status"] not in ("done", *RETRYABLE)
                   for key in STAGES[j["kind"]].temporary_inputs(j)}
-        for key in [output_key, *(k for k in stage.temporary_inputs(job) if k not in others)]:
+        for key in [*([output_key] if output_key else []), *(k for k in stage.temporary_inputs(job) if k not in others)]:
             try:
                 self.storage.delete(key)
             except RuntimeError as e:
