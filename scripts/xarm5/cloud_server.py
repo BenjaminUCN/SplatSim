@@ -36,6 +36,7 @@ REFRESH_PERIOD = 3.0
 OFFERS_SHOWN = 8
 AUTO = "Auto (best estimate)"
 RECORDINGS_ROOT = "~/data/bc_data"
+LEAF_DIR = "~/data/occluders/xarm5_lite_plant_v3"
 CONVERT_REQUIREMENTS = {"min_cores": 8, "min_ram_gb": 16}   # sin GPU; medido: usa ~1.5 núcleos, más no acelera
 PENDING_DATASET = "⏳ #"
 
@@ -250,6 +251,10 @@ class Panel:
         gui = self.v.gui
         self.d_source = gui.add_dropdown("Recordings", self._recordings())
         self.d_render = gui.add_checkbox("Render", True, hint="For state-only recordings")
+        self.d_leaves = gui.add_checkbox("Random leaf occlusions", False, hint="Render: a random leaf per episode, fitted to a target")
+        self.d_leaf_dir = gui.add_text("Leaf folder", LEAF_DIR, hint="From segment_leaf.py")
+        self.d_targets = gui.add_text("Occlusion targets (%)", "0 25 50 75", hint="One is drawn per episode; 0 = no leaf")
+        self.d_seed = gui.add_number("Leaf seed", 0, min=0, step=1, hint="Same seed, same draw per episode")
         self.d_mirror = gui.add_checkbox("Mirror", False)
         self.d_with_original = gui.add_checkbox("Keep originals", True, hint="Mirror: originals + mirrors, twice the frames")
         self.d_convert = gui.add_checkbox("Convert to LeRobot", True)
@@ -272,7 +277,13 @@ class Panel:
             raise ValueError("Faltan las grabaciones o el sufijo")
         fps, workers = int(self.d_fps.value), int(self.d_workers.value)
         render = {"fps": fps, "arrangement": arrangement, "workers": workers} if self.d_render.value else None
-        mirror = ({"with_original": self.d_with_original.value, "arrangement": arrangement, "workers": workers}
+        if render and self.d_leaves.value:
+            leaf_dir = self.d_leaf_dir.value.strip()
+            if not next(Path(leaf_dir).expanduser().glob("*.ply"), None):
+                raise ValueError(f"No hay hojas en {leaf_dir}: recorta alguna con segment_leaf.py")
+            render.update(leaf_dir=leaf_dir, occlusion_targets=[float(t) for t in self.d_targets.value.split()],
+                          seed=int(self.d_seed.value))
+        mirror =({"with_original": self.d_with_original.value, "arrangement": arrangement, "workers": workers}
                   if self.d_mirror.value else None)
         convert = ({"output_dir": DATASETS_ROOT, "fps": fps, "suffix": suffix, "cameras": None,
                     "ignore_selection": self.d_discarded.value, "push": False} if self.d_convert.value else None)

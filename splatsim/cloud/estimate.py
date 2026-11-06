@@ -14,6 +14,7 @@ RENDER_IMAGE_DISK_GB = 9.71
 ASSETS_GB = 1.1               # escena mínima, URDF y tomate
 PNG_GB = 0.44e-3              # 53 GB / 122264 PNG de planned_261103_10hz
 RENDER_STARTUP_S = 120        # cargar la escena en la GPU
+LEAF_FIT_S = 10               # sin medir en un pod: unas 40 mediciones de oclusión de 0.2 s por episodio
 STARTUP_S = 260               # GPU, dataset, carga y torch.compile, medidos en la prueba de 500 pasos
 CHECKPOINT_GB = 1.1           # model.safetensors del modelo de 2 cámaras
 CONVERT_STARTUP_S = 60        # sin GPU ni torch.compile
@@ -101,10 +102,12 @@ def convert_workload(frames: int, cameras: int, recordings_gb: float) -> Workloa
                     predicted_dataset_gb(frames, cameras), CONVERT_STARTUP_S, uses_gpu=False)
 
 
-def render_workload(kind: str, frames: int, cameras: int, workers: int, input_gb: float) -> Workload:
+def render_workload(kind: str, frames: int, cameras: int, workers: int, input_gb: float,
+                    leaf_episodes: int = 0) -> Workload:
     """work = frames que deja la etapa; un espejo con originales renderiza el doble."""
     return Workload(kind, f"{kind}-cam{cameras}-w{workers}", frames, RENDER_IMAGE_GB + ASSETS_GB + input_gb,
-                    frames * cameras * PNG_GB, RENDER_STARTUP_S, image_gb=RENDER_IMAGE_GB,
+                    frames * cameras * PNG_GB, RENDER_STARTUP_S + leaf_episodes * LEAF_FIT_S / workers,
+                    image_gb=RENDER_IMAGE_GB,
                     image_disk_gb=RENDER_IMAGE_DISK_GB)
 
 

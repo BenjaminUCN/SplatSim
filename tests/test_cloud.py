@@ -23,7 +23,7 @@ os.environ["SPLATSIM_WARMUP_S"] = "0"
 
 import yaml  # noqa: E402
 
-from splatsim.cloud.estimate import (PREFER_CACHED_USD, Estimate, convert_workload, estimate, lookup_rate,  # noqa: E402
+from splatsim.cloud.estimate import (LEAF_FIT_S, PREFER_CACHED_USD, Estimate, convert_workload, estimate, lookup_rate,  # noqa: E402
                                      prefer_machines, rank, train_profile, train_workload)
 from splatsim.cloud import orchestrator  # noqa: E402
 from splatsim.cloud.orchestrator import Orchestrator, Settings, train_config  # noqa: E402
@@ -805,6 +805,59 @@ class TestStubbornPod(Base):
         self.orch.busy.discard(999)
         self.orch.tick()
         self.assertNotIn(7, self.provider.live)
+
+
+class TestLeafRender(unittest.TestCase):
+    RENDER = {"fps": 10, "arrangement": None, "workers": 1}
+    LEAVES = {"leaf_dir": "~/data/occluders/plant", "occlusion_targets": [0.0, 50.0], "seed": 3}
+
+    def setUp(self):
+        self.addCleanup(setattr, stages, "scene_assets", stages.scene_assets)
+        self.addCleanup(setattr, stages, "pod_files", stages.pod_files)
+        stages.scene_assets = lambda: ([], [])
+        stages.pod_files = lambda: {}
+
+    def job(self, **render):
+        job = plan_pipeline("/lab/gello", {**self.RENDER, **render}, None, None)[0]
+        return {**job, "frames": 100, "cameras": ["a"], "workers": 1, "input_gb": 0.1, "episodes": 5}
+
+    def test_leaves_travel_to_the_pod_and_args_point_there(self):
+        render = stages.STAGES["render"]
+        job = self.job(**self.LEAVES)
+        self.assertIn({"local": "~/data/occluders/plant", "key": "assets/occluders/plant"}, render.uploads(job))
+        pod = render.pod(job, "runs/x", "/workspace")
+        self.assertIn({"key": "assets/occluders/plant", "path": "~/data/occluders/plant"}, pod["inputs"])
+        args = pod["args"]
+        self.assertEqual(args[args.index("--leaf_dir") + 1], "~/data/occluders/plant")
+        self.assertEqual(args[args.index("--seed") + 1], "3")
+        self.assertEqual(args[args.index("--occlusion_targets") + 1:args.index("--occlusion_targets") + 3], ["0.0", "50.0"])
+
+    def test_a_leafless_render_is_as_before(self):
+        render = stages.STAGES["render"]
+        job = self.job()
+        self.assertEqual(render.uploads(job), [{"local": "/lab/gello", "key": "recordings/gello"}])
+        self.assertNotIn("--leaf_dir", render.pod(job, "runs/x", "/workspace")["args"])
+        self.assertEqual(job["output"], "/lab/gello_10hz")
+
+    def test_the_output_says_it_has_leaves(self):
+        self.assertEqual(self.job(**self.LEAVES)["output"], "/lab/gello_10hz_leaves")
+
+    def test_mirror_is_refused(self):
+        with self.assertRaisesRegex(ValueError, "espejo"):
+            plan_pipeline("/lab/gello", {**self.RENDER, **self.LEAVES}, {"with_original": True}, None)
+
+    def test_the_fit_counts_in_the_estimate_but_not_in_the_measured_speed(self):
+        render = stages.STAGES["render"]
+        plain, leaves = self.job(), self.job(**self.LEAVES)
+        self.assertEqual(render.workload(leaves).startup_s - render.workload(plain).startup_s, 5 * LEAF_FIT_S)
+        result = {"result": {"seconds": {"run": 10.0}}}
+        self.assertEqual(render.rate({**plain, **result}), 10.0)
+        self.assertIsNone(render.rate({**leaves, **result}))
+
+    def test_meta_paths_also_work_in_the_lab(self):
+        from scripts.xarm5.render_recordings import portable_path
+        self.assertEqual(str(portable_path(Path.home() / "data/hoja.ply")), "~/data/hoja.ply")
+        self.assertEqual(str(portable_path(Path("/otra/hoja.ply"))), "/otra/hoja.ply")
 
 
 class TestMachineMemory(Base):

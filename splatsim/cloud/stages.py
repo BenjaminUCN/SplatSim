@@ -128,6 +128,7 @@ def describe_pipeline(plan: list[dict]) -> list[dict]:
         if kind == "render":
             scan = scan_states(a["input"], a["fps"])
             frames, cameras, gb = scan["frames"], chosen or ALL_CAMERAS, scan["gb"]
+            item = {**item, "episodes": scan["episodes"]}
         elif i == 0:
             scan = scan_recordings(a["input"], chosen)
             frames, cameras, gb = scan["frames"], scan["cameras"], scan["gb"]
@@ -244,7 +245,9 @@ class Render:
     output_feeds_children = True
 
     def workload(self, job: dict) -> Workload:
-        return render_workload(self.kind, job["frames"], len(job["cameras"]), job["workers"], job["input_gb"])
+        leaf_episodes = job.get("episodes", 0) if job["args"].get("leaf_dir") else 0
+        return render_workload(self.kind, job["frames"], len(job["cameras"]), job["workers"], job["input_gb"],
+                               leaf_episodes)
 
     def refresh(self, job: dict, folder_gb) -> None:
         pass
@@ -253,17 +256,26 @@ class Render:
     def _input_key(job: dict) -> str:
         return f"recordings/{Path(job['args']['input']).name}"
 
+    @staticmethod
+    def _leaves_key(job: dict) -> str:
+        return f"assets/occluders/{Path(job['args']['leaf_dir']).name}"
+
     def uploads(self, job: dict) -> list[dict]:
         own = [] if job.get("depends_on") is not None else [{"local": job["args"]["input"], "key": self._input_key(job)}]
-        return [*own, *scene_assets()[0]]
+        leaves = [{"local": job["args"]["leaf_dir"], "key": self._leaves_key(job)}] if job["args"].get("leaf_dir") else []
+        return [*own, *leaves, *scene_assets()[0]]
 
     def pod(self, job: dict, run_key: str, pod_root: str) -> dict:
         a = job["args"]
         source = f"{pod_root}/recordings/{Path(a['input']).name}"
         out = f"{pod_root}/recordings/{Path(job['output']).name}"
-        pod_job = {"kind": self.kind, "args": {**a, "input": source}, "output": out}
+        pod_args, leaves = {**a, "input": source}, []
+        if a.get("leaf_dir"):
+            pod_args["leaf_dir"] = f"~/data/occluders/{Path(a['leaf_dir']).name}"
+            leaves = [{"key": self._leaves_key(job), "path": pod_args["leaf_dir"]}]
+        pod_job = {"kind": self.kind, "args": pod_args, "output": out}
         return {"args": command(pod_job)[1:], "files": pod_files(), "clean": [],    # lo renderizado no se repite
-                "inputs": [{"key": self._input_key(job), "path": source}, *scene_assets()[1]],
+                "inputs": [{"key": self._input_key(job), "path": source}, *leaves, *scene_assets()[1]],
                 "outputs": [{"key": self.output_key(job), "path": out}]}
 
     def output_key(self, job: dict) -> str:
@@ -279,6 +291,8 @@ class Render:
         return [self._input_key(job)]
 
     def rate(self, job: dict) -> float | None:
+        if job["args"].get("leaf_dir"):
+            return None          # incluye el ajuste de las hojas: no es comparable con un render normal
         seconds = (job["result"].get("seconds") or {}).get("run")
         return round(job["frames"] / seconds, 3) if seconds else None
 

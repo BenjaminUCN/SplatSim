@@ -318,6 +318,8 @@ A pod's start is mostly the image download: 18 s on a machine that already had i
 
 Pods render from the images `splatsim-train` and `splatsim-render`, built by `.github/workflows/images.yml`, which reuses the published layers: pushing code leaves the 4.5 GB dependency layer as it was, and changing `requirements-train.txt` or `scripts/runpod_setup.sh` makes every machine download it again. Render and mirror receive this PC's camera poses and scene config with each job, and upload only the scene files needed (about 1.1 GB: COLMAP `sparse`, the trained splat, two photos, the URDF, the tomato). With `SPLATSIM_HEADLESS=1`, PyBullet runs without a window; the images are identical to rendering with one. Use `--workers` on a GPU with about 8 GB per worker.
 
+*Random leaf occlusions* (*Data*, with Render) does the same as `--leaf_dir` in [A different leaf per episode](#occlusion): it uploads the leaf folder to `assets/occluders/` and leaves the output in `<folder>_<fps>hz_leaves`. Mirror is refused with it, because `mirror_recordings.py` renders without the leaves while keeping the `meta.json` that says they are there. The estimate adds an unmeasured 10 s per episode for the fit (`LEAF_FIT_S`), and these renders aren't added to the speed history.
+
 ## Registry of recordings, datasets and models
 
 `configs/registry.yaml` links each model to the dataset it was trained on, and each dataset to the GELLO recordings it was converted from. Regenerate it after recording, converting or training:
