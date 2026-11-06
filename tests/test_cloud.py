@@ -741,6 +741,36 @@ class TestLimits(Base):
         self.run_until(lambda: "sin ofertas" in job.get("wait", ""))
         self.assertEqual(self.provider.created, [])
 
+    def expensive_transfer(self, machine=10):
+        chosen = offer(machine=machine, dph=0.5)
+        chosen.up_cost_gb = 1.0     # el checkpoint sale más caro que el máximo
+        return chosen
+
+    def test_offer_whose_transfer_alone_exceeds_the_max_is_not_used_even_without_an_estimate(self):
+        self.provider.offers = [self.expensive_transfer()]
+        job = self.submit(max_cost=1.0, batch_size=7)      # sin mediciones de este perfil
+        self.run_until(lambda: "sin ofertas" in job.get("wait", ""))
+        self.assertEqual(self.provider.created, [])
+        self.assertNotIn("phase", job)                     # el panel debe mostrar el motivo
+
+    def test_without_an_estimate_the_cheaper_transfer_goes_first(self):
+        cheap = offer(id=2, machine=20, dph=0.6)
+        self.provider.offers = [self.expensive_transfer(), cheap]
+        self.provider.autostart = False
+        self.orch.settings.budget_usd = 1000.0
+        job = self.submit(max_cost=50.0, batch_size=7)
+        self.run_until(lambda: job["status"] == "starting")
+        self.assertEqual(job["offer"]["machine_id"], 20)
+
+    def test_a_retried_job_can_only_spend_what_is_left(self):
+        self.provider.autostart = False
+        job = self.submit(max_cost=1.0, batch_size=7)
+        job["cost_before"] = 0.75
+        self.run_until(lambda: job["status"] == "starting")
+        spec = self.provider.created[0][1]
+        transfer = job["estimate"]["transfer_cost"]
+        self.assertAlmostEqual(spec["deadline_s"], (0.25 - transfer) / 1.0 * 3600, places=3)
+
     def test_pause_launches_nothing(self):
         self.orch.settings.paused = True
         job = self.submit()
@@ -776,6 +806,100 @@ class TestRestart(Base):
         self.submit()
         data = yaml.safe_load((self.tmp / "queue/jobs.yaml").read_text())
         self.assertEqual(data["jobs"][0]["name"], "m")
+
+
+class TestUnfinishedPodCost(Base):
+    def setUp(self):
+        super().setUp()
+        self.orch.settings.budget_usd = 1000.0
+
+    def start(self, **extra):
+        self.provider.autostart = False
+        job = self.submit(**extra)
+        self.run_until(lambda: job["status"] == "starting")
+        return job
+
+    def test_a_failed_pod_does_not_keep_the_predicted_upload(self):
+        job = self.start(max_cost=50.0)
+        job["billing_ts"] = time.time() - 3600
+        self.orch.tick()
+        predicted = job["cost"]
+        self.orch._retry_or_fail(job, "prueba")
+        self.assertLess(job["cost"], predicted)
+        self.assertAlmostEqual(job["cost_before"], job["cost"])
+        self.assertGreaterEqual(job["cost"], 1.0)     # la hora corrida sí
+
+    def test_retries_do_not_add_up_what_was_not_transferred(self):
+        job = self.start(max_cost=50.0)
+        self.orch.stop(job["id"])
+        once = job["cost"]
+        for _ in range(3):
+            self.orch.retry(job["id"])
+            self.orch.stop(job["id"])
+        self.assertAlmostEqual(job["cost"], once)
+
+    def test_stopped_cost_does_not_grow_with_time(self):
+        job = self.start(max_cost=50.0)
+        job["billing_ts"] = time.time() - 3600
+        self.orch.stop(job["id"])
+        job["billing_ts"] -= 3600                     # el pod ya no existe
+        cost = job["cost"]
+        self.orch.retry(job["id"])
+        self.assertEqual(job["cost_before"], cost)
+
+    def test_a_finished_pod_keeps_the_whole_transfer(self):
+        job = self.submit(max_cost=50.0)
+        self.run_until(lambda: job["status"] == "done")
+        self.assertGreaterEqual(job["cost"], job["estimate"]["transfer_cost"])
+
+
+class TestRunKey(Base):
+    def setUp(self):
+        super().setUp()
+        self.orch.settings.budget_usd = 1000.0
+
+    def test_retry_does_not_reuse_the_folder_of_the_previous_pod(self):
+        self.provider.autostart = False
+        job = self.submit(max_cost=50.0)
+        self.run_until(lambda: job["status"] == "starting")
+        first = job["run_key"]
+        self.storage.write(f"{first}/status.json", json.dumps({"phase": "download", "seq": 23, "boot": 1}))
+        self.orch.stop(job["id"])
+        self.orch.retry(job["id"])
+        self.run_until(lambda: job["status"] == "starting")
+        self.assertNotEqual(job["run_key"], first)
+        self.orch.tick()
+        self.assertEqual(job["status"], "starting")   # no cree que el pod nuevo ya arrancó
+        self.assertNotIn("boot_s", job)
+
+
+class TestSetMaxCost(Base):
+    def setUp(self):
+        super().setUp()
+        self.orch.settings.budget_usd = 1000.0
+
+    def test_a_waiting_job_tries_again_at_once(self):
+        self.provider.offers = [offer(dph=5.0)]
+        cfg = self.cfg(training_steps=63000)
+        job = self.orch.submit("x", cfg, str(self.dataset), Requirements(), 1.0)
+        self.run_until(lambda: "sin ofertas" in job.get("wait", ""))
+        self.provider.autostart = False
+        self.assertTrue(self.orch.set_max_cost(job["id"], 100.0))
+        self.run_until(lambda: job["status"] == "starting")
+
+    def test_saved(self):
+        job = self.submit()
+        self.orch.settings.paused = True
+        self.assertTrue(self.orch.set_max_cost(job["id"], 7.0))
+        self.assertEqual(self.make().get(job["id"])["max_cost"], 7.0)
+
+    def test_refused_with_a_pod_or_when_done_or_not_positive(self):
+        self.provider.autostart = False
+        job = self.submit(max_cost=1.0)
+        self.assertFalse(self.orch.set_max_cost(job["id"], 0))
+        self.run_until(lambda: job["status"] == "starting")
+        self.assertFalse(self.orch.set_max_cost(job["id"], 5.0))
+        self.assertEqual(job["max_cost"], 1.0)
 
 
 class TestStubbornPod(Base):
@@ -952,6 +1076,11 @@ class TestPreferMachines(unittest.TestCase):
     def test_the_margin_is_counted_from_the_best_machine_that_did_not_fail(self):
         estimates = [self.est(1, 0.1), self.est(2, 1.0), self.est(3, 1.1)]
         self.assertEqual(self.order(estimates, cached=[3], failed=[1]), [3, 2, 1])
+
+    def test_without_estimates_an_expensive_transfer_is_not_worth_it(self):
+        expensive = self.est(2, None, 1.0)
+        expensive.transfer_cost = 1.75
+        self.assertEqual(self.order([self.est(1, None, 1.0), expensive], cached=[2]), [1, 2])
 
     def test_all_failed_keeps_the_order(self):
         self.assertEqual(self.order([self.est(1, 1.0), self.est(2, 2.0)], failed=[1, 2]), [1, 2])

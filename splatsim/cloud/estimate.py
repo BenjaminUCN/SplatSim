@@ -142,10 +142,11 @@ def estimate(history: list[dict], work: Workload, offer: Offer) -> Estimate:
 
 
 def rank(history: list[dict], work: Workload, offers: list[Offer]) -> list[Estimate]:
-    """Primero las estimaciones más fiables; dentro de cada grupo, las más baratas."""
+    """Primero las estimaciones más fiables; dentro de cada grupo, las más baratas. Sin velocidad no hay
+    total: se compara una hora más la transferencia, que en algunas máquinas vale más que el cómputo."""
     estimates = [estimate(history, work, o) for o in offers]
     return sorted(estimates, key=lambda e: (CONFIDENCE_ORDER[e.confidence],
-                                            e.total if e.total is not None else e.offer.dph))
+                                            e.total if e.total is not None else e.offer.dph + e.transfer_cost))
 
 
 def prefer_machines(ranked: list[Estimate], cached: set[int], failed: set[int]) -> list[Estimate]:
@@ -159,7 +160,8 @@ def prefer_machines(ranked: list[Estimate], cached: set[int], failed: set[int]) 
             return False
         if e.total is not None and best.total is not None:
             return e.total <= best.total + PREFER_CACHED_USD
-        return e.total is None and best.total is None and e.offer.dph <= best.offer.dph * PREFER_CACHED_DPH
+        return (e.total is None and best.total is None and e.offer.dph <= best.offer.dph * PREFER_CACHED_DPH
+                and e.transfer_cost <= best.transfer_cost + PREFER_CACHED_USD)
 
     for e in ranked:
         e.cached = e.offer.machine_id in cached

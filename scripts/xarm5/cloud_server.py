@@ -78,11 +78,30 @@ class Panel:
         gui.add_button("Stop (deletes the pod)", color="red").on_click(lambda _: self._act(self.orch.stop))
         gui.add_button("Retry").on_click(lambda _: self._act(self.orch.retry))
         gui.add_button("Remove").on_click(lambda _: self._act(self.orch.remove))
+        self.new_max = gui.add_number("Max cost of the selected job ($)", 0.0, min=0.0, step=0.5,
+                                      hint="Only without a pod running. A failed job then needs Retry.")
+        gui.add_button("Set max cost").on_click(lambda _: self._set_max_cost())
+        self.max_note = gui.add_markdown("")
+        self.selected.on_update(lambda _: self._show_max_cost())
         self.detail = gui.add_markdown("")
 
     def _selected_id(self) -> int | None:
         value = self.selected.value
         return int(value.split(" ", 1)[0]) if value != "—" else None
+
+    def _show_max_cost(self):
+        job = self.orch.get(self._selected_id()) if self._selected_id() is not None else None
+        self.new_max.value = job["max_cost"] if job else 0.0
+        self.max_note.content = ""
+
+    def _set_max_cost(self):
+        job_id = self._selected_id()
+        if job_id is None:
+            return
+        changed = self.orch.set_max_cost(job_id, self.new_max.value)
+        self.max_note.content = (f"Max cost of job {job_id}: {money(self.new_max.value)}." if changed else
+                                 "Not changed: it must be above 0, and the job can't have a pod or be done.")
+        self.refresh()
 
     def _act(self, action):
         if (job_id := self._selected_id()) is not None:

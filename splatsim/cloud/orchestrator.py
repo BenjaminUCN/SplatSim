@@ -40,7 +40,8 @@ WAIT_RETRY_S = 120              # sin ofertas o sin saldo: cuánto esperar antes
 DISK_MARGIN_GB = 20
 OFFERS_TO_TRY = 5
 MACHINE_MEMORY_S = 14 * 24 * 3600   # después, el host pudo borrar la imagen o haberse arreglado
-RESET_ON_RETRY = ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "billing_ts", "boot_s", "result")
+RESET_ON_RETRY = ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "billing_ts", "boot_s", "result",
+                  "settled")
 POD_PYTHON = "/opt/venv/bin/python"
 GPU_CHECK = [POD_PYTHON, "-c",     # 1 GB en la GPU: detecta hosts como el del "out of memory" en RunPod
              "import torch; x = torch.ones(1024, 1024, 256, device='cuda'); assert (x * 2).sum() > 0"]
@@ -305,8 +306,13 @@ class Orchestrator:
 
     # ── preparar y lanzar ────────────────────────────────────────────────────
     def _run_key(self, job: dict) -> str:
+        """Siempre una carpeta sin usar: Retry reinicia los intentos, y un pod nuevo que encuentra el estado
+        o el resultado de otro anterior parece haber arrancado o terminado."""
         safe = re.sub(r"[^\w.+-]+", "_", job["name"])
-        return f"runs/{job['id']:04d}_{job['attempts']}_{safe}"
+        attempt = job["attempts"]
+        while self.storage.read(key := f"runs/{job['id']:04d}_{attempt}_{safe}/spec.json") is not None:
+            attempt += 1
+        return key.removesuffix("/spec.json")
 
     def _pick_offers(self, job: dict) -> list[Estimate]:
         req, work = Requirements(**job["requirements"]), self.workload(job)
@@ -314,12 +320,17 @@ class Orchestrator:
                   if o.machine_id not in job["excluded_machines"]]
         ranked = self._ranked(work, offers)
         ranked.sort(key=lambda e: e.offer.id != job.get("offer_id"))     # la elegida, si sigue disponible
-        return [e for e in ranked if e.total is None or e.total <= job["max_cost"]]
+        left = self._budget_left(job)     # sin estimación se sabe al menos lo que costará la transferencia
+        return [e for e in ranked if (e.total if e.total is not None else e.transfer_cost) <= left]
+
+    @staticmethod
+    def _budget_left(job: dict) -> float:
+        return job["max_cost"] - job.get("cost_before", 0.0)
 
     def _spec(self, job: dict, estimate: Estimate, run_key: str) -> dict:
         stage = STAGES[job["kind"]]
         pod = stage.pod(job, run_key, self.pod_root)
-        deadline_s = max(job["max_cost"] - estimate.transfer_cost, 0.0) / estimate.offer.dph * 3600
+        deadline_s = max(self._budget_left(job) - estimate.transfer_cost, 0.0) / estimate.offer.dph * 3600
         return {"command": [self.python, "-u", self.scripts[job["kind"]], *pod.pop("args")],
                 "health": self.health if stage.needs_gpu else None, **pod, "deadline_s": deadline_s}
 
@@ -372,6 +383,7 @@ class Orchestrator:
         with self.lock:
             job.update(status="pending", wait=reason, attempts=job["attempts"] - 1,
                        retry_at=time.time() + WAIT_RETRY_S)
+            job.pop("phase", None)      # el panel muestra la fase antes que el motivo de la espera
 
     # ── seguimiento ──────────────────────────────────────────────────────────
     def _check(self, job: dict, instance) -> None:
@@ -437,6 +449,7 @@ class Orchestrator:
     def _retry_or_fail(self, job: dict, reason: str) -> None:
         machine = (job.get("offer") or {}).get("machine_id")
         self._release(job)
+        self._settle(job)
         job["cost_before"] = job.get("cost") or 0.0
         if machine is not None:
             job["excluded_machines"].append(machine)
@@ -451,6 +464,7 @@ class Orchestrator:
 
     def _fail(self, job: dict, reason: str) -> None:
         with self.lock:
+            self._settle(job)
             job.update(status="failed", error=reason, finished=datetime.now().strftime("%Y-%m-%d %H:%M"))
             self.save()
 
@@ -462,6 +476,15 @@ class Orchestrator:
         hours = (time.time() - job["billing_ts"]) / 3600 if "billing_ts" in job else 0.0
         job["cost"] = round(job.get("cost_before", 0.0) + hours * job["offer"]["dph"]
                             + job["estimate"]["transfer_cost"], 4)
+
+    def _settle(self, job: dict) -> None:
+        """Un pod que no terminó no subió sus salidas: se queda lo que corrió y lo que bajó, no lo previsto."""
+        if "offer" not in job or job.get("settled") or (job.get("result") or {}).get("ok"):
+            return
+        hours = (time.time() - job["billing_ts"]) / 3600 if "billing_ts" in job else 0.0
+        job["cost"] = round(job.get("cost_before", 0.0) + hours * job["offer"]["dph"]
+                            + self.workload(job).down_gb * job["offer"]["down_cost_gb"], 4)
+        job["settled"] = True
 
     # ── descargar ────────────────────────────────────────────────────────────
     def _finish(self, job: dict) -> None:
@@ -525,11 +548,23 @@ class Orchestrator:
             job = self.get(job_id)
             if job and job["status"] in ACTIVE and job["id"] not in self.busy:
                 self._release(job)
+                self._settle(job)
                 job.update(status="stopped", finished=datetime.now().strftime("%Y-%m-%d %H:%M"))
                 self.save()
             elif job and job["status"] == "pending":
                 job["status"] = "stopped"
                 self.save()
+
+    def set_max_cost(self, job_id: int, value: float) -> bool:
+        """Solo sin pod: el que está corriendo ya recibió su límite y se detiene solo al alcanzarlo."""
+        with self.lock:
+            job = self.get(job_id)
+            if not job or value <= 0 or job["status"] in ACTIVE or job["status"] == "done":
+                return False
+            job["max_cost"] = float(value)
+            job.pop("retry_at", None)
+            self.save()
+            return True
 
     def retry(self, job_id: int) -> None:
         with self.lock:
