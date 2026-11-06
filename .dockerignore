@@ -5,6 +5,7 @@
 !scripts/runpod_setup.sh
 !scripts/xarm5/train_diffusion.py
 !configs/camera_poses.yaml
+!configs/train/diffusion.yaml
 !splatsim/__init__.py
 !splatsim/utils/**
 !splatsim/cloud/**
