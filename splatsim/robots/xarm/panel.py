@@ -14,6 +14,7 @@ from splatsim.utils.apple_grid import (
     load_grid,
 )
 from splatsim.utils.leaf_segmentation import place_between, saved_leaves
+from splatsim.utils.occlusion import OUT_OF_VIEW, fit_lateral_offset
 
 from .config import BASE_CAM_FOV, SIM_CLOCKS
 
@@ -37,6 +38,7 @@ class SimPanel(StationPanel):
             self._build_camera_gui()
             if self.s.occluders is not None:
                 self._build_occluder_gui()
+            self._build_occlusion_gui()
 
     def _update_status_extra(self):
         # la manzana también se mueve desde fuera (p.ej. run_policy_trials.py)
@@ -107,11 +109,17 @@ class SimPanel(StationPanel):
                 "Tomato → camera", 0.0, 1.0, 0.01, 0.2,
                 hint="Where on the line from the tomato to the camera: 0 = at the tomato, 1 = at the camera")
             between = self.v.gui.add_button("Put Between Camera and Tomato")
+            self._occ_target = self.v.gui.add_slider(
+                "Target occlusion (%)", 0.0, 100.0, 1.0, 40.0,
+                hint="For Fit to Target: slides the leaf sideways, at the distance of 'Tomato → camera', "
+                     "until it covers this much of the tomato in the chosen camera")
+            fit = self.v.gui.add_button("Fit to Target")
             remove = self.v.gui.add_button("Remove from Scene", color="red")
             save = self.v.gui.add_button("Save Occluders", hint=f"Writes {self.s.occluders.path}")
             self._occ_info = self.v.gui.add_markdown("")
         self._on_click(add, self._add_occluder)
         self._on_click(between, self._occluder_between)
+        self._on_click(fit, self._fit_occluder)
         self._on_click(remove, self._remove_occluder)
         self._on_click(save, self._save_occluders)
         self._on_user(self._occ_select, lambda _: self._sync_occluder_ui())
@@ -150,6 +158,46 @@ class SimPanel(StationPanel):
     def _occluder_between(self):
         cam = next(c for c in self.base_cams if c.name == self._occ_camera.value)
         self._move_occluder(place_between(cam.xyz, self._apple_pos(), self._occ_fraction.value))
+
+    def _fit_occluder(self):
+        item = self._occ_current()
+        if item is None:
+            self._occ_info.content = "Add a leaf first."
+            return
+        cam = next(c for c in self.base_cams if c.name == self._occ_camera.value)
+        center = place_between(cam.xyz, self._apple_pos(), self._occ_fraction.value)
+        client = self.s.pybullet_client
+        right = np.reshape(client.getMatrixFromQuaternion(client.getQuaternionFromEuler(cam.rpy)), (3, 3))[:, 0]
+        item.enabled = self._occ_enabled.value = True
+
+        def occlusion_at(offset):
+            self.s.occluders.set_pose(item.name, center + offset * right, item.wxyz)
+            return self.s.measure_occlusion([cam.name])[cam.name]["occlusion"]
+
+        fit = fit_lateral_offset(occlusion_at, float(self._occ_target.value))
+        self._move_occluder(center + fit["offset"] * right)
+        self._occ_info.content = {
+            "ok": f"{fit['occlusion']:.0f}% in {cam.name}.",
+            "too_small": f"At most {fit['occlusion']:.0f}% in {cam.name}: move it closer to the camera or use a bigger leaf.",
+            "already_covered": f"The rest of the scene already covers {fit['occlusion']:.0f}% in {cam.name}.",
+            OUT_OF_VIEW: f"The tomato isn't in view of {cam.name}.",
+        }[fit["status"]]
+        self._measure_occlusion()
+
+    def _build_occlusion_gui(self):
+        with self.v.gui.add_folder("Occlusion"):
+            button = self.v.gui.add_button(
+                "Measure Occlusion", hint="How much of the tomato is covered in each camera, with the "
+                                          "plant, the arm and the occluders as they are now")
+            self._occlusion_text = self.v.gui.add_markdown("")
+        self._on_click(button, self._measure_occlusion)
+
+    def _measure_occlusion(self):
+        lines = []
+        for name, r in self.s.measure_occlusion().items():
+            text = "not in view" if r["occlusion"] is None else f"**{r['occlusion']:.0f}%**"
+            lines.append(f"{name}: {text}" + (" (partly out of frame)" if r["cut_by_frame"] else ""))
+        self._occlusion_text.content = "  \n".join(lines) or "No cameras."
 
     def _add_occluder(self):
         ply = self._saved_leaves.get(self._occ_saved.value)

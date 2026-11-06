@@ -80,8 +80,13 @@ def grid_index(apple_grid, pos, tol: float = 0.01) -> int:
     return int(d.argmin()) if d.min() < tol else -1
 
 
+def occlusion_columns(measured: dict) -> dict:
+    """{occlusion_<cámara>: %} (vacío si el tomate no está en cuadro)."""
+    return {f"occlusion_{cam}": r["occlusion"] for cam, r in measured.items()}
+
+
 def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_point,
-              reset: bool = True) -> dict:
+              reset: bool = True, measure_occlusion: bool = False) -> dict:
     """apple_pos None: el tomate se deja donde está. Sin su posición en la observación (robot
     real) solo se cuentan los frames."""
     call(robot, "stop_recording")
@@ -91,6 +96,9 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
         robot.set_object_pose(APPLE_NAME, np.array(apple_pos), np.array(APPLE_QUAT), use_gravity=False)
     reset_policy(agent)
 
+    # antes de que el brazo se mueva: cuánto tapa la planta (y las hojas) con el brazo en reposo
+    occlusion = occlusion_columns(call(robot, "measure_occlusion")) if measure_occlusion else {}
+    metadata = {**metadata, **occlusion}
     obs = robot.get_observations()
     folder = call(robot, "start_recording", max_seconds=trial_seconds,
                   metadata=metadata, root=root)
@@ -114,7 +122,7 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
         if not obs["recording"]:   # el servidor cortó al llegar a trial_seconds
             break
 
-    result = {"folder": folder, "frames": frames}
+    result = {"folder": folder, "frames": frames, **occlusion}
     if distances:
         result.update(final_dist=distances[-1], min_dist=min(distances),
                       final_grasp_err=grasp_errors[-1], min_grasp_err=min(grasp_errors))
@@ -156,6 +164,8 @@ def main(args: Args) -> None:
     total = len(positions) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
               "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point"]
+    if not manual:
+        fields += list(occlusion_columns(call(robot, "measure_occlusion")))
     grasp_point = load_grasp_point()
     # con qué punto se midió el error de agarre: compare_trials.py recalcula si cambió
     point_text = " ".join(f"{v:.4f}" for v in grasp_point)
@@ -190,7 +200,7 @@ def main(args: Args) -> None:
                                 "checkpoint": checkpoint, "run_name": run_name}
                     result = run_trial(robot, agent, None if (args.here or manual) else apple_pos,
                                        args.trial_seconds, metadata, root, grasp_point,
-                                       reset=not manual)
+                                       reset=not manual, measure_occlusion=not manual)
                     if manual:
                         call(robot, "stop_recording")
                         answer = ask_operator(robot, f"Trial {n}/{total} finished: result?",

@@ -222,10 +222,28 @@ Without `--occluders` no leaf is loaded. With it, the panel's *Scene* tab has an
 **Limits:**
 
 - Leaves exist only in the images. They have no collisions, so the arm goes through them and the planner ignores them.
-- The poses are fixed for the whole render: there is no per-episode randomization yet, and no measure of how much of the tomato a leaf covers.
+- The poses are fixed for the whole render: there is no per-episode randomization yet.
 - Policy runs and `run_policy_trials.py` see the leaves of the server they connect to. `mirror_recordings.py` doesn't take the flag, so a mirrored dataset is rendered without leaves.
 - The original leaf stays in the plant: placing one adds a copy.
 - A leaf that was partly hidden by others during the capture has gaps there, and the tomato shows through them. The side facing away from the capture is less defined, so a leaf rotated a lot looks blurrier.
+
+## Occlusion percentage
+
+How much of the tomato is covered in each camera. The scene is rendered twice, with the tomato painted black and white: the difference is exactly what the tomato contributes to each pixel after alpha blending, so translucent leaves count for what they cover, with no thresholds. Divided by the silhouette of the tomato alone, it gives the visible fraction (`splatsim/utils/occlusion.py`). It takes about 0.2 s per camera. Levels: `0-25`, `25-50`, `50-75`, `75-100` and `out_of_view`.
+
+The percentage counts everything in front of the tomato: plant, occluders, the arm, and the gripper in the wrist camera. It is relative to the part of the tomato inside the image: when the frame cuts the tomato, `cut_by_frame` says so, and a sliver can read as 100%.
+
+**In the panel** (*Scene* tab, sim only): **Measure Occlusion** shows it for the server's cameras. With `--occluders`, **Fit to Target** (*Occluders* folder) slides the selected leaf sideways, at the *Tomato → camera* distance, until it covers *Target occlusion* in the chosen camera. It says so if the leaf can't reach it, or if the rest of the scene already covers more. Leaves are irregular, so a larger coverage isn't always closer to the center.
+
+**Over a recording folder:**
+
+```bash
+python scripts/xarm5/measure_occlusion.py ~/data/bc_data/<folder> [--frames 8] [--arrangement 2cam] [--occluders configs/occluders.yaml] [--out <dir>]
+```
+
+It works on state-only and old recordings, with the current camera poses (not the ones used when recording), and writes `occlusion.csv` (per episode, frame and camera) and `occlusion_summary.csv` (per episode and camera: `start`, `mean`, `end`, `level`, `start_cut`). `level` comes from `start`, the first measured instant with the tomato in frame, because later the arm covers it too. The counts per level printed at the end leave out the episodes with `start_cut`.
+
+**In trials:** `run_policy_trials.py` measures each trial right after placing the tomato, before the arm moves, and adds `occlusion_<camera>` to `trials.csv` and `meta.json`. On the real arm it isn't measured. `compare_trials.py` doesn't group by these columns yet.
 
 ## Train the diffusion policy
 
