@@ -197,6 +197,36 @@ python scripts/xarm5/mirror_recordings.py ~/data/bc_data/gello_3plants [--robot-
 ```
 The output has the original episodes under their own numbers (000-205) followed by their mirrors (the mirror of episode n is n + 206, in general n + the highest source number + 1; `mirror_offset` in `mirror_info.yaml`), all rendered with the same cameras, so the dataset doesn't mix two camera framings; each frame has `mirrored: True/False`. `--no-with-original` writes only the mirrors, under the source numbers. Discarded episodes in the source `selection.yaml` stay discarded, along with their mirrors. It reflects every episode across the robot's xz plane (y → −y): the tomato goes to (x, −y, z) and the arm makes the symmetric motion, which for the xArm5 is exact by flipping the sign of joint1 (base) and joint5 (wrist roll); the end-effector pose (`ee_pos_quat`, `state`, `action`) is recomputed in PyBullet and the cameras are rendered again rather than flipped, since the wrist camera is mounted to one side and the scene isn't symmetric. It works on old recordings (it takes the arm pose from `all_joint_positions`; their `joint_positions` is sometimes the command) and on current ones (`sim_joint_positions`). Frames keep their numbering and aren't resampled; the images are written per frame, only as `.png` (not inside the `.pkl`), with the current camera poses and the gripper. The plant isn't mirrored, so check a few episodes in the reviewer: a mirrored tomato can end up in front of different foliage. Keep each episode and its mirror on the same side of a train/validation split. The output has a `mirror_info.yaml` (source, scene, cameras, mirror offset).
 
+## Leaf occluders
+
+Cut a leaf out of the scene's splat and place it in the images, to create occlusions the plant doesn't have.
+
+**Cut a leaf:**
+
+```bash
+python scripts/xarm5/segment_leaf.py [--robot_name xarm5_lite_plant_v3] [--port 8083]
+```
+
+Open http://localhost:8083: the scene's splat, seen from `base_rgb`. With *Pick* on, a click on a leaf selects it (in red): the selection grows from the visible surface under the cursor through connected gaussians while the surface stays smooth and the color similar. The sliders redo the last click. If it spills onto another leaf, lower *Max bend* or *Max step*; if it stops short, raise *Link* or *Color tolerance*, or click again on the part that's missing, since clicks add up. *Click does* switches to *Brush add* or *Brush erase* for touching up by hand. *Show only selection* shows the leaf alone. **Save Leaf** writes `~/data/occluders/<scene>/<name>.ply`, an ordinary splat, and `<name>.yaml` with its center, size and transformation to the world. A click on a highlight can select almost nothing, since it has no green to compare with: undo and click a greener spot.
+
+**Place it in the scene:**
+
+```bash
+python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --occluders configs/occluders.yaml
+```
+
+Without `--occluders` no leaf is loaded. With it, the panel's *Scene* tab has an *Occluders* folder: **Add to Scene** adds a saved leaf (the same one several times if you want; leaves saved after the server started need a restart to be listed), a gizmo moves and rotates it, and **Put Between Camera and Tomato** places it on the line from the tomato to the chosen base camera (*Tomato → camera*: 0 = at the tomato, 1 = at the camera). **Save Occluders** writes the file. The file holds each leaf's center position in the world and its rotation (`wxyz`; identity = as in the plant).
+
+**Render with them:** `render_recordings.py <folder> --occluders configs/occluders.yaml` adds the same leaves to every episode and notes them in `render_info.yaml`.
+
+**Limits:**
+
+- Leaves exist only in the images. They have no collisions, so the arm goes through them and the planner ignores them.
+- The poses are fixed for the whole render: there is no per-episode randomization yet, and no measure of how much of the tomato a leaf covers.
+- Policy runs and `run_policy_trials.py` see the leaves of the server they connect to. `mirror_recordings.py` doesn't take the flag, so a mirrored dataset is rendered without leaves.
+- The original leaf stays in the plant: placing one adds a copy.
+- A leaf that was partly hidden by others during the capture has gaps there, and the tomato shows through them. The side facing away from the capture is less defined, so a leaf rotated a lot looks blurrier.
+
 ## Train the diffusion policy
 
 Parameters (dataset, cameras, `n_obs_steps`, `horizon`, `n_action_steps`, steps, batch size, Hub upload…) live in `configs/train/diffusion.yaml`. Copy it per experiment, or override any field from the CLI:

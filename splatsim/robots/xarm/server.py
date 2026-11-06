@@ -40,6 +40,7 @@ from .debug_ui import (
     SaveCameraPosesButton,
 )
 from .gripper import XArm5Gripper
+from .occluders import OccluderSet
 from .preview import PreviewStream
 from splatsim.robots.station.operator import OperatorMixin, OperatorPrompt
 from splatsim.robots.station.recorder import TrajectoryRecorder, to_uint8_image
@@ -55,7 +56,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
                  gui: str = "viser", panel_port: int = 8080, control_mode: str = "position",
-                 sim_clock: str = "fixed", **kwargs):
+                 sim_clock: str = "fixed", occluders: str | None = None, **kwargs):
         """gui: "viser" (panel web en http://localhost:<panel_port>) o "pybullet"
         (sliders y botones de PyBullet; --move_apple agrega los de la manzana).
         control_mode: position / interp / velocity (ver splatsim/robots/joint_controller.py),
@@ -65,7 +66,9 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         "realtime": el serve_loop la avanza continuamente al ritmo del reloj y los comandos solo
         cambian el objetivo (teleoperación con GELLO); las grabaciones guardan solo el estado,
         un frame por comando, y las imágenes se renderizan después con
-        scripts/xarm5/render_recordings.py."""
+        scripts/xarm5/render_recordings.py.
+        occluders: archivo con hojas recortadas del splat que se agregan a la escena (ver
+        splatsim/robots/xarm/occluders.py); None = ninguna."""
         if sim_clock not in SIM_CLOCKS:
             raise ValueError(f"sim_clock debe ser uno de {SIM_CLOCKS}, no {sim_clock!r}")
         self.sim_clock = sim_clock
@@ -103,7 +106,10 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         self.recorder = TrajectoryRecorder(
             self, MAX_RECORD_SECONDS, RECORD_EVERY, state_only_max_seconds=TELEOP_MAX_RECORD_SECONDS)
         self.gripper = None  # se crea en setup_gripper(), que la base llama en su __init__
+        self.occluders = None
         super().__init__(**kwargs)
+        if occluders:
+            self.occluders = OccluderSet(self, occluders)
 
         self._remove_wall()
         self._lower_floor(FLOOR_Z)
@@ -285,6 +291,11 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
     def set_object_pose(self, *args, **kwargs) -> None:
         with self.lock:  # también se llama desde el hilo ZMQ
             super().set_object_pose(*args, **kwargs)
+
+    def prep_image_rendering(self, data, cached_link_states=None):
+        super().prep_image_rendering(data, cached_link_states=cached_link_states)
+        if self.occluders is not None:
+            self.occluders.append_to(self.robot_gaussian)
 
     def render_image(self, camera_name, cached_link_states=None):
         if camera_name not in self.cameras:

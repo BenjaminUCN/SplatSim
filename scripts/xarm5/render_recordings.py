@@ -35,6 +35,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.robots.station.recorder import save_frame  # noqa: E402
 from splatsim.utils.camera_setup import arrangement_cameras  # noqa: E402
 from splatsim.utils.episode_selection import SELECTION_FILE  # noqa: E402
+from splatsim.utils.leaf_segmentation import load_occluder_config  # noqa: E402
 from splatsim.utils.parallel_episodes import own_argv, run_workers  # noqa: E402
 
 
@@ -49,6 +50,8 @@ class Args:
     out: str | None = None
     """carpeta de salida (por defecto <folder>_<fps>hz)"""
     robot_name: str = "xarm5_lite_plant_v3"
+    occluders: str | None = None
+    """hojas recortadas del splat que se agregan a todos los episodios (configs/occluders.yaml)"""
     episodes: tuple[str, ...] = ()
     """solo estos episodios (por defecto todos)"""
     overwrite: bool = False
@@ -132,6 +135,7 @@ def main(args: Args):
         shutil.copy(folder / SELECTION_FILE, out_root / SELECTION_FILE)
     with open(out_root / RENDER_INFO_FILE, "w") as f:
         yaml.safe_dump({"source": str(folder.resolve()), "fps": args.fps, "cameras": cameras,
+                        "occluders": load_occluder_config(args.occluders) if args.occluders else [],
                         "rendered": datetime.now().strftime("%Y-%m-%d %H:%M")}, f, sort_keys=False)
     print(f"{len(episodes)} episodios → {out_root} a {args.fps} fps, cámaras {cameras}")
     if args.workers > 1:
@@ -152,7 +156,7 @@ def main(args: Args):
         times = np.array([f["sim_time"] for f in frames])
         points = resample(times, args.fps)
         if server is None:
-            server = make_server(args.robot_name, cameras)
+            server = make_server(args.robot_name, cameras, occluders=args.occluders)
 
         start = time.time()
         tmp = out_root / f".{episode.name}.tmp"
