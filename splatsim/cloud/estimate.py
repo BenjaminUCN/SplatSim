@@ -7,7 +7,8 @@ from dataclasses import dataclass
 
 from splatsim.cloud.providers import Offer
 
-IMAGE_GB = 9.0                # tamaño de splatsim-train; se paga en cada pod que la descarga
+IMAGE_GB = 4.82               # splatsim-train comprimida: lo que cada pod descarga y paga
+IMAGE_DISK_GB = 9.06          # lo que ocupa ya extraída
 CHECKPOINT_GB = 1.1           # model.safetensors del modelo de 2 cámaras
 CONFIDENCE_ORDER = {"alta": 0, "baja": 1, "sin datos": 2}
 
@@ -75,7 +76,8 @@ def lookup_rate(history: list[dict], work: Workload, offer: Offer) -> tuple[floa
 
 def estimate(history: list[dict], work: Workload, offer: Offer) -> Estimate:
     rate, confidence, source = lookup_rate(history, work, offer)
-    transfer_s = (work.down_gb * 8000 / max(offer.inet_down_mbps, 1)
+    # la descarga de la imagen se cobra por GB, no por hora: la instancia aún no corre
+    transfer_s = ((work.down_gb - IMAGE_GB) * 8000 / max(offer.inet_down_mbps, 1)
                   + work.up_gb * 8000 / max(offer.inet_up_mbps, 1))
     transfer_cost = work.down_gb * offer.down_cost_gb + work.up_gb * offer.up_cost_gb
     if rate is None:

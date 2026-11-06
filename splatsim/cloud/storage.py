@@ -6,6 +6,7 @@ Las credenciales van en variables RCLONE_CONFIG_*, nunca en archivos ni en la l�
 import os
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 # ~/.local/bin no siempre está en el PATH (p.ej. si el panel se abrió desde otro proceso)
@@ -48,12 +49,11 @@ class Storage:
         self.remote = remote.rstrip("/")
         self.env = {**os.environ, **(env or {})}
 
-    def _run(self, *args: str, input_text: str | None = None) -> subprocess.CompletedProcess:
-        return subprocess.run(["rclone", *args], env=self.env, input=input_text, text=True,
-                              capture_output=True)
+    def _run(self, *args: str) -> subprocess.CompletedProcess:
+        return subprocess.run(["rclone", *args], env=self.env, text=True, capture_output=True)
 
-    def _checked(self, *args: str, input_text: str | None = None) -> str:
-        done = self._run(*args, input_text=input_text)
+    def _checked(self, *args: str) -> str:
+        done = self._run(*args)
         if done.returncode:
             raise RuntimeError(f"rclone {args[0]} falló: {done.stderr.strip()[-500:]}")
         return done.stdout
@@ -67,7 +67,10 @@ class Storage:
         return done.stdout if done.returncode == 0 and done.stdout else None
 
     def write(self, key: str, text: str) -> None:
-        self._checked("rcat", self._path(key), input_text=text)
+        with tempfile.NamedTemporaryFile("w", suffix=".txt") as f:
+            f.write(text)
+            f.flush()
+            self._checked("copyto", f.name, self._path(key))
 
     def upload(self, local: str | Path, key: str) -> None:
         """Copia una carpeta; lo que ya está igual (tamaño y hash) no se vuelve a subir."""

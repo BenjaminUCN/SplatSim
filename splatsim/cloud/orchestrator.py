@@ -6,6 +6,7 @@
 El estado vive en <qdir>/jobs.yaml, así que el panel se puede cerrar: los pods siguen, y al volver
 se retoman. Un pod nunca depende de este proceso para detenerse (ver runner.py).
 """
+import hashlib
 import json
 import math
 import os
@@ -19,9 +20,9 @@ from pathlib import Path
 
 import yaml
 
-from splatsim.cloud.estimate import IMAGE_GB, SEED_HISTORY, Estimate, Workload, rank, train_workload
+from splatsim.cloud.estimate import IMAGE_DISK_GB, IMAGE_GB, SEED_HISTORY, Estimate, Workload, rank, train_workload
 from splatsim.cloud.providers import Offer, Requirements
-from splatsim.cloud.runner import sha256
+from splatsim.cloud.runner import MAX_BOOTS, sha256
 from splatsim.cloud.storage import Storage
 
 ACTIVE = ("preparing", "starting", "running", "finishing")
@@ -66,7 +67,7 @@ def folder_gb(path: Path) -> float:
 
 
 def disk_for(work: Workload) -> int:
-    return math.ceil(work.down_gb + work.up_gb + DISK_MARGIN_GB)
+    return math.ceil(work.down_gb - IMAGE_GB + IMAGE_DISK_GB + work.up_gb + DISK_MARGIN_GB)
 
 
 class Orchestrator:
@@ -76,6 +77,8 @@ class Orchestrator:
         self.qdir = Path(qdir).expanduser()
         self.qdir.mkdir(parents=True, exist_ok=True)
         self.python, self.train_script = python, train_script
+        # cada cola solo responde por sus pods: otra cola o una prueba aparte no son huérfanos suyos
+        self.label_prefix = f"splatsim-{hashlib.sha1(str(self.qdir).encode()).hexdigest()[:6]}-"
         self.provider, self.storage, self.image, self.health = provider, storage, image, health
         self.pod_env = pod_env or {}
         self.on_model_ready = on_model_ready
@@ -181,7 +184,7 @@ class Orchestrator:
         """Pods nuestros que ningún trabajo conoce (p.ej. se cerró el panel al crearlos): cobran."""
         known = {j.get("instance_id") for j in self.jobs if j["status"] in ACTIVE}
         for instance in instances.values():
-            if instance.label.startswith("splatsim-") and instance.id not in known:
+            if instance.label.startswith(self.label_prefix) and instance.id not in known:
                 self.provider.destroy(instance.id)
                 self.warnings.append(f"Eliminado el pod huérfano {instance.id} ({instance.label})")
 
@@ -219,10 +222,7 @@ class Orchestrator:
         cfg = dict(job["config"])
         model_dir = f"{cfg['output_root']}/{cfg['model_name']}"
         config_path = f"/tmp/{cfg['model_name']}.yaml"
-        offer = estimate.offer
-        # el reloj del pod parte al arrancar el contenedor, pero la descarga de la imagen ya se cobró
-        pull_s = IMAGE_GB * 8000 / max(offer.inet_down_mbps, 1)
-        deadline_s = max(job["max_cost"] - estimate.transfer_cost, 0.0) / offer.dph * 3600 - pull_s
+        deadline_s = max(job["max_cost"] - estimate.transfer_cost, 0.0) / estimate.offer.dph * 3600
         return {"command": [self.python, "-u", self.train_script, "--config", config_path],
                 "health": self.health,
                 "files": {config_path: yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)},
@@ -247,7 +247,7 @@ class Orchestrator:
             self._wait(job, f"saldo ${balance:.2f} < máximo ${job['max_cost']:.2f}")
             return
         env = {**self.pod_env, "SPLATSIM_REMOTE": self.storage.remote}
-        label = "splatsim-" + run_key.removeprefix("runs/")
+        label = self.label_prefix + run_key.removeprefix("runs/")
         error = None
         for candidate in candidates[:OFFERS_TO_TRY]:
             self.storage.write(f"{run_key}/spec.json", json.dumps(self._spec(job, candidate, run_key)))
@@ -275,6 +275,8 @@ class Orchestrator:
 
     # ── seguimiento ──────────────────────────────────────────────────────────
     def _check(self, job: dict, instance) -> None:
+        if "billing_ts" not in job and instance is not None and instance.status in ("running", "exited"):
+            job["billing_ts"] = time.time()
         self._update_cost(job)
         result = self.storage.read(f"{job['run_key']}/result.json")
         if result:
@@ -288,8 +290,13 @@ class Orchestrator:
                 job.update(seq=status["seq"], seen_ts=now, phase=status["phase"],
                            progress={k: status[k] for k in ("done", "total", "rate") if k in status})
                 job["status"] = "running"
+                job.setdefault("billing_ts", now)
                 if status["phase"] == "run" and "run_ts" not in job:
                     job["run_ts"] = now
+            if status.get("boot", 1) > MAX_BOOTS + 1:     # el runner debió cortarlo: no seguir pagando
+                self._retry_or_fail(job, "el pod se reinicia en bucle")
+                self.save()
+                return
         if job.get("cost", 0.0) > job["max_cost"]:
             self.provider.destroy(job["instance_id"])
             self._fail(job, f"superó el máximo de ${job['max_cost']:.2f}")
@@ -330,7 +337,7 @@ class Orchestrator:
             self._fail(job, f"{reason} ({job['attempts']} intentos)")
             return
         job.update(status="pending", wait=f"reintento: {reason}")
-        for key in ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "result"):
+        for key in ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "billing_ts", "result"):
             job.pop(key, None)
         self.save()
 
@@ -340,10 +347,11 @@ class Orchestrator:
             self.save()
 
     def _update_cost(self, job: dict) -> None:
-        """Horas de pod por su precio más la transferencia prevista: el valor real sale en la factura."""
-        if "started_ts" not in job or "offer" not in job:
+        """Horas corriendo por su precio más la transferencia prevista: la descarga de la imagen no se
+        cobra por hora. El valor exacto sale en la factura."""
+        if "offer" not in job:
             return
-        hours = (time.time() - job["started_ts"]) / 3600
+        hours = (time.time() - job["billing_ts"]) / 3600 if "billing_ts" in job else 0.0
         job["cost"] = round(job.get("cost_before", 0.0) + hours * job["offer"]["dph"]
                             + job["estimate"]["transfer_cost"], 4)
 
@@ -405,7 +413,7 @@ class Orchestrator:
                 job["status"] = "finishing"     # solo falló la descarga: no se entrena de nuevo
             else:
                 job.update(status="pending", attempts=0, excluded_machines=[], cost_before=job.get("cost") or 0.0)
-                for key in ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "result"):
+                for key in ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "billing_ts", "result"):
                     job.pop(key, None)
             self.save()
 

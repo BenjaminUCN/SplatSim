@@ -6,8 +6,10 @@ Lee <run>/spec.json, comprueba el host, baja las entradas, corre el comando, sub
 escribe <run>/result.json, siempre lo último: si existe, las salidas ya están completas. Cada
 HEARTBEAT_S actualiza <run>/status.json y <run>/run.log, que es todo lo que necesita el panel.
 
-Al salir, el contenedor se detiene y deja de cobrar la GPU. Por eso spec["deadline_s"] se aplica
-aquí: el gasto queda acotado aunque el PC del panel esté apagado.
+Vast reinicia el contenedor cuando termina, así que salir no deja de cobrar: al final el pod detiene
+su propia instancia con la API de Vast. <run>/boot.json guarda el primer arranque y cuántos van, para
+que el plazo (spec["deadline_s"]) no vuelva a cero en cada reinicio y un bucle de reinicios se corte.
+Con eso el gasto queda acotado aunque el PC del panel esté apagado.
 
 Solo usa la biblioteca estándar y rclone.
 """
@@ -22,6 +24,7 @@ import tempfile
 import threading
 import time
 import traceback
+import urllib.request
 from pathlib import Path
 
 from splatsim.cloud.storage import Storage
@@ -29,6 +32,9 @@ from splatsim.cloud.storage import Storage
 HEARTBEAT_S = float(os.environ.get("SPLATSIM_HEARTBEAT_S", 30))
 HEALTH_TIMEOUT_S = 180
 STOP_TIMEOUT_S = 30
+MAX_BOOTS = 3
+RESULT_ATTEMPTS = 20          # result.json es lo único imprescindible: unos minutos de reintentos
+RESULT_RETRY_S = float(os.environ.get("SPLATSIM_RESULT_RETRY_S", 15))
 STEP = re.compile(r"step: (\d+)\b")
 FRACTION = re.compile(r"(\d+)/(\d+)")
 
@@ -54,6 +60,7 @@ class Run:
     def __init__(self, storage: Storage, key: str):
         self.storage, self.key = storage, key
         self.t0 = time.monotonic()
+        self.first_boot = time.time()
         self.status = {"phase": "boot", "seq": 0}
         self.seconds: dict[str, float] = {}
         self.log_path = Path(tempfile.mkstemp(suffix=".log")[1])
@@ -68,13 +75,16 @@ class Run:
         with self.lock:
             self.status.update(fields, seq=self.status["seq"] + 1)
             text = json.dumps(self.status)
-        self.storage.write(f"{self.key}/status.json", text)
+        try:
+            self.storage.write(f"{self.key}/status.json", text)
+        except Exception as e:  # noqa: BLE001  informar el avance no debe matar el trabajo
+            print(f"[runner] no se pudo publicar el estado: {e}", flush=True)
 
     def heartbeat(self) -> None:
         """Un corte de red no debe matar el trabajo: el siguiente latido lo vuelve a intentar."""
         while not self.finished.wait(HEARTBEAT_S):
+            self.publish()
             try:
-                self.publish()
                 if self.log_path.exists():
                     self.storage.upload_file(self.log_path, f"{self.key}/run.log")
             except Exception as e:  # noqa: BLE001
@@ -117,7 +127,7 @@ class Run:
 
         def watchdog():
             while self.proc.poll() is None:
-                if time.monotonic() > deadline_at:
+                if time.time() > deadline_at:
                     self.timed_out = True
                     self.terminate()
                     return
@@ -143,12 +153,22 @@ class Run:
 
     def finish(self, **result) -> None:
         self.finished.set()
-        if self.log_path.exists():
-            self.storage.upload_file(self.log_path, f"{self.key}/run.log")
+        try:
+            if self.log_path.exists():
+                self.storage.upload_file(self.log_path, f"{self.key}/run.log")
+        except Exception as e:  # noqa: BLE001
+            print(f"[runner] no se pudo subir el log: {e}", flush=True)
         self.publish(phase="finished")
-        self.storage.write(f"{self.key}/result.json",
-                           json.dumps({**result, "rate": self.rate(), "seconds": self.seconds,
-                                       "total_s": round(time.monotonic() - self.t0, 1)}))
+        text = json.dumps({**result, "rate": self.rate(), "seconds": self.seconds,
+                           "total_s": round(time.monotonic() - self.t0, 1)})
+        for attempt in range(RESULT_ATTEMPTS):
+            try:
+                self.storage.write(f"{self.key}/result.json", text)
+                return
+            except Exception as e:  # noqa: BLE001
+                print(f"[runner] result.json, intento {attempt + 1}: {e}", flush=True)
+                time.sleep(RESULT_RETRY_S)
+        raise RuntimeError("no se pudo escribir result.json")
 
 
 def host_is_healthy(command: list[str] | None) -> str | None:
@@ -162,8 +182,26 @@ def host_is_healthy(command: list[str] | None) -> str | None:
     return None if done.returncode == 0 else (done.stdout + done.stderr).strip()[-500:]
 
 
+def stop_own_instance() -> str:
+    """Detiene esta instancia de Vast (CONTAINER_API_KEY solo sirve para ella). Devuelve qué pasó."""
+    key, instance = os.environ.get("CONTAINER_API_KEY"), os.environ.get("CONTAINER_ID")
+    if not key or not instance:
+        return "sin CONTAINER_API_KEY o CONTAINER_ID"
+    request = urllib.request.Request(
+        f"https://console.vast.ai/api/v0/instances/{instance}/", data=json.dumps({"state": "stopped"}).encode(),
+        method="PUT", headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return f"http {response.status}"
+    except Exception as e:  # noqa: BLE001
+        return f"{type(e).__name__}: {e}"
+
+
 def run_stage(run: Run, spec: dict) -> None:
-    deadline_at = run.t0 + spec["deadline_s"]
+    deadline_at = run.first_boot + spec["deadline_s"]
+    if time.time() > deadline_at:
+        run.finish(ok=False, reason="deadline")
+        return
     run.publish(phase="health")
     if problem := host_is_healthy(spec.get("health")):
         run.finish(ok=False, reason="host_bad", error=problem)
@@ -203,8 +241,29 @@ def run_stage(run: Run, spec: dict) -> None:
 def main(key: str) -> int:
     storage = Storage(os.environ["SPLATSIM_REMOTE"])
     run = Run(storage, key)
+    code = run_once(run, storage, key)
+    outcome = stop_own_instance()
+    print(f"[runner] detener la instancia: {outcome}", flush=True)
+    try:
+        storage.write(f"{key}/stop.txt", outcome)
+    except Exception as e:  # noqa: BLE001
+        print(f"[runner] {e}", flush=True)
+    return code
+
+
+def run_once(run: Run, storage: Storage, key: str) -> int:
+    if storage.read(f"{key}/result.json"):       # reinicio de un trabajo ya terminado: solo detenerse
+        return 0
+    boot = json.loads(storage.read(f"{key}/boot.json") or "{}")
+    boot = {"first": boot.get("first", run.first_boot), "boots": boot.get("boots", 0) + 1}
+    storage.write(f"{key}/boot.json", json.dumps(boot))
+    run.first_boot = boot["first"]
+    run.status["boot"] = boot["boots"]
     signal.signal(signal.SIGTERM, lambda *_: (run.terminate(), sys.exit(143)))
     threading.Thread(target=run.heartbeat, daemon=True).start()
+    if boot["boots"] > MAX_BOOTS:
+        run.finish(ok=False, reason="restart_loop", error=f"{boot['boots']} arranques sin terminar")
+        return 1
     try:
         run_stage(run, json.loads(storage.read(f"{key}/spec.json")))
     except Exception:  # noqa: BLE001  el panel debe enterarse de cualquier fallo

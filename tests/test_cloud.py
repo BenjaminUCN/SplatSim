@@ -15,12 +15,14 @@ from dataclasses import asdict
 from pathlib import Path
 
 os.environ["SPLATSIM_HEARTBEAT_S"] = "0.05"
+os.environ["SPLATSIM_RESULT_RETRY_S"] = "0.01"
 
 import yaml  # noqa: E402
 
 from splatsim.cloud.estimate import estimate, lookup_rate, rank, train_profile, train_workload  # noqa: E402
 from splatsim.cloud.orchestrator import Orchestrator, Settings, train_config  # noqa: E402
 from splatsim.cloud.providers import Instance, Offer, Requirements, VastProvider  # noqa: E402
+from splatsim.cloud import runner  # noqa: E402
 from splatsim.cloud.runner import Run, run_stage  # noqa: E402
 
 CPU = "AMD Ryzen 9 7950X 16-Core Processor"
@@ -238,11 +240,89 @@ class TestPipeline(Base):
         self.provider.autostart = False
         job = self.submit(max_cost=1.0)
         self.run_until(lambda: job["status"] == "starting")
-        job["started_ts"] -= 2 * 3600         # dos horas a $1/h
+        job["billing_ts"] = time.time() - 2 * 3600    # dos horas a $1/h
         self.orch.tick()
         self.assertEqual(job["status"], "failed")
         self.assertIn("máximo", job["error"])
         self.assertEqual(self.provider.live, {})
+
+
+class TestPodLifecycle(Base):
+    """Lo que pasó en Vast: el contenedor se reinicia al terminar y el almacenamiento puede fallar."""
+
+    def start(self, command="pass", deadline=30):
+        self.storage.write("runs/z/spec.json", json.dumps(
+            {"command": [sys.executable, "-c", command], "deadline_s": deadline}))
+        os.environ["SPLATSIM_REMOTE"] = self.storage.remote
+        self.addCleanup(os.environ.pop, "SPLATSIM_REMOTE", None)
+        return runner.run_once(Run(self.storage, "runs/z"), self.storage, "runs/z")
+
+    def test_finished_job_does_not_run_again_after_restart(self):
+        self.start("print('primera')")
+        first = self.storage.read("runs/z/result.json")
+        self.start("raise SystemExit(9)")
+        self.assertEqual(self.storage.read("runs/z/result.json"), first)
+
+    def test_deadline_survives_restarts(self):
+        self.storage.write("runs/z/boot.json", json.dumps({"first": time.time() - 1000, "boots": 1}))
+        self.start("import time; time.sleep(60)", deadline=100)
+        self.assertEqual(json.loads(self.storage.read("runs/z/result.json"))["reason"], "deadline")
+
+    def test_restart_loop_is_cut(self):
+        self.storage.write("runs/z/boot.json", json.dumps({"first": time.time(), "boots": runner.MAX_BOOTS}))
+        self.assertEqual(self.start(), 1)
+        self.assertEqual(json.loads(self.storage.read("runs/z/result.json"))["reason"], "restart_loop")
+
+    def test_status_failure_does_not_lose_the_result(self):
+        write = self.storage.write
+
+        def flaky(key, text):
+            if key.endswith("status.json"):
+                raise RuntimeError("501 Not Implemented")
+            write(key, text)
+
+        self.storage.write = flaky
+        self.assertEqual(self.start(), 0)
+        self.assertTrue(json.loads(self.storage.read("runs/z/result.json"))["ok"])
+
+    def test_result_write_is_retried(self):
+        write, fails = self.storage.write, [1, 2]
+
+        def flaky(key, text):
+            if key.endswith("result.json") and fails:
+                fails.pop()
+                raise RuntimeError("corte de red")
+            write(key, text)
+
+        self.storage.write = flaky
+        self.start()
+        self.assertTrue(json.loads(self.storage.read("runs/z/result.json"))["ok"])
+
+    def test_pod_stops_its_own_instance(self):
+        seen = {}
+
+        class Response:
+            status = 200
+            __enter__ = lambda s: s
+            __exit__ = lambda s, *a: None
+
+        def urlopen(request, timeout):
+            seen.update(url=request.full_url, method=request.method, body=request.data,
+                        auth=request.get_header("Authorization"))
+            return Response()
+
+        original = runner.urllib.request.urlopen
+        runner.urllib.request.urlopen = urlopen
+        self.addCleanup(setattr, runner.urllib.request, "urlopen", original)
+        os.environ.update(CONTAINER_API_KEY="k", CONTAINER_ID="55")
+        self.addCleanup(lambda: [os.environ.pop(k) for k in ("CONTAINER_API_KEY", "CONTAINER_ID")])
+        self.assertEqual(runner.stop_own_instance(), "http 200")
+        self.assertEqual((seen["method"], seen["auth"]), ("PUT", "Bearer k"))
+        self.assertTrue(seen["url"].endswith("/instances/55/"))
+        self.assertEqual(json.loads(seen["body"]), {"state": "stopped"})
+
+    def test_no_credentials_is_reported(self):
+        self.assertIn("sin CONTAINER", runner.stop_own_instance())
 
 
 class TestLimits(Base):
@@ -309,11 +389,13 @@ class TestRestart(Base):
         self.assertIn(instance, self.provider.live)
 
     def test_orphan_is_destroyed_but_other_pods_are_not(self):
-        self.provider.live[7] = Instance(7, "running", "splatsim-0009_1_x")
+        self.provider.live[7] = Instance(7, "running", f"{self.orch.label_prefix}0009_1_x")
         self.provider.live[8] = Instance(8, "running", "experimento-a-mano")
+        self.provider.live[9] = Instance(9, "running", "splatsim-abc123-de-otra-cola")
         self.orch.tick()
         self.assertEqual(self.provider.destroyed, [7])
         self.assertIn(8, self.provider.live)
+        self.assertIn(9, self.provider.live)
         self.assertTrue(self.orch.warnings)
 
     def test_state_survives_on_disk(self):
@@ -333,7 +415,7 @@ class TestEstimate(unittest.TestCase):
         self.assertEqual(e.confidence, "alta")
         self.assertAlmostEqual(50000 / 6.30 * 0.793 / 3600, 1.75, places=2)
         self.assertGreater(e.total, 1.75)
-        self.assertAlmostEqual(e.transfer_cost, (9 + 0.77) * 0.01 + 6 * 1.1 * 0.02, places=6)
+        self.assertAlmostEqual(e.transfer_cost, (4.82 + 0.77) * 0.01 + 6 * 1.1 * 0.02, places=6)
 
     def test_other_cpu_uses_slowest_known_and_says_so(self):
         work = train_workload(self.CFG, 1)
