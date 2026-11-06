@@ -16,6 +16,7 @@ from pathlib import Path
 
 os.environ["SPLATSIM_HEARTBEAT_S"] = "0.05"
 os.environ["SPLATSIM_RESULT_RETRY_S"] = "0.01"
+os.environ["SPLATSIM_WARMUP_S"] = "0"
 
 import yaml  # noqa: E402
 
@@ -320,6 +321,19 @@ class TestPodLifecycle(Base):
         self.assertEqual((seen["method"], seen["auth"]), ("PUT", "Bearer k"))
         self.assertTrue(seen["url"].endswith("/instances/55/"))
         self.assertEqual(json.loads(seen["body"]), {"state": "stopped"})
+
+    def test_rate_ignores_the_warmup(self):
+        run = Run(self.storage, "runs/w")
+        times = iter([100.0, 100.0])
+        original, runner.WARMUP_S = runner.WARMUP_S, 50
+        self.addCleanup(setattr, runner, "WARMUP_S", original)
+        clock = runner.time.monotonic
+        self.addCleanup(setattr, runner.time, "monotonic", clock)
+        for now, step in [(0.0, 0), (40.0, 10), (60.0, 100), (160.0, 600)]:
+            runner.time.monotonic = lambda now=now: now
+            run._track(f"step: {step} loss: 0.1")
+        self.assertEqual((run.first_step[0], run.last_step[0]), (10, 600))
+        self.assertAlmostEqual(run.rate(), 590 / 120, places=2)
 
     def test_no_credentials_is_reported(self):
         self.assertIn("sin CONTAINER", runner.stop_own_instance())

@@ -9,6 +9,7 @@ from splatsim.cloud.providers import Offer
 
 IMAGE_GB = 4.82               # splatsim-train comprimida: lo que cada pod descarga y paga
 IMAGE_DISK_GB = 9.06          # lo que ocupa ya extraída
+STARTUP_S = 260               # GPU, dataset, carga y torch.compile, medidos en la prueba de 500 pasos
 CHECKPOINT_GB = 1.1           # model.safetensors del modelo de 2 cámaras
 CONFIDENCE_ORDER = {"alta": 0, "baja": 1, "sin datos": 2}
 
@@ -18,6 +19,8 @@ SEED_HISTORY = [
      "cpu": "AMD Ryzen 9 7950X 16-Core Processor", "rate": 6.30},
     {"kind": "train", "profile": "bs32-cam2-noaug-compile", "gpu": "RTX 5090",
      "cpu": "AMD Ryzen 5 7600 6-Core Processor", "rate": 4.49},    # 50k pasos en 185.7 min
+    {"kind": "train", "profile": "bs32-cam2-noaug-compile", "gpu": "RTX 5090",
+     "cpu": "AMD EPYC 7452 32-Core Processor", "rate": 3.26},    # últimos 326 pasos de la prueba, PCIe 26
 ]
 
 
@@ -82,7 +85,7 @@ def estimate(history: list[dict], work: Workload, offer: Offer) -> Estimate:
     transfer_cost = work.down_gb * offer.down_cost_gb + work.up_gb * offer.up_cost_gb
     if rate is None:
         return Estimate(offer, None, confidence, source, None, None, transfer_cost, None)
-    hours = (work.work / rate + transfer_s) / 3600
+    hours = (STARTUP_S + work.work / rate + transfer_s) / 3600
     compute = hours * offer.dph
     return Estimate(offer, rate, confidence, source, hours, compute, transfer_cost, compute + transfer_cost)
 

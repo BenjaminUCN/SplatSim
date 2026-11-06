@@ -256,6 +256,7 @@ class Orchestrator:
                                                 disk_for(self.workload(job)), label)
             except RuntimeError as e:          # la oferta ya no está: la siguiente
                 error = e
+                print(f"[Cloud] oferta {candidate.offer.id} ({candidate.offer.cpu_name}): {e}", flush=True)
                 continue
             with self.lock:
                 job.update(status="starting", instance_id=instance, offer=asdict(candidate.offer),

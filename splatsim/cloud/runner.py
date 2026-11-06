@@ -33,6 +33,7 @@ HEARTBEAT_S = float(os.environ.get("SPLATSIM_HEARTBEAT_S", 30))
 HEALTH_TIMEOUT_S = 180
 STOP_TIMEOUT_S = 30
 MAX_BOOTS = 3
+WARMUP_S = float(os.environ.get("SPLATSIM_WARMUP_S", 180))   # torch.compile: no es la velocidad de crucero
 RESULT_ATTEMPTS = 20          # result.json es lo único imprescindible: unos minutos de reintentos
 RESULT_RETRY_S = float(os.environ.get("SPLATSIM_RESULT_RETRY_S", 15))
 STEP = re.compile(r"step: (\d+)\b")
@@ -69,6 +70,7 @@ class Run:
         self.proc: subprocess.Popen | None = None
         self.timed_out = False
         self.first_step: tuple[int, float] | None = None
+        self.started_steps = 0.0
         self.last_step: tuple[int, float] | None = None
 
     def publish(self, **fields) -> None:
@@ -114,7 +116,10 @@ class Run:
             done, total = int(m.group(1)), int(m.group(2))
         else:
             return
-        self.first_step = self.first_step or (done, now)
+        if self.first_step is None:
+            self.started_steps = now
+        if self.first_step is None or now - self.started_steps < WARMUP_S:
+            self.first_step = (done, now)
         self.last_step = (done, now)
         with self.lock:
             self.status.update(done=done, rate=self.rate(), **({"total": total} if total else {}))
