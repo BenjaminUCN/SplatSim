@@ -130,6 +130,8 @@ class Panel:
         if job.get("estimate"):
             e = job["estimate"]
             lines.append(f"Estimate: {money(e['total'])} ({e['confidence']}: {e['source']})")
+        if job.get("boot_s") is not None:
+            lines.append(f"Pod started in {job['boot_s'] / 60:.1f} min")
         if job.get("output_dir"):
             lines.append(f"Output: `{job['output_dir']}`")
         if job.get("run_key"):
@@ -224,12 +226,12 @@ class Panel:
             table.content = intro + "No machines match these requirements right now."
             queue.disabled = True
             return
-        rows = ["| Offer | CPU | $/h | PCIe | Speed | Hours | Total | Confidence |", "|---|---|---|---|---|---|---|---|"]
+        rows = ["| Offer | CPU | $/h | PCIe | Speed | Hours | Total | Confidence | Image |", "|---|---|---|---|---|---|---|---|---|"]
         for e in ranked[:OFFERS_SHOWN]:
             o = e.offer
             rows.append(f"| {o.id} | {o.cpu_name[:22]} ({o.cores:.0f}) | {o.dph:.3f} | {o.pcie_gbps:.0f} | "
                         f"{f'{e.rate:.2f}/s' if e.rate else '—'} | {f'{e.hours:.2f}' if e.hours else '—'} | "
-                        f"{money(e.total)} | {e.confidence} |")
+                        f"{money(e.total)} | {e.confidence} | {'cached' if e.cached else ''} |")
         table.content = intro + "\n".join(rows)
         offer.options = (AUTO, *(str(e.offer.id) for e in ranked[:OFFERS_SHOWN]))
         offer.value = AUTO
@@ -295,7 +297,7 @@ class Panel:
             work = self.orch.workload(stage)
             best = ranked[0] if ranked else None
             rows.append(f"| {stage['kind']} | {stage['frames']:,} | {len(stage['cameras'])} | {work.down_gb - work.image_gb:.1f} | "
-                        f"{work.up_gb:.1f} | {f'{best.offer.gpu_name} ${best.offer.dph:.2f}/h' if best else 'none'} | "
+                        f"{work.up_gb:.1f} | {f'{best.offer.gpu_name} ${best.offer.dph:.2f}/h{" (image cached)" if best.cached else ""}' if best else 'none'} | "
                         f"{f'{best.rate:.1f}/s' if best and best.rate else '—'} | {f'{best.hours:.2f}' if best and best.hours else '—'} | "
                         f"{money(best.total) if best else '—'} | {best.confidence if best else '—'} |")
             totals.append(best.total if best else None)

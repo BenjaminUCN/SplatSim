@@ -23,7 +23,8 @@ from pathlib import Path
 import yaml
 
 from scripts.xarm5.data_jobs import dataset_path
-from splatsim.cloud.estimate import SEED_HISTORY, Estimate, Workload, convert_workload, rank, train_workload
+from splatsim.cloud.estimate import (SEED_HISTORY, Estimate, Workload, convert_workload, prefer_machines, rank,
+                                     train_workload)
 from splatsim.cloud.providers import Offer, Requirements
 from splatsim.cloud.runner import MAX_BOOTS, sha256
 from splatsim.cloud.stages import DEFAULT_SCRIPTS, STAGES, describe_pipeline, scan_recordings
@@ -38,6 +39,8 @@ EXIT_GRACE_S = 120              # el pod terminó, pero result.json puede tardar
 WAIT_RETRY_S = 120              # sin ofertas o sin saldo: cuánto esperar antes de volver a mirar
 DISK_MARGIN_GB = 20
 OFFERS_TO_TRY = 5
+MACHINE_MEMORY_S = 14 * 24 * 3600   # después, el host pudo borrar la imagen o haberse arreglado
+RESET_ON_RETRY = ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "billing_ts", "boot_s", "result")
 POD_PYTHON = "/opt/venv/bin/python"
 GPU_CHECK = [POD_PYTHON, "-c",     # 1 GB en la GPU: detecta hosts como el del "out of memory" en RunPod
              "import torch; x = torch.ones(1024, 1024, 256, device='cuda'); assert (x * 2).sum() > 0"]
@@ -100,6 +103,8 @@ class Orchestrator:
         self.next_id = max((j["id"] for j in self.jobs), default=0) + 1
         path = self.qdir / "history.yaml"
         self.history: list[dict] = (yaml.safe_load(path.read_text()) if path.exists() else None) or []
+        path = self.qdir / "machines.yaml"
+        self.machines: dict[int, dict] = (yaml.safe_load(path.read_text()) if path.exists() else None) or {}
         self._orphans_checked = False
         for job in self.jobs:            # lo que hacía un hilo de la sesión anterior
             if job["status"] == "preparing":
@@ -133,7 +138,27 @@ class Orchestrator:
 
     def rank_offers(self, work: Workload, req: Requirements) -> list[Estimate]:
         """Ofertas disponibles ahora para este trabajo, de la mejor a la peor."""
-        return rank(self.known_history(), work, self.provider.search(req, disk_for(work)))
+        return self._ranked(work, self.provider.search(req, disk_for(work)))
+
+    def _ranked(self, work: Workload, offers: list[Offer]) -> list[Estimate]:
+        since = time.time() - MACHINE_MEMORY_S
+        recent = {machine: r["ok"] for machine, r in self.machines.items() if r["ts"] > since}
+        return prefer_machines(rank(self.known_history(), work, offers),
+                               {m for m, ok in recent.items() if ok}, {m for m, ok in recent.items() if not ok})
+
+    def _note_machine(self, machine: int, ok: bool, boot_s: int | None = None) -> None:
+        """Solo el último resultado de cada máquina. El arranque se guarda para ver si la preferencia sirve."""
+        self.machines[machine] = {"ok": ok, "ts": time.time(), "boot_s": boot_s,
+                                  "date": datetime.now().strftime("%Y-%m-%d %H:%M")}
+        tmp = self.qdir / "machines.tmp"
+        tmp.write_text(yaml.safe_dump(self.machines, sort_keys=False))
+        os.replace(tmp, self.qdir / "machines.yaml")
+
+    def _note_boot(self, job: dict) -> None:
+        """La primera señal del pod: la imagen ya está en esa máquina."""
+        if job["status"] == "starting":
+            job["boot_s"] = round(time.time() - job["started_ts"])
+            self._note_machine(job["offer"]["machine_id"], True, job["boot_s"])
 
     def estimate(self, cfg: dict, dataset: str, req: Requirements, depends_on: int | None = None) -> list[Estimate]:
         return self.rank_offers(train_workload(cfg, self._dataset_gb(dataset, depends_on)), req)
@@ -287,7 +312,7 @@ class Orchestrator:
         req, work = Requirements(**job["requirements"]), self.workload(job)
         offers = [o for o in self.provider.search(req, disk_for(work))
                   if o.machine_id not in job["excluded_machines"]]
-        ranked = rank(self.known_history(), work, offers)
+        ranked = self._ranked(work, offers)
         ranked.sort(key=lambda e: e.offer.id != job.get("offer_id"))     # la elegida, si sigue disponible
         return [e for e in ranked if e.total is None or e.total <= job["max_cost"]]
 
@@ -355,6 +380,7 @@ class Orchestrator:
         self._update_cost(job)
         result = self.storage.read(f"{job['run_key']}/result.json")
         if result:
+            self._note_boot(job)
             self._on_result(job, json.loads(result))
             return
         now = time.time()
@@ -364,6 +390,7 @@ class Orchestrator:
             if status["seq"] != job.get("seq"):
                 job.update(seq=status["seq"], seen_ts=now, phase=status["phase"],
                            progress={k: status[k] for k in ("done", "total", "rate") if k in status})
+                self._note_boot(job)
                 job["status"] = "running"
                 job.setdefault("billing_ts", now)
                 if status["phase"] == "run" and "run_ts" not in job:
@@ -413,11 +440,12 @@ class Orchestrator:
         job["cost_before"] = job.get("cost") or 0.0
         if machine is not None:
             job["excluded_machines"].append(machine)
+            self._note_machine(machine, False)
         if job["attempts"] >= MAX_ATTEMPTS:
             self._fail(job, f"{reason} ({job['attempts']} intentos)")
             return
         job.update(status="pending", wait=f"reintento: {reason}")
-        for key in ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "billing_ts", "result"):
+        for key in RESET_ON_RETRY:
             job.pop(key, None)
         self.save()
 
@@ -485,7 +513,8 @@ class Orchestrator:
         self.history.append({"kind": job["kind"], "profile": self.workload(job).profile,
                              "gpu": job["offer"]["gpu_name"],
                              "cpu": job["offer"]["cpu_name"], "rate": rate, "job": job["id"],
-                             "seconds": job["result"].get("seconds"), "dph": job["offer"]["dph"],
+                             "seconds": job["result"].get("seconds"), "boot_s": job.get("boot_s"),
+                             "machine": job["offer"]["machine_id"], "dph": job["offer"]["dph"],
                              "cost": job.get("cost"), "estimated_total": job["estimate"].get("total"),
                              "date": datetime.now().strftime("%Y-%m-%d")})
         (self.qdir / "history.yaml").write_text(yaml.safe_dump(self.history, sort_keys=False, allow_unicode=True))
@@ -512,7 +541,7 @@ class Orchestrator:
                 job["status"] = "finishing"     # solo falló la descarga: no se entrena de nuevo
             else:
                 job.update(status="pending", attempts=0, excluded_machines=[], cost_before=job.get("cost") or 0.0)
-                for key in ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "billing_ts", "result"):
+                for key in RESET_ON_RETRY:
                     job.pop(key, None)
             self.save()
 

@@ -19,6 +19,10 @@ CHECKPOINT_GB = 1.1           # model.safetensors del modelo de 2 cámaras
 CONVERT_STARTUP_S = 60        # sin GPU ni torch.compile
 DATASET_GB_PER_FRAME_CAMERA = 14.6e-6   # 13.0-14.6 kB en los datasets de 640x480 del lab: el mayor
 CONFIDENCE_ORDER = {"alta": 0, "baja": 1, "sin datos": 2}
+# Con la imagen ya en la máquina, el pod arrancó en 18 s en vez de 7-25 min. La espera no se cobra, así
+# que esto es lo que vale ahorrarla: un trabajo largo no acaba en una máquina mucho más lenta por esto.
+PREFER_CACHED_USD = 0.15
+PREFER_CACHED_DPH = 1.25      # sin estimaciones que comparar, cuánto más cara por hora
 
 # Medido en vast con 12 workers y en RunPod (entrenamiento completo), noviembre de 2026.
 SEED_HISTORY = [
@@ -69,6 +73,7 @@ class Estimate:
     compute_cost: float | None
     transfer_cost: float
     total: float | None
+    cached: bool = False      # la máquina ya corrió una de nuestras imágenes
 
 
 def train_profile(cfg: dict) -> str:
@@ -138,3 +143,21 @@ def rank(history: list[dict], work: Workload, offers: list[Offer]) -> list[Estim
     estimates = [estimate(history, work, o) for o in offers]
     return sorted(estimates, key=lambda e: (CONFIDENCE_ORDER[e.confidence],
                                             e.total if e.total is not None else e.offer.dph))
+
+
+def prefer_machines(ranked: list[Estimate], cached: set[int], failed: set[int]) -> list[Estimate]:
+    """Primero las máquinas que ya tienen la imagen, si no salen mucho más caras que la mejor; al final,
+    las que fallaron hace poco."""
+    usable = [e for e in ranked if e.offer.machine_id not in failed]
+    best = usable[0] if usable else None
+
+    def worth_it(e: Estimate) -> bool:
+        if not e.cached or best is None:
+            return False
+        if e.total is not None and best.total is not None:
+            return e.total <= best.total + PREFER_CACHED_USD
+        return e.total is None and best.total is None and e.offer.dph <= best.offer.dph * PREFER_CACHED_DPH
+
+    for e in ranked:
+        e.cached = e.offer.machine_id in cached
+    return sorted(ranked, key=lambda e: (e.offer.machine_id in failed, not worth_it(e)))

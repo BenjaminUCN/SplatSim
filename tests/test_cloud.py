@@ -23,7 +23,9 @@ os.environ["SPLATSIM_WARMUP_S"] = "0"
 
 import yaml  # noqa: E402
 
-from splatsim.cloud.estimate import convert_workload, estimate, lookup_rate, rank, train_profile, train_workload  # noqa: E402
+from splatsim.cloud.estimate import (PREFER_CACHED_USD, Estimate, convert_workload, estimate, lookup_rate,  # noqa: E402
+                                     prefer_machines, rank, train_profile, train_workload)
+from splatsim.cloud import orchestrator  # noqa: E402
 from splatsim.cloud.orchestrator import Orchestrator, Settings, train_config  # noqa: E402
 from splatsim.cloud.providers import Instance, Offer, Requirements, VastProvider  # noqa: E402
 from splatsim.cloud import runner  # noqa: E402
@@ -803,6 +805,103 @@ class TestStubbornPod(Base):
         self.orch.busy.discard(999)
         self.orch.tick()
         self.assertNotIn(7, self.provider.live)
+
+
+class TestMachineMemory(Base):
+    """Un pod arranca en segundos donde la imagen ya está, y una máquina que falló no merece otra espera."""
+
+    def setUp(self):
+        super().setUp()
+        self.provider.offers = [offer(1, machine=10, dph=1.0), offer(2, machine=20, dph=1.2)]
+        self.orch = self.make()
+
+    def machines_used(self):
+        return [machine for machine, _ in self.provider.created]
+
+    def run_job(self, name):
+        job = self.submit(name)
+        self.run_until(lambda: job["status"] in ("done", "failed"))
+        self.assertEqual(job["status"], "done", job.get("error"))
+        return job
+
+    def test_first_job_takes_the_cheapest_and_the_boot_is_recorded(self):
+        job = self.run_job("a")
+        self.assertEqual(self.machines_used(), [10])
+        self.assertIsNotNone(job["boot_s"])
+        self.assertTrue(self.orch.machines[10]["ok"])
+        self.assertEqual(self.orch.history[-1]["boot_s"], job["boot_s"])
+
+    def test_a_machine_that_has_the_image_wins_if_it_costs_a_little_more(self):
+        self.orch._note_machine(20, True, 300)
+        self.run_job("a")
+        self.assertEqual(self.machines_used(), [20])
+
+    def test_but_not_if_it_costs_much_more(self):
+        self.provider.offers = [offer(1, machine=10, dph=1.0), offer(2, machine=20, dph=9.0)]
+        self.orch._note_machine(20, True, 300)
+        self.run_job("a")
+        self.assertEqual(self.machines_used(), [10])
+
+    def test_a_chosen_offer_still_comes_first(self):
+        self.orch._note_machine(20, True, 300)
+        job = self.orch.submit("a", self.cfg("a"), str(self.dataset), Requirements(), 1.0, offer_id=1)
+        self.run_until(lambda: job["status"] == "done")
+        self.assertEqual(self.machines_used(), [10])
+
+    def test_a_machine_that_failed_goes_last_for_the_next_jobs(self):
+        self.provider.bad_machines.add(10)
+        self.run_job("a")
+        self.assertEqual(self.machines_used(), [10, 20])
+        self.assertFalse(self.orch.machines[10]["ok"])
+        self.provider.created.clear()
+        self.provider.bad_machines.clear()
+        self.provider.offers = [offer(1, machine=10, dph=0.5), offer(2, machine=20, dph=1.2)]
+        self.run_job("b")
+        self.assertEqual(self.machines_used(), [20])
+
+    def test_memory_survives_a_restart(self):
+        self.orch._note_machine(20, True, 300)
+        self.assertTrue(self.make().machines[20]["ok"])
+
+    def test_memory_expires(self):
+        self.orch._note_machine(20, True, 300)
+        self.orch.machines[20]["ts"] -= orchestrator.MACHINE_MEMORY_S + 1
+        self.run_job("a")
+        self.assertEqual(self.machines_used(), [10])
+
+    def test_the_offers_say_which_machine_has_the_image(self):
+        self.orch._note_machine(20, True, 300)
+        ranked = self.orch.estimate(self.cfg(), str(self.dataset), Requirements())
+        self.assertEqual([(e.offer.machine_id, e.cached) for e in ranked], [(20, True), (10, False)])
+
+
+class TestPreferMachines(unittest.TestCase):
+    @staticmethod
+    def est(machine, total, dph=1.0):
+        return Estimate(offer(machine, machine=machine, dph=dph), None, "baja", "", None, None, 0.0, total)
+
+    def order(self, estimates, cached=(), failed=()):
+        return [e.offer.machine_id for e in prefer_machines(estimates, set(cached), set(failed))]
+
+    def test_within_the_margin(self):
+        self.assertEqual(self.order([self.est(1, 1.0), self.est(2, 1.0 + PREFER_CACHED_USD)], cached=[2]), [2, 1])
+
+    def test_past_the_margin(self):
+        self.assertEqual(self.order([self.est(1, 1.0), self.est(2, 1.01 + PREFER_CACHED_USD)], cached=[2]), [1, 2])
+
+    def test_without_estimates_compares_the_hourly_price(self):
+        self.assertEqual(self.order([self.est(1, None, 1.0), self.est(2, None, 1.2)], cached=[2]), [2, 1])
+        self.assertEqual(self.order([self.est(1, None, 1.0), self.est(2, None, 1.3)], cached=[2]), [1, 2])
+
+    def test_no_estimate_does_not_beat_a_known_price(self):
+        self.assertEqual(self.order([self.est(1, 1.0), self.est(2, None, 0.5)], cached=[2]), [1, 2])
+
+    def test_the_margin_is_counted_from_the_best_machine_that_did_not_fail(self):
+        estimates = [self.est(1, 0.1), self.est(2, 1.0), self.est(3, 1.1)]
+        self.assertEqual(self.order(estimates, cached=[3], failed=[1]), [3, 2, 1])
+
+    def test_all_failed_keeps_the_order(self):
+        self.assertEqual(self.order([self.est(1, 1.0), self.est(2, 2.0)], failed=[1, 2]), [1, 2])
 
 
 class TestVastReplies(unittest.TestCase):
