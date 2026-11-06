@@ -1,0 +1,11 @@
+# Solo entra lo que usa la imagen (el repo trae submódulos y datos pesados).
+*
+!requirements-train.txt
+!setup.py
+!scripts/runpod_setup.sh
+!scripts/xarm5/train_diffusion.py
+!configs/camera_poses.yaml
+!splatsim/__init__.py
+!splatsim/utils/**
+!splatsim/cloud/**
+**/__pycache__
