@@ -3,12 +3,14 @@ bucket en una carpeta local.
 
     PYTHONPATH=. python tests/test_cloud.py
 """
+import io
 import json
 import os
 import pickle
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import threading
 import time
@@ -26,14 +28,14 @@ import yaml  # noqa: E402
 from splatsim.cloud.estimate import (LEAF_FIT_S, PREFER_CACHED_USD, Estimate, convert_workload, estimate, lookup_rate,  # noqa: E402
                                      prefer_machines, rank, train_profile, train_workload)
 from splatsim.cloud import orchestrator  # noqa: E402
-from splatsim.cloud.orchestrator import Orchestrator, Settings, train_config  # noqa: E402
+from splatsim.cloud.orchestrator import Orchestrator, Settings, describe_progress, train_config  # noqa: E402
 from splatsim.cloud.providers import Instance, Offer, Requirements, VastProvider  # noqa: E402
 from splatsim.cloud import runner  # noqa: E402
 from splatsim.cloud.runner import Run, run_stage  # noqa: E402
 from scripts.xarm5.data_jobs import plan_pipeline  # noqa: E402
 from splatsim.cloud import stages  # noqa: E402
 from splatsim.cloud.stages import describe_pipeline, scan_recordings, scan_states  # noqa: E402
-from splatsim.cloud.storage import Storage  # noqa: E402
+from splatsim.cloud.storage import EpisodePacks, Storage, write_pack  # noqa: E402
 
 CPU = "AMD Ryzen 9 7950X 16-Core Processor"
 FAKE_TRAIN = """
@@ -87,7 +89,7 @@ for episode in source:
 """
 
 
-class FolderStorage:
+class FolderStorage(EpisodePacks):
     """Misma interfaz que Storage, sobre una carpeta."""
 
     def __init__(self, root: Path):
@@ -105,18 +107,29 @@ class FolderStorage:
         tmp.write_text(text)
         os.replace(tmp, self.root / key)
 
-    def upload(self, local, key, exclude=None):
+    def upload(self, local, key, exclude=None, packed=False, progress=None):
         self.excluded[key] = exclude
-        shutil.copytree(local, self.root / key, dirs_exist_ok=True)
+        if packed:
+            self._upload_packed(Path(local), key, exclude, progress)
+        else:
+            shutil.copytree(local, self.root / key, dirs_exist_ok=True)
 
     def upload_file(self, local, key):
         (self.root / key).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(local, self.root / key)
 
-    def download(self, key, local):
-        shutil.copytree(self.root / key, local, dirs_exist_ok=True)
+    def download(self, key, local, progress=None):
+        shutil.copytree(self.root / key, local, dirs_exist_ok=True, ignore=lambda folder, names: [
+            n for n in names if n.endswith(".tar") and Path(folder) == self.root / key])
+        self._unpack(key, Path(local), progress)
         if self.corrupt:
             (Path(local) / "model.safetensors").write_text("dañado")
+
+    def download_file(self, key, local):
+        shutil.copy(self.root / key, local)
+
+    def list_files(self, key):
+        return [p.name for p in (self.root / key).iterdir() if p.is_file()]
 
     def copy(self, source, target):
         shutil.copytree(self.root / source, self.root / target, dirs_exist_ok=True)
@@ -808,6 +821,205 @@ class TestRestart(Base):
         self.assertEqual(data["jobs"][0]["name"], "m")
 
 
+class TestEpisodePacks(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.source = self.tmp / "rec"
+        make_recordings(self.source, discarded=["001"])
+        self.bucket = self.tmp / "bucket"
+        self.bucket.mkdir()
+        self.storage = Storage(str(self.bucket))
+
+    @staticmethod
+    def tree(folder):
+        return {p.relative_to(folder).as_posix(): (p.read_bytes(), int(p.stat().st_mtime))
+                for p in folder.rglob("*") if p.is_file()}
+
+    def objects(self):
+        return sorted(p.name for p in (self.bucket / "r").rglob("*") if p.is_file())
+
+    def test_one_object_per_episode_and_the_loose_files(self):
+        self.storage.upload(self.source, "r", packed=True)
+        self.assertEqual(self.objects(), ["000.tar", "001.tar", "selection.yaml"])
+
+    def test_round_trip_leaves_the_same_folder(self):
+        self.storage.upload(self.source, "r", packed=True)
+        self.storage.download("r", self.tmp / "out")
+        self.assertEqual(self.tree(self.tmp / "out"), self.tree(self.source))
+        self.assertEqual(sorted(p.name for p in (self.tmp / "out").iterdir()), ["000", "001", "selection.yaml"])
+
+    def test_exclusions_reach_inside_the_packs(self):
+        exclude = ["/001/**", "**/wrist_rgb_*.png"]
+        self.storage.upload(self.source, "r", exclude, packed=True)
+        self.assertEqual(self.objects(), ["000.tar", "selection.yaml"])
+        self.storage.download("r", self.tmp / "out")
+        names = [p.name for p in (self.tmp / "out/000/image_1").iterdir()]
+        self.assertTrue(names and all(n.startswith("base_rgb") for n in names))
+
+    def test_a_filter_it_does_not_understand_is_an_error(self):
+        with self.assertRaises(ValueError):
+            write_pack(self.source / "000", self.tmp / "x.tar", ["*.png"])
+
+    def test_unchanged_episodes_are_not_sent_again(self):
+        self.storage.upload(self.source, "r", packed=True)
+        for pack in ("000.tar", "001.tar"):
+            os.utime(self.bucket / "r" / pack, (1000, 1000))
+        (self.source / "001/00001.pkl").write_bytes(b"z" * 100)
+        self.storage.upload(self.source, "r", packed=True)
+        self.assertEqual((self.bucket / "r/000.tar").stat().st_mtime, 1000)
+        self.assertNotEqual((self.bucket / "r/001.tar").stat().st_mtime, 1000)
+
+    def test_a_folder_uploaded_loose_still_downloads(self):
+        self.storage.upload(self.source, "r")
+        self.storage.download("r", self.tmp / "out")
+        self.assertEqual(self.tree(self.tmp / "out"), self.tree(self.source))
+
+    def test_only_packs_at_the_top_are_opened(self):
+        (self.source / "000/inner.tar").write_bytes(b"no es un paquete")
+        self.storage.upload(self.source, "r")
+        self.storage.download("r", self.tmp / "out")
+        self.assertEqual((self.tmp / "out/000/inner.tar").read_bytes(), b"no es un paquete")
+
+    def test_a_pack_cannot_write_outside_the_folder(self):
+        (self.bucket / "r").mkdir()
+        with tarfile.open(self.bucket / "r/bad.tar", "w") as tar:
+            info = tarfile.TarInfo("../escaped.txt")
+            info.size = 1
+            tar.addfile(info, io.BytesIO(b"x"))
+        with self.assertRaises(tarfile.FilterError):
+            self.storage.download("r", self.tmp / "out")
+        self.assertFalse((self.tmp / "escaped.txt").exists())
+
+    def test_progress_counts_episodes(self):
+        seen = []
+        self.storage.upload(self.source, "r", packed=True, progress=lambda d, t: seen.append((d, t)))
+        self.assertEqual(sorted(seen), [(1, 3), (2, 3), (3, 3)])
+        seen.clear()
+        self.storage.download("r", self.tmp / "out", progress=lambda d, t: seen.append((d, t)))
+        self.assertEqual(sorted(seen), [(1, 2), (2, 2)])
+
+    def test_the_pod_packs_its_output_and_the_manifest_still_lists_each_file(self):
+        out = self.tmp / "pod_out"
+        make_recordings(out, episodes=("000",))
+        command = [sys.executable, "-c", "pass"]
+        run = Run(self.storage, "runs/p")
+        run_stage(run, {"deadline_s": 60, "command": command,
+                        "outputs": [{"key": "recordings/x", "path": str(out), "packed": True}]})
+        self.assertEqual(sorted(p.name for p in (self.bucket / "recordings/x").iterdir()), ["000.tar"])
+        result = json.loads(self.storage.read("runs/p/result.json"))
+        self.assertIn("000/00001.pkl", result["outputs"]["recordings/x"])
+
+    def test_recordings_are_packed_in_every_stage_that_moves_them(self):
+        job = {"args": {"input": "/lab/g", "fps": 10, "arrangement": "2cam", "workers": 1}, "output": "/lab/g_10hz",
+               "depends_on": None, "kind": "render", "exclude": []}
+        self.assertTrue(stages.STAGES["render"].uploads({**job, "args": job["args"]})[0]["packed"])
+        self.assertTrue(stages.STAGES["convert"].uploads(job)[0]["packed"])
+        self.assertTrue(stages.STAGES["mirror"].uploads(job)[0]["packed"])
+
+    def test_no_temporary_folder_is_left_behind(self):
+        self.storage.upload(self.source, "r", packed=True)
+        self.storage.download("r", self.tmp / "out")
+        self.assertEqual([p for p in [*self.tmp.iterdir(), *(self.tmp / "out").iterdir()]
+                          if p.name.startswith(".pack-")], [])
+
+
+class TestDescribeProgress(unittest.TestCase):
+    NOW = 10000.0
+
+    def job(self, **fields):
+        return {"status": "running", "phase": "run", "phase_since": self.NOW - 720, "moved_ts": self.NOW - 10, **fields}
+
+    def test_says_how_long_it_has_been_in_the_phase(self):
+        self.assertEqual(describe_progress(self.job(), self.NOW), "run · 12 min")
+
+    def test_counts_and_rate(self):
+        job = self.job(progress={"done": 1500, "total": 43537, "rate": 7.0})
+        self.assertEqual(describe_progress(job, self.NOW), "run · 1,500/43,537 · 7.00/s · 12 min")
+
+    def test_training_takes_the_total_from_its_config(self):
+        job = self.job(progress={"done": 100}, config={"training_steps": 50000})
+        self.assertEqual(describe_progress(job, self.NOW), "run · 100/50,000 · 12 min")
+
+    def test_warns_when_the_counters_stop(self):
+        job = self.job(phase="download", detail="1/8 g: 12/200 episodes", moved_ts=self.NOW - 300)
+        self.assertEqual(describe_progress(job, self.NOW),
+                         "download · 1/8 g: 12/200 episodes · 12 min · ⚠️ no change for 5 min")
+
+    def test_no_warning_while_there_is_nothing_to_count(self):
+        job = self.job(status="starting", phase="waiting for the pod", moved_ts=self.NOW - 900)
+        self.assertEqual(describe_progress(job, self.NOW), "waiting for the pod · 12 min")
+
+    def test_a_job_from_before_this_change_still_shows(self):
+        self.assertEqual(describe_progress({"status": "running", "phase": "download"}, self.NOW), "download")
+
+    def test_inactive_jobs_show_no_clock(self):
+        self.assertEqual(describe_progress({"status": "pending", "wait": "sin ofertas"}, self.NOW), "sin ofertas")
+        self.assertEqual(describe_progress(self.job(status="done", phase="done"), self.NOW), "done")
+        self.assertEqual(describe_progress({"status": "failed"}, self.NOW), "")
+
+
+class TestPodProgress(Base):
+    def setUp(self):
+        super().setUp()
+        self.provider.autostart = False
+        self.job = self.submit()
+        self.run_until(lambda: self.job["status"] == "starting")
+
+    def status(self, **fields):
+        self.seq = getattr(self, "seq", 0) + 1
+        self.storage.write(f"{self.job['run_key']}/status.json", json.dumps({"seq": self.seq, "boot": 1, **fields}))
+        self.orch.tick()
+
+    def test_a_new_phase_restarts_the_clock(self):
+        self.status(phase="download")
+        self.job["phase_since"] -= 500
+        self.status(phase="run")
+        self.assertLess(time.time() - self.job["phase_since"], 60)
+
+    def test_only_real_changes_count_as_progress(self):
+        self.status(phase="download", detail="1/2 a: 1/5 episodes")
+        self.job["moved_ts"] = moved = time.time() - 500
+        self.status(phase="download", detail="1/2 a: 1/5 episodes")     # un latido, sin avance
+        self.assertEqual(self.job["moved_ts"], moved)
+        self.status(phase="download", detail="1/2 a: 2/5 episodes")
+        self.assertGreater(self.job["moved_ts"], moved)
+
+    def test_the_detail_of_a_phase_does_not_stay_in_the_next(self):
+        self.status(phase="download", detail="1/2 a")
+        self.status(phase="run")
+        self.assertNotIn("detail", self.job)
+
+
+class TestRunnerProgress(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+        self.storage = FolderStorage(self.tmp / "bucket")
+        self.seen = []
+        self.run_obj = Run(self.storage, "runs/p")
+        original = self.run_obj.detail
+        self.run_obj.detail = lambda text: (self.seen.append(text), original(text))
+
+    def test_the_pod_reports_episodes_in_both_directions(self):
+        source, out = self.tmp / "src", self.tmp / "out"
+        make_recordings(source, episodes=("000", "001"))
+        make_recordings(out, episodes=("000",))
+        self.storage.upload(source, "recordings/g", packed=True)
+        run_stage(self.run_obj, {"deadline_s": 60, "command": [sys.executable, "-c", "pass"],
+                                 "inputs": [{"key": "recordings/g", "path": str(self.tmp / "in")}],
+                                 "outputs": [{"key": "recordings/o", "path": str(out), "packed": True}]})
+        self.assertIn("1/1 g", self.seen)
+        self.assertTrue({"1/1 g: 1/2 episodes", "1/1 g: 2/2 episodes"} <= set(self.seen))
+        self.assertIn("hashing 6/6 files", self.seen)
+        self.assertIn("1/1 o: 1/1 episodes", self.seen)
+
+    def test_a_new_phase_clears_the_counters(self):
+        self.run_obj.status.update(done=5, total=9, rate=1.0, detail="x")
+        self.run_obj.phase("upload")
+        self.assertEqual({k for k in ("done", "total", "rate", "detail") if k in self.run_obj.status}, set())
+
+
 class TestUnfinishedPodCost(Base):
     def setUp(self):
         super().setUp()
@@ -959,7 +1171,7 @@ class TestLeafRender(unittest.TestCase):
     def test_a_leafless_render_is_as_before(self):
         render = stages.STAGES["render"]
         job = self.job()
-        self.assertEqual(render.uploads(job), [{"local": "/lab/gello", "key": "recordings/gello"}])
+        self.assertEqual(render.uploads(job), [{"local": "/lab/gello", "key": "recordings/gello", "packed": True}])
         self.assertNotIn("--leaf_dir", render.pod(job, "runs/x", "/workspace")["args"])
         self.assertEqual(job["output"], "/lab/gello_10hz")
 

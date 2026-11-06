@@ -26,6 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 from scripts.xarm5.data_jobs import plan_pipeline  # noqa: E402
 from splatsim.cloud.orchestrator import (ACTIVE, DATASETS_ROOT, DEFAULT_IMAGE, DEFAULT_RENDER_IMAGE,  # noqa: E402
+                                        describe_progress,
                                          Orchestrator, train_config)
 from splatsim.cloud.providers import Requirements, VastProvider  # noqa: E402
 from splatsim.cloud.storage import SECRETS_FILE, Storage, load_secrets, storage_env  # noqa: E402
@@ -108,22 +109,13 @@ class Panel:
             action(job_id)
             self.refresh()
 
-    @staticmethod
-    def _progress(job: dict) -> str:
-        p = job.get("progress") or {}
-        if "done" not in p:
-            return job.get("phase") or job.get("wait") or ""
-        total = p.get("total") or (job.get("config") or {}).get("training_steps") or "?"
-        rate = f" · {p['rate']:.2f}/s" if p.get("rate") else ""
-        return f"{p['done']:,}/{total:,}{rate}" if isinstance(total, int) else f"{p['done']:,}/?{rate}"
-
     def refresh(self):
         orch = self.orch
         with orch.lock:
             rows = ["| # | Job | Status | Progress | Machine | Est. | Cost | Max |", "|---|---|---|---|---|---|---|---|"]
             for j in orch.jobs:
                 offer = j.get("offer") or {}
-                rows.append(f"| {j['id']} | {j['name']} | {j['status']} | {self._progress(j)} | "
+                rows.append(f"| {j['id']} | {j['name']} | {j['status']} | {describe_progress(j)} | "
                             f"{offer.get('cpu_name', '')[:24]} | {money((j.get('estimate') or {}).get('total'))} | "
                             f"{money(j.get('cost'))} | {money(j['max_cost'])} |")
             self.table.content = "\n".join(rows) if orch.jobs else "No jobs yet."

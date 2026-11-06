@@ -28,11 +28,12 @@ from splatsim.cloud.estimate import (SEED_HISTORY, Estimate, Workload, convert_w
 from splatsim.cloud.providers import Offer, Requirements
 from splatsim.cloud.runner import MAX_BOOTS, sha256
 from splatsim.cloud.stages import DEFAULT_SCRIPTS, STAGES, describe_pipeline, scan_recordings
-from splatsim.cloud.storage import Storage
+from splatsim.cloud.storage import Storage, item_label
 
 ACTIVE = ("preparing", "starting", "running", "finishing")
 RETRYABLE = ("failed", "stopped")
 MAX_ATTEMPTS = 3
+STILL_S = 180                 # sin cambios por más de esto, el panel lo avisa; tres latidos perdidos no bastan
 BOOT_TIMEOUT_S = 25 * 60        # sin señales del pod (imagen lenta o máquina rota): otra máquina
 STALE_TIMEOUT_S = 10 * 60       # sin latidos con el pod ya corriendo
 EXIT_GRACE_S = 120              # el pod terminó, pero result.json puede tardar en verse
@@ -41,7 +42,7 @@ DISK_MARGIN_GB = 20
 OFFERS_TO_TRY = 5
 MACHINE_MEMORY_S = 14 * 24 * 3600   # después, el host pudo borrar la imagen o haberse arreglado
 RESET_ON_RETRY = ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "billing_ts", "boot_s", "result",
-                  "settled")
+                  "settled", "phase_since", "moved_ts", "detail")
 POD_PYTHON = "/opt/venv/bin/python"
 GPU_CHECK = [POD_PYTHON, "-c",     # 1 GB en la GPU: detecta hosts como el del "out of memory" en RunPod
              "import torch; x = torch.ones(1024, 1024, 256, device='cuda'); assert (x * 2).sum() > 0"]
@@ -69,6 +70,31 @@ class Settings:
     max_pods: int = 2
     budget_usd: float = 5.0       # gasto máximo de toda la cola, comprometido incluido
     paused: bool = False
+
+
+def _duration(seconds: float) -> str:
+    return f"{seconds:.0f} s" if seconds < 60 else f"{seconds / 60:.0f} min" if seconds < 3600 else f"{seconds / 3600:.1f} h"
+
+
+def describe_progress(job: dict, now: float | None = None) -> str:
+    """Para el panel: en qué va, desde cuándo, y si lleva rato sin moverse."""
+    if job["status"] not in ACTIVE:
+        return job.get("wait") or "" if job["status"] == "pending" else job.get("phase") or ""
+    now = time.time() if now is None else now
+    p = job.get("progress") or {}
+    parts = [job.get("phase") or job.get("wait") or ""]
+    if "done" in p:
+        total = p.get("total") or (job.get("config") or {}).get("training_steps")
+        parts.append(f"{p['done']:,}/{total:,}" if isinstance(total, int) else f"{p['done']:,}/?")
+        if p.get("rate"):
+            parts.append(f"{p['rate']:.2f}/s")
+    if job.get("detail"):
+        parts.append(job["detail"])
+    if "phase_since" in job:
+        parts.append(_duration(now - job["phase_since"]))
+    if ("done" in p or job.get("detail")) and now - job.get("moved_ts", now) > STILL_S:
+        parts.append(f"⚠️ no change for {_duration(now - job['moved_ts'])}")
+    return " · ".join(parts)
 
 
 def folder_gb(path: Path) -> float:
@@ -340,13 +366,17 @@ class Orchestrator:
             job["run_key"] = run_key = self._run_key(job)
         stage = STAGES[job["kind"]]
         stage.refresh(job, folder_gb)
-        job["phase"] = "uploading inputs"
-        for item in stage.uploads(job):       # lo que ya está en el bucket no se vuelve a subir
-            local = Path(item["local"]).expanduser()
+        self._enter_phase(job, "uploading inputs")
+        uploads = stage.uploads(job)
+        for i, item in enumerate(uploads, 1):  # lo que ya está en el bucket no se vuelve a subir
+            local, key = Path(item["local"]).expanduser(), item["key"]
+            self._note_detail(job, item_label(i, len(uploads), key))
             if local.is_file():
-                self.storage.upload_file(local, item["key"])
+                self.storage.upload_file(local, key)
             else:
-                self.storage.upload(local, item["key"], item.get("exclude"))
+                self.storage.upload(local, key, item.get("exclude"), packed=item.get("packed", False),
+                                    progress=lambda done, total, i=i, key=key: self._note_detail(
+                                        job, item_label(i, len(uploads), key, done, total)))
 
         candidates = self._pick_offers(job)
         if not candidates:
@@ -371,19 +401,31 @@ class Orchestrator:
             with self.lock:
                 job.update(status="starting", instance_id=instance, offer=asdict(candidate.offer),
                            estimate=_estimate_fields(candidate), started_ts=time.time(), seen_ts=time.time(),
-                           seq=-1, phase="waiting for the pod", started=datetime.now().strftime("%Y-%m-%d %H:%M"))
+                           seq=-1, started=datetime.now().strftime("%Y-%m-%d %H:%M"))
+                self._enter_phase(job, "waiting for the pod")
                 job.pop("wait", None)
                 job.pop("retry_at", None)
                 self.save()
             return
         raise RuntimeError(f"no se pudo crear el pod: {error}")
 
+    @staticmethod
+    def _enter_phase(job: dict, name: str) -> None:
+        now = time.time()
+        job.update(phase=name, phase_since=now, moved_ts=now)
+        job.pop("detail", None)
+
+    @staticmethod
+    def _note_detail(job: dict, text: str) -> None:
+        job.update(detail=text, moved_ts=time.time())
+
     def _wait(self, job: dict, reason: str) -> None:
         """Vuelve a la cola sin gastar un intento; se reintenta más tarde, no en cada ciclo."""
         with self.lock:
             job.update(status="pending", wait=reason, attempts=job["attempts"] - 1,
                        retry_at=time.time() + WAIT_RETRY_S)
-            job.pop("phase", None)      # el panel muestra la fase antes que el motivo de la espera
+            for key in ("phase", "phase_since", "moved_ts", "detail"):
+                job.pop(key, None)      # el panel muestra la fase antes que el motivo de la espera
 
     # ── seguimiento ──────────────────────────────────────────────────────────
     def _check(self, job: dict, instance) -> None:
@@ -400,8 +442,16 @@ class Orchestrator:
         if status:
             status = json.loads(status)
             if status["seq"] != job.get("seq"):
-                job.update(seq=status["seq"], seen_ts=now, phase=status["phase"],
-                           progress={k: status[k] for k in ("done", "total", "rate") if k in status})
+                progress = {k: status[k] for k in ("done", "total", "rate") if k in status}
+                if status["phase"] != job.get("phase"):
+                    self._enter_phase(job, status["phase"])
+                elif (progress.get("done"), status.get("detail")) != ((job.get("progress") or {}).get("done"),
+                                                                      job.get("detail")):
+                    job["moved_ts"] = now
+                job.update(seq=status["seq"], seen_ts=now, progress=progress)
+                job.pop("detail", None)
+                if status.get("detail"):
+                    job["detail"] = status["detail"]
                 self._note_boot(job)
                 job["status"] = "running"
                 job.setdefault("billing_ts", now)
@@ -489,7 +539,7 @@ class Orchestrator:
     # ── descargar ────────────────────────────────────────────────────────────
     def _finish(self, job: dict) -> None:
         """Se puede repetir: el bucket sigue teniendo las salidas si el lab falla o se llena."""
-        job["phase"] = "downloading"
+        self._enter_phase(job, "downloading")
         self._release(job)
         self.save()
         stage = STAGES[job["kind"]]
@@ -499,7 +549,8 @@ class Orchestrator:
             free = shutil.disk_usage(Path.home()).free / 1e9
             if free < need + 5:
                 raise RuntimeError(f"solo hay {free:.0f} GB libres en el lab; la salida sigue en el bucket: {key}")
-            self.storage.download(key, target)
+            self.storage.download(key, target, progress=lambda done, total: self._note_detail(
+                job, item_label(1, 1, key, done, total)))
             bad = [name for name, digest in job["result"]["outputs"][key].items() if sha256(target / name) != digest]
             if bad:
                 raise RuntimeError(f"sha256 distinto en {bad[:3]}; la salida sigue en el bucket: {key}")

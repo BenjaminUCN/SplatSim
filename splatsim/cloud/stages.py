@@ -202,7 +202,8 @@ class Convert:
     def uploads(self, job: dict) -> list[dict]:
         if job.get("depends_on") is not None:
             return []            # la etapa anterior ya las dejó en el bucket
-        return [{"local": job["args"]["input"], "key": self._recordings_key(job), "exclude": job["exclude"]}]
+        return [{"local": job["args"]["input"], "key": self._recordings_key(job), "exclude": job["exclude"],
+                 "packed": True}]
 
     def pod(self, job: dict, run_key: str, pod_root: str) -> dict:
         a = job["args"]
@@ -237,8 +238,8 @@ class Convert:
 
 
 class Render:
-    """render_recordings.py. Lo que deja queda directo en recordings/: son unos 100k archivos, y copiarlos
-    después costaría más que el resto. La siguiente etapa solo parte cuando esta terminó bien."""
+    """render_recordings.py. Lo que deja queda directo en recordings/, en un paquete por episodio.
+    La siguiente etapa solo parte cuando esta terminó bien."""
     kind = "render"
     needs_gpu = True
     image = "render"
@@ -261,7 +262,8 @@ class Render:
         return f"assets/occluders/{Path(job['args']['leaf_dir']).name}"
 
     def uploads(self, job: dict) -> list[dict]:
-        own = [] if job.get("depends_on") is not None else [{"local": job["args"]["input"], "key": self._input_key(job)}]
+        own = [] if job.get("depends_on") is not None else [{"local": job["args"]["input"], "key": self._input_key(job),
+                                                      "packed": True}]
         leaves = [{"local": job["args"]["leaf_dir"], "key": self._leaves_key(job)}] if job["args"].get("leaf_dir") else []
         return [*own, *leaves, *scene_assets()[0]]
 
@@ -276,7 +278,7 @@ class Render:
         pod_job = {"kind": self.kind, "args": pod_args, "output": out}
         return {"args": command(pod_job)[1:], "files": pod_files(), "clean": [],    # lo renderizado no se repite
                 "inputs": [{"key": self._input_key(job), "path": source}, *leaves, *scene_assets()[1]],
-                "outputs": [{"key": self.output_key(job), "path": out}]}
+                "outputs": [{"key": self.output_key(job), "path": out, "packed": True}]}
 
     def output_key(self, job: dict) -> str:
         return f"recordings/{Path(job['output']).name}"

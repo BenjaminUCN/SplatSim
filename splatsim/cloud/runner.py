@@ -28,7 +28,7 @@ import traceback
 import urllib.request
 from pathlib import Path
 
-from splatsim.cloud.storage import Storage
+from splatsim.cloud.storage import Storage, item_label
 
 HEARTBEAT_S = float(os.environ.get("SPLATSIM_HEARTBEAT_S", 30))
 HEALTH_TIMEOUT_S = 180
@@ -54,9 +54,15 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def manifest(folder: Path) -> dict[str, str]:
+def manifest(folder: Path, progress=None) -> dict[str, str]:
     """sha256 de cada archivo: el panel lo compara con lo que descarga."""
-    return {str(p.relative_to(folder)): sha256(p) for p in sorted(folder.rglob("*")) if p.is_file()}
+    files = [p for p in sorted(folder.rglob("*")) if p.is_file()]
+    digests = {}
+    for i, path in enumerate(files, 1):
+        digests[str(path.relative_to(folder))] = sha256(path)
+        if progress:
+            progress(i, len(files))
+    return digests
 
 
 class Run:
@@ -96,7 +102,15 @@ class Run:
 
     def phase(self, name: str) -> None:
         print(f"[runner] {name} ({time.monotonic() - self.t0:.0f} s)", flush=True)
+        with self.lock:                     # el avance de la fase anterior ya no dice nada
+            for field in ("done", "total", "rate", "detail"):
+                self.status.pop(field, None)
         self.publish(phase=name)
+
+    def detail(self, text: str) -> None:
+        """Lo publica el siguiente latido: una escritura por archivo costaría más que el archivo."""
+        with self.lock:
+            self.status["detail"] = text
 
     def timed(self, name: str, action) -> None:
         self.phase(name)
@@ -218,8 +232,12 @@ def run_stage(run: Run, spec: dict) -> None:
         expand(path).write_text(text)
 
     def download():
-        for item in spec.get("inputs", []):
-            run.storage.download(item["key"], expand(item["path"]))
+        inputs = spec.get("inputs", [])
+        for i, item in enumerate(inputs, 1):
+            key = item["key"]
+            run.detail(item_label(i, len(inputs), key))
+            run.storage.download(key, expand(item["path"]), progress=lambda done, total, i=i, key=key: run.detail(
+                item_label(i, len(inputs), key, done, total)))
 
     run.timed("download", download)
     for path in spec.get("clean", []):
@@ -238,10 +256,14 @@ def run_stage(run: Run, spec: dict) -> None:
     outputs: dict[str, dict[str, str]] = {}
 
     def upload():
-        for item in spec.get("outputs", []):
-            folder = expand(item["path"])
-            outputs[item["key"]] = manifest(folder)
-            run.storage.upload(folder, item["key"])
+        items = spec.get("outputs", [])
+        for i, item in enumerate(items, 1):
+            folder, key = expand(item["path"]), item["key"]
+            outputs[key] = manifest(folder, lambda done, total: run.detail(f"hashing {done}/{total} files"))
+            run.detail(item_label(i, len(items), key))
+            run.storage.upload(folder, key, packed=item.get("packed", False),
+                               progress=lambda done, total, i=i, key=key: run.detail(
+                                   item_label(i, len(items), key, done, total)))
 
     run.timed("upload", upload)
     run.finish(ok=True, reason="done", exit_code=0, outputs=outputs)
