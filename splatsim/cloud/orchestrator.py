@@ -1,4 +1,6 @@
-"""Cola de trabajos en la nube: un pod por trabajo, en paralelo hasta max_pods.
+"""Cola de trabajos en la nube: un pod por trabajo, en paralelo hasta max_pods. Un trabajo puede
+esperar a otro (depends_on), p.ej. entrenar con el dataset que deja una conversión. Lo propio de cada
+tipo de trabajo está en stages.py.
 
     pending → preparing (sube entradas, crea el pod) → starting → running → finishing → done
                                                                                       ↘ failed / stopped
@@ -20,9 +22,12 @@ from pathlib import Path
 
 import yaml
 
-from splatsim.cloud.estimate import IMAGE_DISK_GB, IMAGE_GB, SEED_HISTORY, Estimate, Workload, rank, train_workload
+from scripts.xarm5.data_jobs import dataset_path
+from splatsim.cloud.estimate import (IMAGE_DISK_GB, IMAGE_GB, SEED_HISTORY, Estimate, Workload, convert_workload, rank,
+                                     train_workload)
 from splatsim.cloud.providers import Offer, Requirements
 from splatsim.cloud.runner import MAX_BOOTS, sha256
+from splatsim.cloud.stages import DEFAULT_SCRIPTS, STAGES, scan_recordings
 from splatsim.cloud.storage import Storage
 
 ACTIVE = ("preparing", "starting", "running", "finishing")
@@ -38,7 +43,7 @@ POD_PYTHON = "/opt/venv/bin/python"
 GPU_CHECK = [POD_PYTHON, "-c",     # 1 GB en la GPU: detecta hosts como el del "out of memory" en RunPod
              "import torch; x = torch.ones(1024, 1024, 256, device='cuda'); assert (x * 2).sum() > 0"]
 DEFAULT_IMAGE = "ghcr.io/benjaminucn/splatsim-train:latest"
-TRAIN_SCRIPT = "scripts/xarm5/train_diffusion.py"
+POD_ROOT = "/workspace"
 DATASETS_ROOT = "~/lerobot/splatsim_test_data"
 
 
@@ -73,15 +78,17 @@ def disk_for(work: Workload) -> int:
 class Orchestrator:
     def __init__(self, qdir: str | Path, provider, storage: Storage, pod_env: dict[str, str] | None = None,
                  image: str = DEFAULT_IMAGE, health: list[str] | None = GPU_CHECK,
-                 on_model_ready=None, python: str = POD_PYTHON, train_script: str = TRAIN_SCRIPT):
+                 on_ready=None, python: str = POD_PYTHON, scripts: dict[str, str] | None = None,
+                 pod_root: str = POD_ROOT):
         self.qdir = Path(qdir).expanduser()
         self.qdir.mkdir(parents=True, exist_ok=True)
-        self.python, self.train_script = python, train_script
+        self.python, self.pod_root = python, pod_root
+        self.scripts = {**DEFAULT_SCRIPTS, **(scripts or {})}
         # cada cola solo responde por sus pods: otra cola o una prueba aparte no son huérfanos suyos
         self.label_prefix = f"splatsim-{hashlib.sha1(str(self.qdir).encode()).hexdigest()[:6]}-"
         self.provider, self.storage, self.image, self.health = provider, storage, image, health
         self.pod_env = pod_env or {}
-        self.on_model_ready = on_model_ready
+        self.on_ready = on_ready
         self.lock = threading.RLock()
         self.busy: set[int] = set()      # trabajos con un hilo de preparación o descarga en curso
         self.warnings: list[str] = []
@@ -121,30 +128,62 @@ class Orchestrator:
     # ── encolar ──────────────────────────────────────────────────────────────
     @staticmethod
     def workload(job: dict) -> Workload:
-        return train_workload(job["config"], job["dataset_gb"])
+        return STAGES[job["kind"]].workload(job)
 
-    def estimate(self, cfg: dict, dataset: str, req: Requirements) -> list[Estimate]:
+    def rank_offers(self, work: Workload, req: Requirements) -> list[Estimate]:
         """Ofertas disponibles ahora para este trabajo, de la mejor a la peor."""
-        work = train_workload(cfg, folder_gb(Path(dataset).expanduser()))
         return rank(self.known_history(), work, self.provider.search(req, disk_for(work)))
 
-    def submit(self, name: str, cfg: dict, dataset: str, req: Requirements, max_cost: float,
-               offer_id: int | None = None, description: str = "") -> dict:
-        path = Path(dataset).expanduser()
-        if not path.is_dir():
-            raise ValueError(f"No existe el dataset {path}")
+    def estimate(self, cfg: dict, dataset: str, req: Requirements, depends_on: int | None = None) -> list[Estimate]:
+        return self.rank_offers(train_workload(cfg, self._dataset_gb(dataset, depends_on)), req)
+
+    def estimate_convert(self, args: dict, req: Requirements) -> tuple[dict, list[Estimate]]:
+        scan = scan_recordings(args["input"], args.get("cameras"), args.get("ignore_selection", False))
+        work = convert_workload(scan["frames"], len(scan["cameras"]), scan["gb"])
+        return scan, self.rank_offers(work, req)
+
+    def _dataset_gb(self, dataset: str, depends_on: int | None) -> float:
+        """El dataset de una cadena aún no existe: se usa el tamaño previsto por la conversión."""
+        if depends_on is None:
+            path = Path(dataset).expanduser()
+            if not path.is_dir():
+                raise ValueError(f"No existe el dataset {path}")
+            return folder_gb(path)
+        parent = self.get(depends_on)
+        if parent is None or parent["kind"] != "convert" or Path(parent["output"]) != Path(dataset).expanduser():
+            raise ValueError(f"El trabajo #{depends_on} no deja el dataset {dataset}")
+        return self.workload(parent).up_gb
+
+    def _add(self, fields: dict, req: Requirements, max_cost: float, offer_id: int | None) -> dict:
         if max_cost <= 0:
             raise ValueError("max_cost debe ser mayor que 0")
         with self.lock:
-            job = {"id": self.next_id, "name": name, "description": description, "kind": "train",
-                   "status": "pending", "config": cfg, "dataset": str(dataset), "dataset_gb": round(folder_gb(path), 2),
-                   "requirements": asdict(req), "max_cost": float(max_cost), "offer_id": offer_id,
-                   "attempts": 0, "excluded_machines": [],
+            job = {"id": self.next_id, "status": "pending", **fields, "requirements": asdict(req),
+                   "max_cost": float(max_cost), "offer_id": offer_id, "attempts": 0, "excluded_machines": [],
                    "added": datetime.now().strftime("%Y-%m-%d %H:%M")}
             self.next_id += 1
             self.jobs.append(job)
             self.save()
             return job
+
+    def submit(self, name: str, cfg: dict, dataset: str, req: Requirements, max_cost: float,
+               offer_id: int | None = None, description: str = "", depends_on: int | None = None) -> dict:
+        gb = round(self._dataset_gb(dataset, depends_on), 2)
+        return self._add({"name": name, "description": description, "kind": "train", "config": cfg,
+                          "dataset": str(dataset), "dataset_gb": gb, "depends_on": depends_on},
+                         req, max_cost, offer_id)
+
+    def submit_convert(self, name: str, args: dict, req: Requirements, max_cost: float,
+                       offer_id: int | None = None, output_dir: str = DATASETS_ROOT) -> dict:
+        """args: input, fps, suffix y opcionalmente cameras e ignore_selection."""
+        output = dataset_path(output_dir, args["fps"], args["suffix"])
+        taken = any(j.get("output") == output and j["status"] not in RETRYABLE for j in self.jobs)
+        if taken or Path(output).exists():
+            raise ValueError(f"Ya existe o está en cola el dataset {output}: cambia el sufijo")
+        scan = scan_recordings(args["input"], args.get("cameras"), args.get("ignore_selection", False))
+        return self._add({"name": name, "description": "", "kind": "convert", "args": dict(args), "output": output,
+                          "frames": scan["frames"], "cameras": scan["cameras"], "recordings_gb": scan["gb"],
+                          "exclude": scan["exclude"], "depends_on": None}, req, max_cost, offer_id)
 
     # ── ciclo ────────────────────────────────────────────────────────────────
     def tick(self) -> None:
@@ -195,6 +234,9 @@ class Orchestrator:
                 return
             if job["status"] != "pending" or job["id"] in self.busy or job.get("retry_at", 0) > time.time():
                 continue
+            if waiting_for := self._unfinished_parent(job):
+                job["wait"] = f"espera al trabajo #{waiting_for['id']} ({waiting_for['status']})"
+                continue
             spent = self.spent() + self.committed()
             if spent + job["max_cost"] > self.settings.budget_usd:
                 job["wait"] = (f"presupuesto: comprometidos ${spent:.2f} + máximo ${job['max_cost']:.2f} "
@@ -204,6 +246,11 @@ class Orchestrator:
             active += 1
             self._spawn(job, self._prepare)
         self.save()
+
+    def _unfinished_parent(self, job: dict) -> dict | None:
+        """Si el padre falla, el hijo espera: el padre todavía se puede reintentar."""
+        parent = self.get(job.get("depends_on")) if job.get("depends_on") is not None else None
+        return parent if parent and parent["status"] != "done" else None
 
     # ── preparar y lanzar ────────────────────────────────────────────────────
     def _run_key(self, job: dict) -> str:
@@ -219,24 +266,21 @@ class Orchestrator:
         return [e for e in ranked if e.total is None or e.total <= job["max_cost"]]
 
     def _spec(self, job: dict, estimate: Estimate, run_key: str) -> dict:
-        cfg = dict(job["config"])
-        model_dir = f"{cfg['output_root']}/{cfg['model_name']}"
-        config_path = f"/tmp/{cfg['model_name']}.yaml"
+        stage = STAGES[job["kind"]]
+        pod = stage.pod(job, run_key, self.pod_root)
         deadline_s = max(job["max_cost"] - estimate.transfer_cost, 0.0) / estimate.offer.dph * 3600
-        return {"command": [self.python, "-u", self.train_script, "--config", config_path],
-                "health": self.health,
-                "files": {config_path: yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True)},
-                "inputs": [{"key": f"datasets/{Path(job['dataset']).name}", "path": cfg["dataset_root"]}],
-                "outputs": [{"key": f"{run_key}/outputs/model", "path": model_dir}],
-                "deadline_s": max(deadline_s, 0.0)}
+        return {"command": [self.python, "-u", self.scripts[job["kind"]], *pod.pop("args")],
+                "health": self.health if stage.needs_gpu else None, **pod, "deadline_s": deadline_s}
 
     def _prepare(self, job: dict) -> None:
         with self.lock:
             job["attempts"] += 1
             job["run_key"] = run_key = self._run_key(job)
-        name = Path(job["dataset"]).name
-        job["phase"] = "uploading dataset"
-        self.storage.upload(Path(job["dataset"]).expanduser(), f"datasets/{name}")
+        stage = STAGES[job["kind"]]
+        stage.refresh(job, folder_gb)
+        job["phase"] = "uploading inputs"
+        for item in stage.uploads(job):       # lo que ya está en el bucket no se vuelve a subir
+            self.storage.upload(Path(item["local"]).expanduser(), item["key"], item["exclude"])
 
         candidates = self._pick_offers(job)
         if not candidates:
@@ -362,26 +406,40 @@ class Orchestrator:
         job["phase"] = "downloading"
         self._release(job)
         self.save()
-        cfg, key = job["config"], f"{job['run_key']}/outputs/model"
-        target = Path(cfg["output_root"]).expanduser() / cfg["model_name"]
+        stage = STAGES[job["kind"]]
+        key, target = stage.output_key(job), stage.target(job)
         need = self.workload(job).up_gb
         free = shutil.disk_usage(Path.home()).free / 1e9
         if free < need + 5:
-            raise RuntimeError(f"solo hay {free:.0f} GB libres en el lab; el modelo sigue en el bucket: {key}")
+            raise RuntimeError(f"solo hay {free:.0f} GB libres en el lab; la salida sigue en el bucket: {key}")
         self.storage.download(key, target)
         bad = [name for name, digest in job["result"]["outputs"][key].items() if sha256(target / name) != digest]
         if bad:
-            raise RuntimeError(f"sha256 distinto en {bad[:3]}; el modelo sigue en el bucket: {key}")
+            raise RuntimeError(f"sha256 distinto en {bad[:3]}; la salida sigue en el bucket: {key}")
+        if publish := stage.publish_key(job):
+            self.storage.copy(key, publish)
+        self._clean_bucket(job, key)
         with self.lock:
             self._record_history(job)
-            job.update(status="done", phase="done", model_dir=str(target),
+            job.update(status="done", phase="done", output_dir=str(target),
                        finished=datetime.now().strftime("%Y-%m-%d %H:%M"))
             self.save()
-        if self.on_model_ready:
-            self.on_model_ready(job)
+        if self.on_ready:
+            self.on_ready(job)
+
+    def _clean_bucket(self, job: dict, output_key: str) -> None:
+        """Lo que ya llegó verificado no sigue cobrando. Si falla, solo queda el aviso."""
+        stage = STAGES[job["kind"]]
+        others = {key for j in self.jobs if j is not job and j["status"] not in ("done", *RETRYABLE)
+                  for key in STAGES[j["kind"]].temporary_inputs(j)}
+        for key in [output_key, *(k for k in stage.temporary_inputs(job) if k not in others)]:
+            try:
+                self.storage.delete(key)
+            except RuntimeError as e:
+                self.warnings.append(f"No se pudo borrar {key} del bucket: {e}")
 
     def _record_history(self, job: dict) -> None:
-        rate = job["result"].get("rate")
+        rate = STAGES[job["kind"]].rate(job)
         if not rate:
             return
         self.history.append({"kind": job["kind"], "profile": self.workload(job).profile,
@@ -421,7 +479,10 @@ class Orchestrator:
     def remove(self, job_id: int) -> None:
         with self.lock:
             job = self.get(job_id)
-            if job and job["status"] not in ACTIVE:
+            waiting = [j["id"] for j in self.jobs if j.get("depends_on") == job_id and j["status"] == "pending"]
+            if job and job["status"] != "done" and waiting:
+                self.warnings.append(f"El trabajo #{job_id} no se quitó: {waiting} esperan su resultado")
+            elif job and job["status"] not in ACTIVE:
                 self.jobs.remove(job)
                 self.save()
 

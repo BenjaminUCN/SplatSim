@@ -20,11 +20,13 @@ os.environ["SPLATSIM_WARMUP_S"] = "0"
 
 import yaml  # noqa: E402
 
-from splatsim.cloud.estimate import estimate, lookup_rate, rank, train_profile, train_workload  # noqa: E402
+from splatsim.cloud.estimate import convert_workload, estimate, lookup_rate, rank, train_profile, train_workload  # noqa: E402
 from splatsim.cloud.orchestrator import Orchestrator, Settings, train_config  # noqa: E402
 from splatsim.cloud.providers import Instance, Offer, Requirements, VastProvider  # noqa: E402
 from splatsim.cloud import runner  # noqa: E402
 from splatsim.cloud.runner import Run, run_stage  # noqa: E402
+from splatsim.cloud.stages import scan_recordings  # noqa: E402
+from splatsim.cloud.storage import Storage  # noqa: E402
 
 CPU = "AMD Ryzen 9 7950X 16-Core Processor"
 FAKE_TRAIN = """
@@ -42,6 +44,24 @@ for step in range(0, 5):
 (out / "model.safetensors").write_text("weights")
 (out / "checkpoints").mkdir(); (out / "checkpoints" / "a.bin").write_text("ckpt")
 """
+FAKE_CONVERT = """
+import argparse, time
+from pathlib import Path
+p = argparse.ArgumentParser()
+p.add_argument("--input_dir", nargs="+"); p.add_argument("--output_dir"); p.add_argument("--fps")
+p.add_argument("--repo_suffix"); p.add_argument("--cameras", nargs="+"); p.add_argument("--no_push", action="store_true")
+p.add_argument("--ignore_selection", action="store_true")
+a = p.parse_args()
+assert a.no_push
+assert Path(a.input_dir[0], "000", "00001.pkl").exists()
+if "crash" in a.repo_suffix:
+    raise SystemExit(4)
+out = Path(a.output_dir, f"splatsim_xarm5_lite_{a.fps}fps_{a.repo_suffix}")
+out.mkdir(parents=True)     # como LeRobot: falla si ya existe
+time.sleep(0.2)
+print("episodes:  50%|#####     | 1/2 [00:01<00:01,  1.00it/s]", flush=True)
+(out / "data.bin").write_text("dataset")
+"""
 
 
 class FolderStorage:
@@ -50,6 +70,7 @@ class FolderStorage:
     def __init__(self, root: Path):
         self.root, self.remote = Path(root), str(root)
         self.corrupt = False
+        self.excluded = {}
 
     def read(self, key):
         path = self.root / key
@@ -61,7 +82,8 @@ class FolderStorage:
         tmp.write_text(text)
         os.replace(tmp, self.root / key)
 
-    def upload(self, local, key):
+    def upload(self, local, key, exclude=None):
+        self.excluded[key] = exclude
         shutil.copytree(local, self.root / key, dirs_exist_ok=True)
 
     def upload_file(self, local, key):
@@ -72,6 +94,12 @@ class FolderStorage:
         shutil.copytree(self.root / key, local, dirs_exist_ok=True)
         if self.corrupt:
             (Path(local) / "model.safetensors").write_text("dañado")
+
+    def copy(self, source, target):
+        shutil.copytree(self.root / source, self.root / target, dirs_exist_ok=True)
+
+    def delete(self, key):
+        shutil.rmtree(self.root / key)
 
 
 def offer(id=1, machine=10, cpu=CPU, dph=1.0, gpu="RTX 5090"):
@@ -95,7 +123,7 @@ class FakeProvider:
         return self.credit
 
     def search(self, req, disk_gb):
-        return [o for o in self.offers if o.gpu_name == req.gpu_name]
+        return [o for o in self.offers if not req.gpu_name or o.gpu_name == req.gpu_name]
 
     def create(self, chosen, image, args, env, disk_gb, label):
         self.next_id += 1
@@ -132,12 +160,15 @@ class Base(unittest.TestCase):
         (self.dataset / "data.bin").write_text("dataset")
         self.script = self.tmp / "fake_train.py"
         self.script.write_text(FAKE_TRAIN)
+        self.convert_script = self.tmp / "fake_convert.py"
+        self.convert_script.write_text(FAKE_CONVERT)
         self.provider = FakeProvider(self.storage)
         self.orch = self.make()
 
     def make(self):
         return Orchestrator(self.tmp / "queue", self.provider, self.storage, health=None, python=sys.executable,
-                            train_script=str(self.script))
+                            scripts={"train": str(self.script), "convert": str(self.convert_script)},
+                            pod_root=str(self.tmp / "pod"))
 
     def cfg(self, name="m", **extra):
         return {"model_name": name, "output_root": str(self.tmp / "models"), "dataset_root": str(self.tmp / "pod_ds"),
@@ -248,6 +279,164 @@ class TestPipeline(Base):
         self.assertEqual(self.provider.live, {})
 
 
+def make_recordings(root: Path, episodes=("000", "001"), cameras=("base_rgb", "wrist_rgb"), discarded=()):
+    for episode in episodes:
+        (root / episode / "image_1").mkdir(parents=True)
+        for frame in ("00001", "00002"):
+            (root / episode / f"{frame}.pkl").write_bytes(b"x" * 100)
+            for camera in cameras:
+                (root / episode / "image_1" / f"{camera}_{frame}.png").write_bytes(b"y" * 1000)
+    if discarded:
+        (root / "selection.yaml").write_text(yaml.safe_dump({"discarded": list(discarded)}))
+
+
+class TestChain(Base):
+    def setUp(self):
+        super().setUp()
+        self.recordings = self.tmp / "gello_x"
+        make_recordings(self.recordings)
+        self.datasets = self.tmp / "datasets"
+        self.orch.settings = Settings(max_pods=2, budget_usd=100)
+
+    def convert(self, suffix="a"):
+        return self.orch.submit_convert(f"convert {suffix}", {"input": str(self.recordings), "fps": 10, "suffix": suffix},
+                                        Requirements(gpu_name=""), 1.0, output_dir=str(self.datasets))
+
+    def chained_train(self, parent):
+        cfg = self.cfg("m", dataset_root=str(self.tmp / "pod_ds"))
+        return self.orch.submit("m", cfg, parent["output"], Requirements(), 1.0, depends_on=parent["id"])
+
+    def test_convert_then_train(self):
+        parent = self.convert()
+        real_frames, parent["frames"] = parent["frames"], 100_000
+        child = self.chained_train(parent)
+        parent["frames"] = real_frames
+        self.assertEqual(child["status"], "pending")
+        self.assertGreater(child["dataset_gb"], 0, "se usa el tamaño previsto")
+        self.run_until(lambda: parent["status"] == "done" or parent["status"] == "failed")
+        self.assertEqual(parent["status"], "done", parent.get("error"))
+        name = "splatsim_xarm5_lite_10fps_a"
+        self.assertEqual((self.datasets / name / "data.bin").read_text(), "dataset")
+        self.run_until(lambda: child["status"] in ("done", "failed"))
+        self.assertEqual(child["status"], "done", child.get("error"))
+        self.assertEqual((self.tmp / "models/m/model.safetensors").read_text(), "weights")
+        self.assertLess(child["dataset_gb"], 0.01, "ya con el tamaño real")
+
+    def test_child_waits_for_parent_without_a_pod(self):
+        self.provider.autostart = False
+        parent = self.convert()
+        child = self.chained_train(parent)
+        self.run_until(lambda: parent["status"] == "starting")
+        self.orch.tick()
+        self.assertEqual(child["status"], "pending")
+        self.assertIn(f"#{parent['id']}", child["wait"])
+        self.assertEqual(len(self.provider.created), 1)
+
+    def test_failed_parent_keeps_child_waiting_and_retry_resumes(self):
+        parent = self.orch.submit_convert("c", {"input": str(self.recordings), "fps": 10, "suffix": "crash"},
+                                          Requirements(gpu_name=""), 1.0, output_dir=str(self.datasets))
+        child = self.chained_train(parent)
+        self.run_until(lambda: parent["status"] == "failed")
+        self.orch.tick()
+        self.assertEqual(child["status"], "pending")
+        self.orch.remove(parent["id"])
+        self.assertIn(parent, self.orch.jobs, "no se quita un padre con hijos esperando")
+        self.assertTrue(self.orch.warnings)
+
+    def test_bucket_keeps_only_the_dataset(self):
+        job = self.convert()
+        self.run_until(lambda: job["status"] in ("done", "failed"))
+        self.assertEqual(job["status"], "done", job.get("error"))
+        self.assertEqual(self.storage.read("datasets/splatsim_xarm5_lite_10fps_a/data.bin"), "dataset")
+        self.assertIsNone(self.storage.read(f"{job['run_key']}/outputs/dataset/data.bin"))
+        self.assertFalse((self.tmp / "bucket/recordings/gello_x").exists())
+
+    def test_recordings_stay_while_another_job_needs_them(self):
+        first, second = self.convert("a"), self.convert("b")
+        self.orch.settings.max_pods = 1
+        self.run_until(lambda: first["status"] == "done")
+        self.assertTrue((self.tmp / "bucket/recordings/gello_x").exists())
+        self.run_until(lambda: second["status"] == "done")
+        self.assertFalse((self.tmp / "bucket/recordings/gello_x").exists())
+
+    def test_convert_runs_without_gpu_check(self):
+        self.orch.health = ["false"]
+        job = self.convert()
+        self.run_until(lambda: job["status"] in ("done", "failed"))
+        self.assertEqual(job["status"], "done", job.get("error"))
+        self.assertIsNone(self.provider.created[0][1]["health"])
+
+    def test_restarted_conversion_starts_clean(self):
+        (self.tmp / "pod/datasets/splatsim_xarm5_lite_10fps_a").mkdir(parents=True)
+        job = self.convert()
+        self.run_until(lambda: job["status"] in ("done", "failed"))
+        self.assertEqual(job["status"], "done", job.get("error"))
+
+    def test_rate_is_recorded_in_frames(self):
+        job = self.convert()
+        self.run_until(lambda: job["status"] == "done")
+        record = self.orch.history[-1]
+        self.assertEqual((record["kind"], record["profile"]), ("convert", "convert-cam2"))
+        self.assertAlmostEqual(record["rate"], 4 / job["result"]["seconds"]["run"], places=1)
+
+    def test_existing_or_queued_dataset_is_rejected(self):
+        self.convert("a")
+        with self.assertRaises(ValueError):
+            self.convert("a")
+        (self.datasets / "splatsim_xarm5_lite_10fps_b").mkdir(parents=True)
+        with self.assertRaises(ValueError):
+            self.convert("b")
+
+    def test_child_must_use_the_parent_dataset(self):
+        parent = self.convert()
+        with self.assertRaises(ValueError):
+            self.orch.submit("m", self.cfg(), str(self.tmp / "otro"), Requirements(), 1.0, depends_on=parent["id"])
+
+
+class TestRecordings(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, self.tmp, ignore_errors=True)
+
+    def test_scan_skips_discarded_and_unused_cameras(self):
+        make_recordings(self.tmp, ("000", "001"), ("base_rgb", "wrist_rgb", "base_left_rgb"), discarded=["001"])
+        scan = scan_recordings(self.tmp, ["base_rgb", "wrist_rgb"])
+        self.assertEqual((scan["episodes"], scan["frames"], scan["cameras"]), (1, 2, ["base_rgb", "wrist_rgb"]))
+        self.assertEqual(scan["exclude"], ["/001/**", "**/base_left_rgb_*.png"])
+        self.assertAlmostEqual(scan["gb"], round((2 * 100 + 4 * 1000) / 1e9, 2))
+
+    def test_ignore_selection_includes_discarded(self):
+        make_recordings(self.tmp, discarded=["001"])
+        self.assertEqual(scan_recordings(self.tmp, ignore_selection=True)["episodes"], 2)
+
+    def test_state_only_recordings_are_rejected(self):
+        (self.tmp / "000").mkdir()
+        (self.tmp / "000" / "00001.pkl").write_bytes(b"x")
+        with self.assertRaisesRegex(ValueError, "renderizar"):
+            scan_recordings(self.tmp)
+
+    def test_missing_camera_is_rejected(self):
+        make_recordings(self.tmp)
+        with self.assertRaisesRegex(ValueError, "base_left_rgb"):
+            scan_recordings(self.tmp, ["base_left_rgb"])
+
+    @unittest.skipUnless(shutil.which("rclone"), "sin rclone")
+    def test_rclone_applies_the_scan_filters_and_copies_inside_the_bucket(self):
+        source = self.tmp / "gello"
+        make_recordings(source, ("000", "001"), ("base_rgb", "wrist_rgb"), discarded=["001"])
+        scan = scan_recordings(source, ["base_rgb"])
+        bucket = self.tmp / "bucket"
+        storage = Storage(str(bucket))
+        storage.upload(source, "recordings/g", scan["exclude"])
+        uploaded = {str(p.relative_to(bucket / "recordings/g")) for p in (bucket / "recordings/g").rglob("*") if p.is_file()}
+        self.assertEqual(uploaded, {"selection.yaml", "000/00001.pkl", "000/00002.pkl",
+                                    "000/image_1/base_rgb_00001.png", "000/image_1/base_rgb_00002.png"})
+        storage.copy("recordings/g", "copia/g")
+        self.assertTrue((bucket / "copia/g/000/00001.pkl").exists())
+        storage.delete("recordings/g")
+        self.assertFalse((bucket / "recordings/g").exists())
+
+
 class TestPodLifecycle(Base):
     """Lo que pasó en Vast: el contenedor se reinicia al terminar y el almacenamiento puede fallar."""
 
@@ -334,6 +523,14 @@ class TestPodLifecycle(Base):
             run._track(f"step: {step} loss: 0.1")
         self.assertEqual((run.first_step[0], run.last_step[0]), (10, 600))
         self.assertAlmostEqual(run.rate(), 590 / 120, places=2)
+
+    def test_progress_only_follows_the_episode_bar(self):
+        run = Run(self.storage, "runs/w")
+        run._track("Casting the dataset: 100%|####| 300/300 [00:01<00:00]")
+        run._track("/data/12/34 svt 1/2")
+        self.assertNotIn("done", run.status)
+        run._track("episodes:  40%|####      | 2/5 [00:01<00:02,  1.00it/s]")
+        self.assertEqual((run.status["done"], run.status["total"]), (2, 5))
 
     def test_no_credentials_is_reported(self):
         self.assertIn("sin CONTAINER", runner.stop_own_instance())
@@ -436,6 +633,14 @@ class TestEstimate(unittest.TestCase):
         history = [{"kind": "train", "profile": work.profile, "gpu": "RTX 5090", "cpu": CPU, "rate": 6.3},
                    {"kind": "train", "profile": work.profile, "gpu": "RTX 5090", "cpu": "slow", "rate": 4.4}]
         self.assertEqual(lookup_rate(history, work, offer(cpu="otra"))[:2], (4.4, "baja"))
+
+    def test_conversion_speed_ignores_the_gpu_and_startup_is_shorter(self):
+        work = convert_workload(1000, 2, 24.0)
+        history = [{"kind": "convert", "profile": work.profile, "gpu": "RTX 3060", "cpu": "otra", "rate": 10.0}]
+        e = estimate(history, work, offer())
+        self.assertEqual((e.rate, e.confidence, e.source), (10.0, "baja", "otra CPU"))
+        self.assertLess(work.startup_s, train_workload(self.CFG, 1).startup_s)
+        self.assertAlmostEqual(work.up_gb, 1000 * 2 * 14.6e-6)
 
     def test_no_data_gives_no_number(self):
         work = train_workload({**self.CFG, "batch_size": 8}, 1)

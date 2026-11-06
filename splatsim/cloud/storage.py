@@ -72,12 +72,20 @@ class Storage:
             f.flush()
             self._checked("copyto", f.name, self._path(key))
 
-    def upload(self, local: str | Path, key: str) -> None:
+    def upload(self, local: str | Path, key: str, exclude: list[str] | None = None) -> None:
         """Copia una carpeta; lo que ya está igual (tamaño y hash) no se vuelve a subir."""
-        self._checked("copy", str(local), self._path(key), "--transfers", "8", "--checksum")
+        filters = [arg for pattern in exclude or [] for arg in ("--exclude", pattern)]
+        self._checked("copy", str(local), self._path(key), "--transfers", "8", "--checksum", *filters)
 
     def upload_file(self, local: str | Path, key: str) -> None:
         self._checked("copyto", str(local), self._path(key))
 
     def download(self, key: str, local: str | Path) -> None:
         self._checked("copy", self._path(key), str(local), "--transfers", "8", "--checksum")
+
+    def copy(self, source_key: str, target_key: str) -> None:
+        """Copia dentro del bucket, sin pasar por este PC."""
+        self._checked("copy", self._path(source_key), self._path(target_key), "--transfers", "8", "--checksum")
+
+    def delete(self, key: str) -> None:
+        self._checked("purge", self._path(key))

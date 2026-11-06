@@ -17,6 +17,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -37,7 +38,7 @@ WARMUP_S = float(os.environ.get("SPLATSIM_WARMUP_S", 180))   # torch.compile: no
 RESULT_ATTEMPTS = 20          # result.json es lo único imprescindible: unos minutos de reintentos
 RESULT_RETRY_S = float(os.environ.get("SPLATSIM_RESULT_RETRY_S", 15))
 STEP = re.compile(r"step: (\d+)\b")
-FRACTION = re.compile(r"(\d+)/(\d+)")
+EPISODES = re.compile(r"episodes:\s+\d+%.*?(\d+)/(\d+)")   # la barra de lerobot_conversion.py, no las de LeRobot
 
 
 def expand(path: str) -> Path:
@@ -112,7 +113,7 @@ class Run:
         now = time.monotonic()
         if m := STEP.match(line):
             done, total = int(m.group(1)), None
-        elif m := FRACTION.search(line):
+        elif m := EPISODES.match(line):
             done, total = int(m.group(1)), int(m.group(2))
         else:
             return
@@ -220,6 +221,8 @@ def run_stage(run: Run, spec: dict) -> None:
             run.storage.download(item["key"], expand(item["path"]))
 
     run.timed("download", download)
+    for path in spec.get("clean", []):
+        shutil.rmtree(expand(path), ignore_errors=True)
     run.phase("run")
     start = time.monotonic()
     code = run.execute(spec["command"], deadline_at)

@@ -11,7 +11,7 @@ os.environ["PATH"] = f"{os.environ.get('PATH', '')}:{Path.home() / '.local/bin'}
 
 @dataclass
 class Requirements:
-    gpu_name: str = "RTX 5090"
+    gpu_name: str = "RTX 5090"    # "" = cualquiera: para trabajos que solo usan CPU
     min_cores: int = 16           # el cargador de datos limita más que la GPU (6.30 vs 4.42 pasos/s)
     min_ram_gb: int = 48
     min_pcie_gbps: float = 0.0
@@ -61,10 +61,12 @@ class VastProvider:
         return float(json.loads(self._cli("show", "user"))["credit"])
 
     def search(self, req: Requirements, disk_gb: int) -> list[Offer]:
-        query = (f"gpu_name={req.gpu_name.replace(' ', '_')} num_gpus=1 rentable=true verified=true "
+        query = (f"num_gpus=1 rentable=true verified=true "
                  f"cpu_cores_effective>={req.min_cores} cpu_ram>={req.min_ram_gb} "
                  f"disk_space>={disk_gb} reliability2>={req.min_reliability} "
-                 f"inet_down>={req.min_inet_down_mbps} cuda_max_good>=12.8")
+                 f"inet_down>={req.min_inet_down_mbps}")
+        if req.gpu_name:
+            query += f" gpu_name={req.gpu_name.replace(' ', '_')} cuda_max_good>=12.8"
         if req.min_pcie_gbps:
             query += f" pcie_bw>={req.min_pcie_gbps}"
         raw = json.loads(self._cli("search", "offers", query, "-o", "dph_total", "--storage", str(disk_gb)))

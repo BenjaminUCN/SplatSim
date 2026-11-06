@@ -36,6 +36,7 @@ jobs:
         run: |
           docker run --rm --entrypoint /opt/venv/bin/python "$IMAGE:latest" -c "import torch, torchcodec, lerobot, wandb, splatsim.cloud.runner; print(torch.__version__)"
           docker run --rm --entrypoint /opt/venv/bin/python "$IMAGE:latest" scripts/xarm5/train_diffusion.py --help > /dev/null
+          docker run --rm --entrypoint /opt/venv/bin/python "$IMAGE:latest" splatsim/utils/lerobot_conversion.py --help > /dev/null
           docker run --rm --entrypoint rclone "$IMAGE:latest" version
           docker images "$IMAGE"
 

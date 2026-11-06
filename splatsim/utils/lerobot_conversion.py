@@ -781,7 +781,7 @@ def run_conversion(config: ConversionConfig, repo_suffix: str):
         repo_suffix=repo_suffix,
     )
 
-    for ep_dir in tqdm(episode_dirs):
+    for ep_dir in tqdm(episode_dirs, desc="episodes"):
 
         ep_schema = detect_episode_schema(ep_dir)
         ep_image_dir_name = find_image_dir(ep_dir).name

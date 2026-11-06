@@ -164,7 +164,7 @@ def main(args: Args):
             obs = interpolated_obs(server, frames, *point)
             images = server.render_cameras(cameras)
             obs.update({name: img.cpu() for name, img in images.items()})
-            save_frame(str(tmp), k, obs)
+            save_frame(str(tmp), k, obs, images_in_pkl=False)   # 14.7 MB por frame si no
         shutil.rmtree(target, ignore_errors=True)
         os.rename(tmp, target)
         gaps = np.diff(times)

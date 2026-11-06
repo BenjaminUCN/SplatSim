@@ -1,4 +1,5 @@
-"""Panel del orquestador en la nube: cada trabajo levanta su propio pod, en paralelo.
+"""Panel del orquestador en la nube: cada trabajo levanta su propio pod, en paralelo. Convierte
+grabaciones a LeRobot y entrena; un entrenamiento puede esperar a una conversión en cola.
 
     python scripts/xarm5/cloud_server.py            # http://localhost:8083
 
@@ -14,6 +15,7 @@ import sys
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 
 import tyro
@@ -31,6 +33,9 @@ TICK_PERIOD = 20.0
 REFRESH_PERIOD = 3.0
 OFFERS_SHOWN = 8
 AUTO = "Auto (best estimate)"
+RECORDINGS_ROOT = "~/data/bc_data"
+CONVERT_REQUIREMENTS = {"min_cores": 8, "min_ram_gb": 16}   # sin GPU; medido: usa ~1.5 núcleos, más no acelera
+PENDING_DATASET = "⏳ #"
 
 
 @dataclass
@@ -55,6 +60,8 @@ class Panel:
             self._build_queue()
         with tabs.add_tab("New job", viser.Icon.PLUS):
             self._build_new_job()
+        with tabs.add_tab("Convert", viser.Icon.TRANSFORM):
+            self._build_convert()
         with tabs.add_tab("Limits", viser.Icon.COIN):
             self._build_limits()
 
@@ -83,9 +90,9 @@ class Panel:
         p = job.get("progress") or {}
         if "done" not in p:
             return job.get("phase") or job.get("wait") or ""
-        total = p.get("total") or job["config"].get("training_steps")
+        total = p.get("total") or (job.get("config") or {}).get("training_steps") or "?"
         rate = f" · {p['rate']:.2f}/s" if p.get("rate") else ""
-        return f"{p['done']:,}/{total:,}{rate}"
+        return f"{p['done']:,}/{total:,}{rate}" if isinstance(total, int) else f"{p['done']:,}/?{rate}"
 
     def refresh(self):
         orch = self.orch
@@ -105,6 +112,9 @@ class Panel:
             options = tuple(f"{j['id']} {j['name']}" for j in orch.jobs) or ("—",)
             if tuple(self.selected.options) != options:
                 self.selected.options = options
+            datasets = self._datasets()
+            if tuple(self.f_dataset.options) != datasets:
+                self.f_dataset.options = datasets
             job = orch.get(self._selected_id()) if self._selected_id() is not None else None
             self.detail.content = self._detail(job) if job else ""
 
@@ -117,8 +127,8 @@ class Panel:
         if job.get("estimate"):
             e = job["estimate"]
             lines.append(f"Estimate: {money(e['total'])} ({e['confidence']}: {e['source']})")
-        if job.get("model_dir"):
-            lines.append(f"Model: `{job['model_dir']}`")
+        if job.get("output_dir"):
+            lines.append(f"Output: `{job['output_dir']}`")
         if job.get("run_key"):
             log = self.orch.storage.read(f"{job['run_key']}/run.log") or ""
             tail = "\n".join(line[:150] for line in log.splitlines()[-12:])
@@ -130,7 +140,17 @@ class Panel:
     def _datasets(self) -> tuple[str, ...]:
         root = Path(DATASETS_ROOT).expanduser()
         names = sorted((p.name for p in root.iterdir() if (p / "meta").is_dir()), reverse=True) if root.exists() else []
-        return tuple(names) or ("—",)
+        pending = [f"{PENDING_DATASET}{j['id']} {Path(j['output']).name}" for j in self.orch.jobs
+                   if j["kind"] == "convert" and j["status"] != "done"]
+        return (*pending, *names) or ("—",)
+
+    def _chosen_dataset(self) -> tuple[str, int | None]:
+        """Ruta del dataset y, si es el de una conversión en cola, el trabajo al que debe esperar."""
+        value = self.f_dataset.value
+        if not value.startswith(PENDING_DATASET):
+            return f"{DATASETS_ROOT}/{value}", None
+        job_id, name = value.removeprefix(PENDING_DATASET).split(" ", 1)
+        return f"{DATASETS_ROOT}/{name}", int(job_id)
 
     def _build_new_job(self):
         gui = self.v.gui
@@ -158,7 +178,7 @@ class Panel:
         self.f_queue = gui.add_button("Add to queue", disabled=True)
         self.f_queue.on_click(lambda _: self._submit())
 
-    def _form(self) -> tuple[dict, str, Requirements]:
+    def _form(self) -> tuple[dict, str, Requirements, int | None]:
         base = yaml.safe_load((ROOT / self.f_base.value).read_text()) or {}
         extra = yaml.safe_load(self.f_extra.value) if self.f_extra.value.strip() else {}
         name = self.f_name.value.strip()
@@ -167,46 +187,113 @@ class Panel:
         overrides = {"arrangement": self.f_arrangement.value.strip() or None, "training_steps": int(self.f_steps.value),
                      "batch_size": int(self.f_batch.value), "image_augmentation": self.f_aug.value,
                      "torch_compile": self.f_compile.value, **(extra or {})}
-        dataset = f"{DATASETS_ROOT}/{self.f_dataset.value}"
+        dataset, parent = self._chosen_dataset()
         req = Requirements(gpu_name=self.f_gpu.value.strip(), min_cores=int(self.f_cores.value),
                            min_ram_gb=int(self.f_ram.value), min_pcie_gbps=float(self.f_pcie.value))
-        return train_config(base, name, dataset, overrides, self.has_wandb_key), dataset, req
+        return train_config(base, name, dataset, overrides, self.has_wandb_key), dataset, req, parent
 
     def _estimate(self):
         try:
-            cfg, dataset, req = self._form()
+            cfg, dataset, req, parent = self._form()
             self.f_offers.content = "Searching…"
-            ranked = self.orch.estimate(cfg, dataset, req)
+            ranked = self.orch.estimate(cfg, dataset, req, parent)
         except Exception as e:  # noqa: BLE001  se muestra en el panel
             self.f_offers.content = f"**Error:** {e}"
             return
-        if not ranked:
-            self.f_offers.content = "No machines match these requirements right now."
-            self.f_queue.disabled = True
-            return
-        rows = ["| Offer | CPU | $/h | PCIe | Speed | Hours | Total | Confidence |", "|---|---|---|---|---|---|---|---|"]
-        for e in ranked[:OFFERS_SHOWN]:
-            o = e.offer
-            rows.append(f"| {o.id} | {o.cpu_name[:22]} ({o.cores:.0f}) | {o.dph:.3f} | {o.pcie_gbps:.0f} | "
-                        f"{f'{e.rate:.2f}/s' if e.rate else '—'} | {f'{e.hours:.1f}' if e.hours else '—'} | "
-                        f"{money(e.total)} | {e.confidence} |")
-        self.f_offers.content = "\n".join(rows)
-        self.f_offer.options = (AUTO, *(str(e.offer.id) for e in ranked[:OFFERS_SHOWN]))
-        self.f_offer.value = AUTO
-        known = ranked[0].total
-        self.f_max.value = math.ceil(known * 1.5 * 10) / 10 if known else 0.0
-        self.f_queue.disabled = False
+        self._show_offers(ranked, self.f_offers, self.f_offer, self.f_max, self.f_queue)
 
     def _submit(self):
         try:
-            cfg, dataset, req = self._form()
+            cfg, dataset, req, parent = self._form()
             offer_id = None if self.f_offer.value == AUTO else int(self.f_offer.value)
-            self.orch.submit(self.f_name.value.strip(), cfg, dataset, req, float(self.f_max.value), offer_id)
+            self.orch.submit(self.f_name.value.strip(), cfg, dataset, req, float(self.f_max.value), offer_id,
+                             depends_on=parent)
         except Exception as e:  # noqa: BLE001  se muestra en el panel
             self.f_offers.content = f"**Error:** {e}"
             return
         self.f_queue.disabled = True
         self.f_offers.content = f"Queued **{cfg['model_name']}**."
+        self.refresh()
+
+    @staticmethod
+    def _show_offers(ranked, table, offer, max_cost, queue, intro: str = "") -> None:
+        if not ranked:
+            table.content = intro + "No machines match these requirements right now."
+            queue.disabled = True
+            return
+        rows = ["| Offer | CPU | $/h | PCIe | Speed | Hours | Total | Confidence |", "|---|---|---|---|---|---|---|---|"]
+        for e in ranked[:OFFERS_SHOWN]:
+            o = e.offer
+            rows.append(f"| {o.id} | {o.cpu_name[:22]} ({o.cores:.0f}) | {o.dph:.3f} | {o.pcie_gbps:.0f} | "
+                        f"{f'{e.rate:.2f}/s' if e.rate else '—'} | {f'{e.hours:.2f}' if e.hours else '—'} | "
+                        f"{money(e.total)} | {e.confidence} |")
+        table.content = intro + "\n".join(rows)
+        offer.options = (AUTO, *(str(e.offer.id) for e in ranked[:OFFERS_SHOWN]))
+        offer.value = AUTO
+        known = ranked[0].total
+        max_cost.value = math.ceil(known * 1.5 * 10) / 10 if known else 0.0
+        queue.disabled = False
+
+    # ── convertir ────────────────────────────────────────────────────────────
+    @staticmethod
+    def _recordings() -> tuple[str, ...]:
+        """Carpetas con imágenes: las que solo tienen el estado aún hay que renderizarlas."""
+        root = Path(RECORDINGS_ROOT).expanduser()
+        names = []
+        for folder in sorted(root.iterdir()) if root.exists() else []:
+            episode = next((p for p in folder.iterdir() if p.is_dir()), None) if folder.is_dir() else None
+            if episode and any((episode / d).is_dir() for d in ("image_1", "images")):
+                names.append(folder.name)
+        return tuple(names) or ("—",)
+
+    def _build_convert(self):
+        gui = self.v.gui
+        self.c_source = gui.add_dropdown("Recordings", self._recordings())
+        self.c_fps = gui.add_number("FPS", 10, min=1, step=1)
+        self.c_cameras = gui.add_text("Cameras", "", hint="Space separated; empty = all that the recordings have")
+        self.c_suffix = gui.add_text("Name suffix", datetime.now().strftime("%y%m%d_%H%M"))
+        self.c_discarded = gui.add_checkbox("Include discarded", False)
+        gui.add_button("Estimate cost").on_click(lambda _: self._estimate_convert())
+        self.c_offers = gui.add_markdown("Press *Estimate cost* to see what has to be uploaded and the machines.")
+        self.c_offer = gui.add_dropdown("Machine offer", (AUTO,))
+        self.c_max = gui.add_number("Max cost ($)", 0.0, min=0.0, step=0.1,
+                                    hint="The pod stops at this cost, even if this PC is off")
+        self.c_queue = gui.add_button("Add to queue", disabled=True)
+        self.c_queue.on_click(lambda _: self._submit_convert())
+
+    def _convert_args(self) -> tuple[dict, Requirements]:
+        suffix = self.c_suffix.value.strip()
+        if not suffix or self.c_source.value == "—":
+            raise ValueError("Faltan las grabaciones o el sufijo")
+        cameras = self.c_cameras.value.split() or None
+        args = {"input": f"{RECORDINGS_ROOT}/{self.c_source.value}", "fps": int(self.c_fps.value), "suffix": suffix,
+                "cameras": cameras, "ignore_selection": self.c_discarded.value}
+        return args, Requirements(gpu_name="", **CONVERT_REQUIREMENTS)
+
+    def _estimate_convert(self):
+        try:
+            args, req = self._convert_args()
+            self.c_offers.content = "Reading the recordings and searching…"
+            scan, ranked = self.orch.estimate_convert(args, req)
+        except Exception as e:  # noqa: BLE001  se muestra en el panel
+            self.c_offers.content = f"**Error:** {e}"
+            self.c_queue.disabled = True
+            return
+        intro = (f"{scan['episodes']} episodes · {scan['frames']:,} frames · {' '.join(scan['cameras'])} · "
+                 f"**{scan['gb']:.1f} GB to upload**\n\n")
+        self._show_offers(ranked, self.c_offers, self.c_offer, self.c_max, self.c_queue, intro)
+
+    def _submit_convert(self):
+        try:
+            args, req = self._convert_args()
+            offer_id = None if self.c_offer.value == AUTO else int(self.c_offer.value)
+            name = f"convert {self.c_source.value} {args['suffix']}"
+            self.orch.submit_convert(name, args, req, float(self.c_max.value), offer_id)
+        except Exception as e:  # noqa: BLE001  se muestra en el panel
+            self.c_offers.content = f"**Error:** {e}"
+            return
+        self.c_queue.disabled = True
+        self.c_offers.content = f"Queued. Its dataset now shows in *New job → Dataset* as {PENDING_DATASET}…"
         self.refresh()
 
     # ── límites ──────────────────────────────────────────────────────────────
@@ -234,6 +321,7 @@ class Panel:
 
 
 def update_registry(_job: dict) -> None:
+    """Modelos y datasets nuevos aparecen en el panel del robot tras *Reload Registry*."""
     subprocess.run([sys.executable, str(ROOT / "scripts/xarm5/build_registry.py")], cwd=ROOT,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
@@ -245,7 +333,7 @@ def main(args: Args):
     if "WANDB_API_KEY" in secrets:
         pod_env["WANDB_API_KEY"] = secrets["WANDB_API_KEY"]
     orch = Orchestrator(args.queue_dir, VastProvider(), Storage(env["SPLATSIM_REMOTE"], env), pod_env,
-                        image=args.image, on_model_ready=update_registry)
+                        image=args.image, on_ready=update_registry)
     panel = Panel(orch, args.port, "WANDB_API_KEY" in secrets)
 
     def worker():

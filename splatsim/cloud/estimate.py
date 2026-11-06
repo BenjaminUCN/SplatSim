@@ -11,6 +11,8 @@ IMAGE_GB = 4.82               # splatsim-train comprimida: lo que cada pod desca
 IMAGE_DISK_GB = 9.06          # lo que ocupa ya extraída
 STARTUP_S = 260               # GPU, dataset, carga y torch.compile, medidos en la prueba de 500 pasos
 CHECKPOINT_GB = 1.1           # model.safetensors del modelo de 2 cámaras
+CONVERT_STARTUP_S = 60        # sin GPU ni torch.compile
+DATASET_GB_PER_FRAME_CAMERA = 14.6e-6   # 13.0-14.6 kB en los datasets de 640x480 del lab: el mayor
 CONFIDENCE_ORDER = {"alta": 0, "baja": 1, "sin datos": 2}
 
 # Medido en vast con 12 workers y en RunPod (entrenamiento completo), noviembre de 2026.
@@ -21,6 +23,9 @@ SEED_HISTORY = [
      "cpu": "AMD Ryzen 5 7600 6-Core Processor", "rate": 4.49},    # 50k pasos en 185.7 min
     {"kind": "train", "profile": "bs32-cam2-noaug-compile", "gpu": "RTX 5090",
      "cpu": "AMD EPYC 7452 32-Core Processor", "rate": 3.26},    # últimos 326 pasos de la prueba, PCIe 26
+    {"kind": "convert", "profile": "convert-cam2", "gpu": "", "cpu": "AMD Ryzen 9 9950X 16-Core Processor", "rate": 15.1},    # lab, 3 episodios; usa ~1.5 núcleos
+    {"kind": "convert", "profile": "convert-cam2", "gpu": "RTX 4060",
+     "cpu": "AMD EPYC 7502 32-Core Processor", "rate": 7.96},    # pod, 790 frames incluido el arranque
 ]
 
 
@@ -31,6 +36,8 @@ class Workload:
     work: float          # pasos o frames
     down_gb: float       # imagen + entradas
     up_gb: float         # salidas
+    startup_s: float = STARTUP_S
+    uses_gpu: bool = True
 
 
 @dataclass
@@ -65,15 +72,25 @@ def train_workload(cfg: dict, dataset_gb: float) -> Workload:
     return Workload("train", train_profile(cfg), steps, IMAGE_GB + dataset_gb, checkpoints * CHECKPOINT_GB)
 
 
+def convert_workload(frames: int, cameras: int, recordings_gb: float) -> Workload:
+    return Workload("convert", f"convert-cam{cameras}", frames, IMAGE_GB + recordings_gb,
+                    predicted_dataset_gb(frames, cameras), CONVERT_STARTUP_S, uses_gpu=False)
+
+
+def predicted_dataset_gb(frames: int, cameras: int) -> float:
+    return frames * cameras * DATASET_GB_PER_FRAME_CAMERA
+
+
 def lookup_rate(history: list[dict], work: Workload, offer: Offer) -> tuple[float | None, str, str]:
-    """(velocidad, confianza, de dónde sale). Con otra CPU se toma la medición más lenta de esa GPU."""
-    same_gpu = [r for r in history if r["kind"] == work.kind and r["profile"] == work.profile
-                and r["gpu"] == offer.gpu_name]
-    same_cpu = [r["rate"] for r in same_gpu if r["cpu"] == offer.cpu_name]
+    """(velocidad, confianza, de dónde sale). Con otra CPU se toma la medición más lenta de esa GPU;
+    si el trabajo no usa GPU, de cualquiera."""
+    similar = [r for r in history if r["kind"] == work.kind and r["profile"] == work.profile
+               and (not work.uses_gpu or r["gpu"] == offer.gpu_name)]
+    same_cpu = [r["rate"] for r in similar if r["cpu"] == offer.cpu_name]
     if same_cpu:
         return sum(same_cpu) / len(same_cpu), "alta", f"{len(same_cpu)} medición(es) con este hardware"
-    if same_gpu:
-        return min(r["rate"] for r in same_gpu), "baja", "misma GPU, otra CPU"
+    if similar:
+        return min(r["rate"] for r in similar), "baja", "misma GPU, otra CPU" if work.uses_gpu else "otra CPU"
     return None, "sin datos", "sin mediciones comparables"
 
 
@@ -85,7 +102,7 @@ def estimate(history: list[dict], work: Workload, offer: Offer) -> Estimate:
     transfer_cost = work.down_gb * offer.down_cost_gb + work.up_gb * offer.up_cost_gb
     if rate is None:
         return Estimate(offer, None, confidence, source, None, None, transfer_cost, None)
-    hours = (STARTUP_S + work.work / rate + transfer_s) / 3600
+    hours = (work.startup_s + work.work / rate + transfer_s) / 3600
     compute = hours * offer.dph
     return Estimate(offer, rate, confidence, source, hours, compute, transfer_cost, compute + transfer_cost)
 
