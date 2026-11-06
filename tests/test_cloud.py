@@ -7,6 +7,7 @@ import json
 import os
 import pickle
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -775,6 +776,35 @@ class TestRestart(Base):
         self.assertEqual(data["jobs"][0]["name"], "m")
 
 
+class TestStubbornPod(Base):
+    def test_a_pod_that_resists_does_not_fail_the_job_and_gets_destroyed_later(self):
+        self.orch.tick()
+        real, calls = self.provider.destroy, []
+
+        def destroy(instance_id):
+            calls.append(instance_id)
+            if len(calls) == 1:
+                raise RuntimeError("vastai destroy instance: sin respuesta en 120 s")
+            real(instance_id)
+        self.provider.destroy = destroy
+        job = self.submit()
+        self.run_until(lambda: job["status"] == "done" and not self.provider.live)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(calls[0], calls[1])
+        self.assertTrue(any("No se pudo eliminar" in w for w in self.orch.warnings))
+
+    def test_a_new_pod_is_not_taken_for_an_orphan_while_its_job_is_starting(self):
+        self.orch.tick()
+        self.orch._orphans_checked = False
+        self.orch.busy.add(999)
+        self.provider.live[7] = Instance(7, "loading", self.orch.label_prefix + "recien_creado")
+        self.orch.tick()
+        self.assertIn(7, self.provider.live)
+        self.orch.busy.discard(999)
+        self.orch.tick()
+        self.assertNotIn(7, self.provider.live)
+
+
 class TestVastReplies(unittest.TestCase):
     """La API a veces responde vacío: una consulta se repite; crear un pod, no."""
 
@@ -811,6 +841,16 @@ class TestVastReplies(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "respuesta inválida"):
             p.create(offer, "img", ["k"], {}, 40, "l")
         self.assertEqual(len(p.calls), 1)
+
+    def test_destroy_is_repeated(self):
+        p = self.provider([RuntimeError("sin respuesta"), ""])
+        p.destroy(5)
+        self.assertEqual(len(p.calls), 2)
+
+    def test_a_cli_timeout_is_a_normal_error(self):
+        with mock.patch("subprocess.run", side_effect=subprocess.TimeoutExpired("vastai", 120)):
+            with self.assertRaisesRegex(RuntimeError, "sin respuesta"):
+                VastProvider()._cli("show", "user")
 
 
 class TestEstimate(unittest.TestCase):

@@ -209,11 +209,12 @@ class Orchestrator:
     def tick(self) -> None:
         with self.lock:
             instances = None
-            if any(j["status"] in ("starting", "running") for j in self.jobs) or not self._orphans_checked:
+            # con un hilo trabajando, un pod recién creado todavía no tiene su trabajo: no es huérfano
+            check_orphans = not self._orphans_checked and not self.busy
+            if any(j["status"] in ("starting", "running") for j in self.jobs) or check_orphans:
                 instances = {i.id: i for i in self.provider.instances()}
-            if not self._orphans_checked and instances is not None:
+            if check_orphans:
                 self._destroy_orphans(instances)
-                self._orphans_checked = True
             for job in self.jobs:
                 if job["id"] in self.busy:
                     continue
@@ -242,10 +243,15 @@ class Orchestrator:
     def _destroy_orphans(self, instances: dict) -> None:
         """Pods nuestros que ningún trabajo conoce (p.ej. se cerró el panel al crearlos): cobran."""
         known = {j.get("instance_id") for j in self.jobs if j["status"] in ACTIVE}
+        self._orphans_checked = True
         for instance in instances.values():
             if instance.label.startswith(self.label_prefix) and instance.id not in known:
-                self.provider.destroy(instance.id)
-                self.warnings.append(f"Eliminado el pod huérfano {instance.id} ({instance.label})")
+                try:
+                    self.provider.destroy(instance.id)
+                    self.warnings.append(f"Eliminado el pod huérfano {instance.id} ({instance.label})")
+                except RuntimeError as e:
+                    self._orphans_checked = False     # se reintenta en el siguiente ciclo
+                    self.warnings.append(f"No se pudo eliminar el pod {instance.id}: {e}")
 
     def _launch_ready(self) -> None:
         active = sum(j["status"] in ACTIVE for j in self.jobs)
@@ -367,7 +373,7 @@ class Orchestrator:
                 self.save()
                 return
         if job.get("cost", 0.0) > job["max_cost"]:
-            self.provider.destroy(job["instance_id"])
+            self._release(job)
             self._fail(job, f"superó el máximo de ${job['max_cost']:.2f}")
         elif instance is None:
             self._retry_or_fail(job, "el pod desapareció")
@@ -391,8 +397,13 @@ class Orchestrator:
             self._fail(job, f"{result['reason']}: {result.get('error') or 'ver run.log'}")
 
     def _release(self, job: dict) -> None:
+        """Un pod que no se deja eliminar no debe tumbar el trabajo: queda como huérfano y se reintenta."""
         if job.get("instance_id") is not None:
-            self.provider.destroy(job["instance_id"])
+            try:
+                self.provider.destroy(job["instance_id"])
+            except RuntimeError as e:
+                self._orphans_checked = False
+                self.warnings.append(f"No se pudo eliminar el pod {job['instance_id']}: {e}")
             self._update_cost(job)
             job["instance_id"] = None
 

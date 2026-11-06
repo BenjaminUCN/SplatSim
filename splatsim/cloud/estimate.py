@@ -28,13 +28,21 @@ SEED_HISTORY = [
      "cpu": "AMD Ryzen 5 7600 6-Core Processor", "rate": 4.49},    # 50k pasos en 185.7 min
     {"kind": "train", "profile": "bs32-cam2-noaug-compile", "gpu": "RTX 5090",
      "cpu": "AMD EPYC 7452 32-Core Processor", "rate": 3.26},    # últimos 326 pasos de la prueba, PCIe 26
+    {"kind": "train", "profile": "bs32-cam2-noaug-compile", "gpu": "RTX 5090",
+     "cpu": "AMD EPYC 9355 32-Core Processor", "rate": 7.2},    # últimos 600 de 1200 pasos, 16 núcleos
+    {"kind": "train", "profile": "bs32-cam2-noaug-compile", "gpu": "RTX 5090",
+     "cpu": "AMD Ryzen 9 7950X 16-Core Processor", "rate": 4.03},    # otra máquina que la de 6.30: varían
     {"kind": "convert", "profile": "convert-cam2", "gpu": "", "cpu": "AMD Ryzen 9 9950X 16-Core Processor", "rate": 15.1},    # lab, 3 episodios; usa ~1.5 núcleos
     {"kind": "convert", "profile": "convert-cam2", "gpu": "RTX 4060",
      "cpu": "AMD EPYC 7502 32-Core Processor", "rate": 7.96},    # pod, 790 frames incluido el arranque
+    {"kind": "convert", "profile": "convert-cam4", "gpu": "Quadro P4000",
+     "cpu": "Xeon® E5-2690 0 ", "rate": 3.89},    # pod, 2122 frames en 545 s
     {"kind": "render", "profile": "render-cam4-w1", "gpu": "RTX 5080",
      "cpu": "AMD Ryzen 9 9950X 16-Core Processor", "rate": 4.25},    # lab, 117 frames sin pantalla
     {"kind": "render", "profile": "render-cam4-w1", "gpu": "RTX 5090",
-     "cpu": "AMD EPYC 9355 32-Core Processor", "rate": 7.0},    # pod, 91 frames con un hilo
+     "cpu": "AMD EPYC 9355 32-Core Processor", "rate": 7.0},    # pod, 1061 frames con un hilo
+    {"kind": "mirror", "profile": "mirror-cam4-w3", "gpu": "RTX 5090",
+     "cpu": "XEON® GOLD 6530", "rate": 11.73},    # pod, 2122 frames en 181 s
 ]
 
 

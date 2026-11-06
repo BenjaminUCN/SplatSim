@@ -54,7 +54,10 @@ class VastProvider:
         command = ["vastai", *args]
         # todo lo que sigue a --args va al contenedor, así que --raw debe ir antes
         command.insert(command.index("--args") if "--args" in command else len(command), "--raw")
-        done = subprocess.run(command, capture_output=True, text=True, timeout=120)
+        try:
+            done = subprocess.run(command, capture_output=True, text=True, timeout=120)
+        except subprocess.TimeoutExpired as e:
+            raise RuntimeError(f"vastai {args[0]} {args[1] if len(args) > 1 else ''}: sin respuesta en 120 s") from e
         if done.returncode:
             raise RuntimeError(f"vastai {args[0]} {args[1] if len(args) > 1 else ''}: "
                                f"{(done.stderr or done.stdout).strip()[-400:]}")
@@ -110,4 +113,11 @@ class VastProvider:
                 for i in self._read("show", "instances")]
 
     def destroy(self, instance_id: int) -> None:
-        self._cli("destroy", "instance", str(instance_id), "-y")
+        for attempt in range(READ_ATTEMPTS):      # repetirlo no hace daño, y mientras falle el pod cobra
+            try:
+                self._cli("destroy", "instance", str(instance_id), "-y")
+                return
+            except RuntimeError:
+                if attempt == READ_ATTEMPTS - 1:
+                    raise
+                time.sleep(READ_RETRY_S)
