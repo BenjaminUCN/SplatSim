@@ -45,6 +45,10 @@ class SimPanel(StationPanel):
         pos = self._apple_pos()
         if np.abs(np.subtract(pos, self._apple_xyz.value)).max() > 1e-3:
             self._sync_apple_ui(pos)
+        if self.s.peduncle is not None and self.s.peduncle.blade_link is not None:
+            p = self.s.peduncle
+            state = ("**cut, held**" if p.held else "**cut, dropped**") if p.cut else (f"not cut: {p.last_check}" if p.last_check else "not cut")
+            self._peduncle_text.content = f"Peduncle: blade at {p.error() * 100:.1f} cm, {state}"
 
     # ── cámaras base ─────────────────────────────────────────────────────────
     def _build_camera_gui(self):
@@ -235,6 +239,8 @@ class SimPanel(StationPanel):
         self._grid_handles = []
         self._grid_note = ""
         with self.v.gui.add_folder("Tomato"):
+            if self.s.peduncle is not None:
+                self._peduncle_text = self.v.gui.add_markdown("")
             self._apple_xyz = self.v.gui.add_vector3("xyz (m)", pos, step=0.001)
             rand = self.v.gui.add_button("Random Position")
             save = self.v.gui.add_button("Save Position to Grid")

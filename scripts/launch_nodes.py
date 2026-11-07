@@ -243,7 +243,15 @@ def launch_robot_server(args: Args):
         ip = args.robot_ip if explicit_ip else cfg["ip"]
         cameras = {name: ZMQCamera(cam["port"], host=args.hostname)
                    for name, cam in (cfg.get("cameras") or {}).items()}
-        robot = XArmRobot(ip=ip, control_mode=args.control_mode, command_hz=args.hz)
+        gripper_cfg = cfg.get("gripper") or {}
+        external_gripper = None
+        if gripper_cfg.get("type", "xarm") == "xl330":
+            from splatsim.robots.xl330_gripper import XL330Gripper
+
+            external_gripper = XL330Gripper.from_config(gripper_cfg)
+            external_gripper.start()
+        robot = XArmRobot(ip=ip, control_mode=args.control_mode, command_hz=args.hz,
+                          external_gripper=external_gripper)
         server = XArm5RealServer(
             robot, cameras, port=port, host=args.hostname, control_hz=args.hz,
             panel_port=None if args.gui == "none" else args.panel_port,
