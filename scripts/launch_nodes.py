@@ -36,6 +36,9 @@ class Args:
     # sim xArm5: tiempo simulado por comando. fixed = 1/hz (políticas, ensayos; dt fijo por frame),
     # realtime = el tiempo real entre comandos (teleop con GELLO, aunque el lazo no alcance hz)
     sim_clock: str = "fixed"
+    # sim xArm5: hojas recortadas del splat en la escena (configs/occluders.yaml; si no existe, el
+    # panel lo crea). Sin este flag no se carga ninguna.
+    occluders: str | None = None
 
 
 def launch_robot_server(args: Args):
@@ -224,6 +227,7 @@ def launch_robot_server(args: Args):
             panel_port=args.panel_port,
             control_mode=args.control_mode,
             sim_clock=args.sim_clock,
+            occluders=args.occluders,
         )
 
     elif args.robot == "xarm5_lite":
