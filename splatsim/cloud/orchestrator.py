@@ -518,6 +518,8 @@ class Orchestrator:
         with self.lock:
             self._settle(job)
             job.update(status="failed", error=reason, finished=datetime.now().strftime("%Y-%m-%d %H:%M"))
+            for key in ("phase", "phase_since", "moved_ts", "detail"):
+                job.pop(key, None)      # si no, el panel sigue mostrando la fase en la que falló
             self.save()
 
     def _update_cost(self, job: dict) -> None:
@@ -559,7 +561,11 @@ class Orchestrator:
                 raise RuntimeError(f"solo hay {free:.0f} GB libres en el lab; la salida sigue en el bucket: {key}")
             self.storage.download(key, target, progress=lambda done, total: self._note_detail(
                 job, item_label(1, 1, key, done, total)))
-            bad = [name for name, digest in job["result"]["outputs"][key].items() if sha256(target / name) != digest]
+            outputs = job["result"]["outputs"][key]
+            missing = [name for name in outputs if not (target / name).is_file()]
+            if missing:
+                raise RuntimeError(f"no llegaron {missing[:3]}; la salida sigue en el bucket: {key}")
+            bad = [name for name, digest in outputs.items() if sha256(target / name) != digest]
             if bad:
                 raise RuntimeError(f"sha256 distinto en {bad[:3]}; la salida sigue en el bucket: {key}")
         if publish := stage.publish_key(job):

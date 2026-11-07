@@ -290,6 +290,7 @@ class TestPipeline(Base):
         job = self.submit()
         self.run_until(lambda: job["status"] == "failed")
         self.assertIn("sha256", job["error"])
+        self.assertNotIn("phase", job, "un trabajo fallido no sigue mostrando 'downloading'")
         self.storage.corrupt = False
         self.orch.retry(job["id"])
         self.run_until(lambda: job["status"] == "done")
@@ -909,6 +910,15 @@ class TestEpisodePacks(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (self.bucket / "recordings/x").iterdir()), ["000.tar"])
         result = json.loads(self.storage.read("runs/p/result.json"))
         self.assertIn("000/00001.pkl", result["outputs"]["recordings/x"])
+
+    def test_the_manifest_skips_symlinks_because_rclone_does_not_upload_them(self):
+        out = self.tmp / "model"
+        (out / "wandb/run-1/logs").mkdir(parents=True)
+        (out / "model.safetensors").write_text("pesos")
+        (out / "wandb/run-1/logs/debug.log").write_text("log")
+        (out / "wandb/debug.log").symlink_to(out / "wandb/run-1/logs/debug.log")
+        (out / "wandb/latest-run").symlink_to(out / "wandb/run-1", target_is_directory=True)
+        self.assertEqual(sorted(runner.manifest(out)), ["model.safetensors", "wandb/run-1/logs/debug.log"])
 
     def test_recordings_are_packed_in_every_stage_that_moves_them(self):
         job = {"args": {"input": "/lab/g", "fps": 10, "arrangement": "2cam", "workers": 1}, "output": "/lab/g_10hz",
