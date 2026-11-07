@@ -25,6 +25,7 @@ cámaras y el desplazamiento de los espejos.
 """
 import os
 import pickle
+import re
 import shutil
 import sys
 import time
@@ -126,6 +127,14 @@ def rendered_obs(server, frame: dict, base_q: np.ndarray, cameras: list[str], mi
     return obs
 
 
+def episode_cameras(episode: Path, first: dict) -> list[str]:
+    """Cámaras con que se grabó: las imágenes pueden estar en el .pkl, en los .png o en ambos."""
+    names = {k for k in first if k.endswith("_rgb")}
+    for folder in ("image_1", "images"):
+        names |= {m.group(1) for f in (episode / folder).glob("*.png") if (m := re.match(r"^(.+_rgb)_\d+\.png$", f.name))}
+    return sorted(names)
+
+
 def read_frame(path: Path) -> dict | None:
     try:
         with open(path, "rb") as f:
@@ -175,7 +184,7 @@ def main(args: Args):
             elif args.cameras:
                 cameras = list(args.cameras)
             else:
-                cameras = sorted({k for k in first if k.endswith("_rgb")}) or ["base_rgb", "wrist_rgb"]
+                cameras = episode_cameras(episode, first) or ["base_rgb", "wrist_rgb"]
             with open(out_root / MIRROR_INFO_FILE, "w") as f:
                 yaml.safe_dump({"source": str(folder.resolve()), "robot_name": args.robot_name,
                                 "cameras": cameras, "mirror": "y -> -y (joint1, joint5)",

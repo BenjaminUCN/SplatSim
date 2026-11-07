@@ -86,7 +86,7 @@ class XArm5RealServer(OperatorMixin):
     def get_observations(self) -> dict:
         with self.lock:
             obs = self.robot.get_observations()
-            obs.update(self._read_cameras(self.camera_names))
+            obs.update(self._read_cameras(self.recorder.cameras_to_capture(self.camera_names)))
             obs["time"] = self.clock()
             if self._last_command is not None:   # lo que pidió el cliente (GELLO), para reproducirlo
                 obs["joint_command"] = self._last_command
@@ -150,9 +150,10 @@ class XArm5RealServer(OperatorMixin):
                 time.sleep(1 / self.control_hz)
 
     def start_recording(self, max_seconds: float | None = None, metadata: dict | None = None,
-                        root: str | None = None) -> str | None:
+                        root: str | None = None, images_in_pkl: bool = True,
+                        cameras: list[str] | None = None) -> str | None:
         with self.lock:
-            return self.recorder.start(max_seconds, metadata, root)
+            return self.recorder.start(max_seconds, metadata, root, images_in_pkl, cameras)
 
     def stop_recording(self) -> None:
         with self.lock:

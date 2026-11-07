@@ -138,6 +138,11 @@ def make_server(robot_name: str, cameras: list[str], **kwargs):
     return server
 
 
+def portable_path(path: Path) -> Path:
+    """Con ~: el meta.json de un render en un pod también debe servir en el lab."""
+    return Path("~") / path.relative_to(Path.home()) if path.is_relative_to(Path.home()) else path
+
+
 def write_leaf_meta(path: Path, entries: list[dict], leaf_fit: dict) -> None:
     """Agrega la hoja al meta.json del episodio (measure_occlusion.py la vuelve a poner desde ahí)."""
     meta = json.loads(path.read_text()) if path.exists() else {}
@@ -152,7 +157,7 @@ def main(args: Args):
                       and (not args.episodes or e.name in args.episodes))
     if not episodes:
         raise SystemExit(f"No hay episodios en {folder}")
-    leaves = sorted(Path(args.leaf_dir).expanduser().glob("*.ply")) if args.leaf_dir else []
+    leaves = [portable_path(p) for p in sorted(Path(args.leaf_dir).expanduser().glob("*.ply"))] if args.leaf_dir else []
     if args.leaf_dir and not leaves:
         raise SystemExit(f"No hay hojas en {args.leaf_dir}: recorta alguna con segment_leaf.py")
     leaf_cameras = list(args.leaf_cameras) or [c for c in cameras if "wrist" not in c]
@@ -203,7 +208,7 @@ def main(args: Args):
             obs = interpolated_obs(server, frames, *point)
             images = server.render_cameras(cameras)
             obs.update({name: img.cpu() for name, img in images.items()})
-            save_frame(str(tmp), k, obs)
+            save_frame(str(tmp), k, obs, images_in_pkl=False)   # 14.7 MB por frame si no
         if leaf_fit:
             write_leaf_meta(tmp / "meta.json", entries, leaf_fit)
         shutil.rmtree(target, ignore_errors=True)

@@ -370,6 +370,29 @@ Jobs use one of two lanes: trainings, renders and mirrors use the GPU and run on
 
 The queue is saved in `~/data/train_queues/live/jobs.yaml` with each job's config and log. Each job runs in its own session: closing the panel does not stop them, and reopening it picks them up again (each log ends with the job's exit code). A job that depends on another starts only when that one is done; if it fails, the next steps wait until it is retried or removed. After each finished training or conversion the registry is regenerated, so the model or dataset appears in the simulator panel.
 
+## Cloud queue
+
+`scripts/xarm5/cloud_server.py` (http://localhost:8083) runs data and training jobs on rented GPUs instead of this PC, each job in its own Vast pod, several at once. It doesn't replace the training queue.
+
+```bash
+python scripts/xarm5/cloud_server.py
+```
+
+It needs `~/.config/splatsim/cloud.env` (copy `configs/cloud.env.example`, `chmod 600`), `rclone` and the `vastai` CLI logged in. Data travels through a Cloudflare R2 bucket.
+
+- *Data*: chains **Render** → **Mirror** → **Convert** for a folder of `~/data/bc_data`. It shows each stage's frames, transfers and estimated cost before queuing. Intermediate images stay in the bucket: only the last stage comes down to this PC, and what was used is then deleted from the bucket. To review a render before converting it, queue Render alone.
+- *New job*: trains a model, on a dataset of this PC or on one still queued (`⏳ #<job> <name>`), and waits for it.
+- *Queue*: progress, cost and log of each job, with Stop, Retry and Remove.
+- *Limits*: pods at once, the budget of the whole queue and a pause.
+
+Each pod stops itself when it finishes or reaches its *Max cost*, even if this PC is off, and a closed panel picks its pods up again when reopened (`~/data/cloud_queue/`). Speeds come from `history.yaml`, so a job with no comparable measurement has no estimate and you set its maximum yourself. The cost shown in the queue is an estimate: while a pod runs it already includes the whole predicted transfer, uploads too, and if the pod ends without finishing only its hours and download remain. The balance can drop less. An offer whose transfer alone exceeds the maximum isn't used, and in some machines 40 GB of renders cost more than the compute. Recordings travel as one `<episode>.tar` per episode instead of one object per file, so the bucket sees a few hundred operations instead of hundreds of thousands, and the folder is the same again once extracted. A cut upload repeats only the missing episodes, and an unchanged episode is not sent again; this hashes each package, which reads every file. The *Progress* column shows the phase, how long it has been there, its counters (episodes while moving recordings, frames or steps while running) and ⚠️ if they stop for 3 minutes. Pods report every 30 s. Folders that do not travel in packages, like a dataset or a model, only show which folder is moving. To change a maximum, select the job in *Queue* and use *Set max cost*; it can't be done while the job has a pod, and a failed job then needs *Retry*.
+
+A pod's start is mostly the image download: 18 s on a machine that already had it, 7–25 min otherwise. So the queue goes first to a machine where one of its pods ran in the last 14 days (`machines.yaml`, *cached* in the offers table), as long as it costs at most $0.15 more than the best offer (`PREFER_CACHED_USD`), and leaves for last a machine that failed in that time. An offer you choose by hand still comes first. The hosts can delete the image, so *cached* is likely, not certain; each job's detail shows how long its pod took to start.
+
+Pods render from the images `splatsim-train` and `splatsim-render`, built by `.github/workflows/images.yml`, which reuses the published layers: pushing code leaves the 4.5 GB dependency layer as it was, and changing `requirements-train.txt` or `scripts/runpod_setup.sh` makes every machine download it again. Render and mirror receive this PC's camera poses and scene config with each job, and upload only the scene files needed (about 1.1 GB: COLMAP `sparse`, the trained splat, two photos, the URDF, the tomato). With `SPLATSIM_HEADLESS=1`, PyBullet runs without a window; the images are identical to rendering with one. Use `--workers` on a GPU with about 8 GB per worker.
+
+*Random leaf occlusions* (*Data*, with Render) does the same as `--leaf_dir` in [A different leaf per episode](#occlusion-percentage): it uploads the leaf folder to `assets/occluders/` and leaves the output in `<folder>_<fps>hz_leaves`. Mirror is refused with it, because `mirror_recordings.py` renders without the leaves while keeping the `meta.json` that says they are there. The estimate adds an unmeasured 10 s per episode for the fit (`LEAF_FIT_S`), and these renders aren't added to the speed history.
+
 ## Registry of recordings, datasets and models
 
 `configs/registry.yaml` links each model to the dataset it was trained on, and each dataset to the GELLO recordings it was converted from. Regenerate it after recording, converting or training:
