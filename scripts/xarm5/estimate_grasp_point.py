@@ -41,8 +41,9 @@ class Args:
     point: Literal["gripper", "demos"] = "gripper"
     """gripper: centro entre las pinzas (URDF); demos: mediana del final de las demos"""
     recordings: tuple[str, ...] = ("~/data/bc_data/gello_3plants",)
-    robot_name: str = "xarm5_lite_plant_v3"
-    """robot de configs/object_configs/objects.yaml cuya URDF da el centro de la pinza"""
+    robot_name: str | None = None
+    """robot de configs/object_configs/objects.yaml cuya URDF da el centro de la pinza; por defecto
+    xarm5_lite_plant_v3_hand_held si existe, si no xarm5_lite_plant_v3"""
     out: str = GRASP_POINT_PATH
 
 
@@ -76,7 +77,10 @@ def main(args: Args):
     rels = np.array(rels)
     demo_point = np.median(rels, axis=0)
     if args.point == "gripper":
-        urdf = expand(load_yaml("configs/object_configs/objects.yaml")[args.robot_name]["urdf_path"][0])
+        robots = load_yaml("configs/object_configs/objects.yaml")
+        name = args.robot_name or ("xarm5_lite_plant_v3_hand_held" if "xarm5_lite_plant_v3_hand_held" in robots
+                                   else "xarm5_lite_plant_v3")
+        urdf = expand(robots[name]["urdf_path"][0])
         point = gripper_center(urdf)
     else:
         point = demo_point

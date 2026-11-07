@@ -156,6 +156,8 @@ class XArmRobot(Robot):
             self.robot.disconnect()
         if self.command_thread is not None:
             self.command_thread.join()
+        if self.external_gripper is not None:
+            self.external_gripper.close()
 
     # ------------------------------------------------------------------ #
     # Init                                                                 #
@@ -169,12 +171,16 @@ class XArmRobot(Robot):
         max_delta: float = DEFAULT_MAX_DELTA,
         control_mode: str = "position",
         command_hz: float = 30.0,
+        external_gripper=None,
     ):
         """control_mode: position / interp / velocity (splatsim/robots/joint_controller.py),
         la misma ley que usa el simulador. command_hz: frecuencia con que llegan los objetivos
-        (el --hz del cliente: run_env_sim con GELLO o con la política)."""
+        (el --hz del cliente: run_env_sim con GELLO o con la política).
+        external_gripper: gripper que no va por el controlador del brazo (XL330Gripper); con él no
+        se le pide nada al gripper del xArm, que ya no está montado."""
         print(f"[XArmRobot] Connecting to xArm5 at {ip} (control_mode={control_mode})")
         self.real = real
+        self.external_gripper = external_gripper
         self.max_delta = max_delta
         self.ctrl = JointController(control_mode, 1 / command_hz, ControllerGains(max_delta=max_delta))
 
@@ -200,14 +206,16 @@ class XArmRobot(Robot):
             print(f"[XArmRobot] No report stream from {ip} (ports 30001-30003 unreachable): "
                   "the arm state is queried directly")
         self._clear_error_states()
-        self._set_gripper_position(self.GRIPPER_OPEN)
+        if external_gripper is None:
+            self._set_gripper_position(self.GRIPPER_OPEN)
 
         self.last_state_lock = threading.Lock()
         self.target_command_lock = threading.Lock()
         self.last_state = self._update_last_state()
         self.target_command = {
             "joints": self.last_state.joints(),
-            "gripper": 0,
+            # el gripper externo no se mueve al arrancar: espera el primer comando
+            "gripper": None if external_gripper is not None else 0,
         }
         self.ctrl.reset(self.last_state.joints(), time.monotonic())
 
@@ -256,6 +264,10 @@ class XArmRobot(Robot):
                 "gripper": gripper,
             }
             self.ctrl.set_target(joints, time.monotonic())
+        # una vez por comando recibido (no repetido por el hilo de control): así no pisa los botones
+        # del panel ni Recover. Con el brazo detenido tampoco se mueve la hoja
+        if self.external_gripper is not None and gripper is not None and self.arm_problem is None:
+            self.external_gripper.command(gripper)
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
@@ -277,6 +289,8 @@ class XArmRobot(Robot):
         time.sleep(1)
         if any(codes.values()):
             print(f"[XArmRobot] Return codes while enabling: {codes}")
+        if self.external_gripper is not None:
+            return
         self.robot.set_gripper_enable(True)
         time.sleep(1)
         self.robot.set_gripper_mode(0)
@@ -325,7 +339,9 @@ class XArmRobot(Robot):
         with self.target_command_lock:
             joints = self._update_last_state().joints()
             self.ctrl.reset(joints, time.monotonic())
-            self.target_command = {"joints": joints, "gripper": self.target_command["gripper"]}
+            # el gripper externo no retoma la orden de antes de la parada: espera una nueva
+            gripper = None if self.external_gripper is not None else self.target_command["gripper"]
+            self.target_command = {"joints": joints, "gripper": gripper}
         # tras set_state(0) el controlador reporta un rato el estado 0 (transición) antes de 1/2
         deadline = time.monotonic() + 3.0
         expected = 4 if self.ctrl.mode == "velocity" else 1
@@ -340,6 +356,8 @@ class XArmRobot(Robot):
         return problem
 
     def _get_gripper_pos(self) -> float:
+        if self.external_gripper is not None:
+            return self.external_gripper.get_state()
         if self.robot is None:
             return 0.0
         code, gripper_pos = self.robot.get_gripper_position()
@@ -394,7 +412,7 @@ class XArmRobot(Robot):
                 if ret in (1, 9) and not self._report_connected():
                     self._pause_arm(self._check_arm(query=True) or f"command returned code {ret}")
 
-            if gripper_command is not None:
+            if self.external_gripper is None and gripper_command is not None:
                 # Solo envía si cambió más del 2 % (evita spam al gripper)
                 if abs(gripper_command - self._last_sent_gripper) > 0.02:
                     target_pos = self.GRIPPER_OPEN + gripper_command * (
@@ -424,9 +442,9 @@ class XArmRobot(Robot):
             if self.robot is None:
                 return RobotState(0, 0, 0, 0, 0, 0, 0, 0, 0, np.zeros(3))
 
-            # Actualiza el gripper cada 10 pasos (caché de Gello)
+            # Actualiza el gripper cada 10 pasos (caché de Gello); el externo no usa este bus
             self._gripper_counter += 1
-            if self._gripper_counter >= 10:
+            if self.external_gripper is not None or self._gripper_counter >= 10:
                 self._cached_gripper_pos = self._get_gripper_pos()
                 self._gripper_counter = 0
 
@@ -457,6 +475,8 @@ class XArmRobot(Robot):
 
     def _pause_arm(self, problem: str) -> None:
         self.arm_problem = problem
+        if self.external_gripper is not None:
+            self.external_gripper.hold()
         print(f"[XArmRobot] Arm stopped: {problem}. Commands are paused until Enable arm "
               "(panel, Robot folder)")
 
