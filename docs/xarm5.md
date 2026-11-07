@@ -156,6 +156,32 @@ Edit `urdf_path` in `configs/object_configs/objects.yaml` or pass `--urdf` if yo
 
 `python -m unittest tests/test_hand_held_xl330.py` tests the driver, the URDF and the splat merge without hardware, PyBullet or GPU. `scripts/xarm5/export_hand_held_meshes.py` regenerates the meshes when the CAD changes.
 
+### Tomato peduncle
+
+A placeholder until there is a scan of a tomato with its peduncle: a green cylinder of Gaussians on top of the tomato, to test approaching the peduncle and cutting it. This scene mounts the tool with the blue top cover down, 180° from `xarm5_lite_plant_v3_hand_held`.
+
+```bash
+python scripts/xarm5/build_hand_held_urdf.py --dst ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down.urdf
+python scripts/xarm5/hand_held_splat.py --new-scene xarm5_lite_plant_v3_hand_held_down --urdf ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down.urdf
+python scripts/xarm5/add_peduncle.py --scene xarm5_lite_plant_v3_hand_held_down [--length 0.05] [--radius 0.0025]
+python scripts/xarm5/plan_trajectories.py --episodes 6 --out ~/data/bc_data/planned_cut --robot_name xarm5_lite_plant_v3_hand_held_down --target peduncle
+python scripts/xarm5/render_recordings.py ~/data/bc_data/planned_cut --fps 10 --robot_name xarm5_lite_plant_v3_hand_held_down
+```
+
+`add_peduncle.py` writes a new splat next to the original tomato and adds `plastic_apple_peduncle` to `objects.yaml`, with the `bottom`, `top` and `cut` points of the stem in the tomato's frame. The scene's `object_overrides` makes it use that tomato under its usual name, so other scenes are unchanged. For a real scan, change `ply_path`, `aabb` and those points.
+
+With `--target peduncle` the planner puts the middle of the blade edge on the `cut` point, arrives open, closes at the start of the hold, and then backs away still closed. Episodes that don't end with the tomato held are discarded, and `meta.json` records `peduncle_cut` and `peduncle_held`. Frames record `peduncle_error` (m, blade to `cut` point), `peduncle_cut` and `peduncle_held`, and the panel's *Tomato* folder shows them.
+
+The pruner is cut-and-hold. A cut happens when the jaw finishes closing (gripper at 0.8) with the stem crossing the blade plane, within 15 mm of the middle of the edge and at most 45° from the pivot axis. Arriving already closed doesn't cut. The tomato then moves rigidly with the pruner until the gripper opens below 0.6, when it falls. Placing it again restores it.
+
+**Limits:**
+
+- The stem has no collisions and nothing pushes it. It stays whole and moves with the tomato, so no stub stays on the plant.
+- While held, the tomato is fixed to the blade: it doesn't swing or slip, and it doesn't collide.
+- The 15 mm, 45° and the 0.8 and 0.6 gripper values are chosen, not measured on the real pruner.
+- The stem is straight and vertical, and the tomato doesn't turn. With `joint5` at 0, the tool's pitch is the angle between the stem and the pivot axis, which is why the planner keeps it between -25° and 0°.
+- `run_policy_trials.py` still measures against the grasp point, not the cut point.
+
 ## Replay recordings in each control mode
 
 To compare `position`, `interp` and `velocity` on the same motion (e.g. on the real arm), record one GELLO demonstration and replay it in each mode:

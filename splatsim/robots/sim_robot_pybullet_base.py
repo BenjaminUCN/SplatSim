@@ -193,6 +193,9 @@ class PybulletRobotServerBase:
         )
 
         self.object_config = load_yaml(self.object_config_path)
+        # la escena puede usar otra versión de un objeto (el tomate con pedúnculo) con su mismo nombre
+        for name, replacement in self.object_config[self.robot_name].get("object_overrides", {}).items():
+            self.object_config[name] = self.object_config[replacement]
 
         urdf_path = self.object_config[self.robot_name]["urdf_path"][0]
         if not os.path.exists(urdf_path):

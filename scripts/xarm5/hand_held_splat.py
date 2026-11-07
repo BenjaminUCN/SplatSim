@@ -41,6 +41,8 @@ def main() -> None:
     args = parser.parse_args()
 
     new_scene = args.new_scene or args.scene + "_hand_held"
+    # el splat de cada escena va en su carpeta, para que otra versión no pise a la anterior
+    suffix = new_scene[len(args.scene):] if new_scene.startswith(args.scene) else "_hand_held"
     configs = load_yaml(OBJECTS)
     with open(OBJECTS, encoding="utf-8") as f:
         raw = yaml.safe_load(f)                 # sin expandir ~, para escribirlo igual
@@ -93,7 +95,7 @@ def main() -> None:
         vertices, old_labels, scene["transformation"]["matrix"], scene["aabb"]["bounding_box"], label_map,
         np.concatenate(xyz), np.concatenate(rgb), np.concatenate(labels), args.spacing_mm / 1000 * 0.7)
 
-    out = model_path.rstrip("/\\") + "_hand_held"
+    out = model_path.rstrip("/\\") + suffix
     shutil.copytree(model_path, out, ignore=lambda d, names: ["point_cloud"] if d == model_path else [],
                     dirs_exist_ok=True)
     write_ply(os.path.join(out, "point_cloud", iteration, "point_cloud.ply"), merged)
@@ -101,7 +103,7 @@ def main() -> None:
 
     entry = dict(raw[args.scene])
     entry["urdf_path"] = [args.urdf]
-    entry["model_path"] = raw[args.scene]["model_path"].rstrip("/\\") + "_hand_held"
+    entry["model_path"] = raw[args.scene]["model_path"].rstrip("/\\") + suffix
     entry["aabb"] = {**entry["aabb"], "bounding_box": aabb}
     entry["gripper"] = "hand_held_xl330"
     with open(OBJECTS, "a", encoding="utf-8") as f:

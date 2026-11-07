@@ -41,7 +41,7 @@ from render_recordings import make_server  # noqa: E402
 from splatsim.robots.station.recorder import save_frame  # noqa: E402
 from splatsim.robots.xarm.config import APPLE_HEMISPHERE, APPLE_RANGE  # noqa: E402
 from splatsim.utils.apple_grid import load_grid, load_random_range, load_random_shape, sample_hemisphere  # noqa: E402
-from splatsim.utils.grasp_point import grasp_error, load_grasp_point  # noqa: E402
+from splatsim.utils.grasp_point import grasp_error, gripper_center, load_grasp_point  # noqa: E402
 
 PLAN_INFO_FILE = "plan_info.yaml"
 EE_LINK = 6          # link_eef: el de obs["state"]
@@ -82,6 +82,13 @@ class Args:
     """rad: amplitud de la desviación suave de la ida (0 = sin desviación)"""
     gripper: float = 0.0
     """comando del gripper durante todo el episodio (0 = cerrado, como en las demos)"""
+    target: Literal["tomato", "peduncle"] = "tomato"
+    """peduncle (escena con cortadora y tomate con tallo): deja el centro del filo en el punto de corte,
+    llega con la cortadora abierta y cierra al empezar el sostenido. Reemplaza grasp_point, --gripper
+    y --pitch-deg por --peduncle-pitch-deg. Al final se retira con el tomate sujeto, sin abrir, y
+    descarta los episodios que no terminan con el tomate sujeto"""
+    peduncle_pitch_deg: tuple[float, float] = (-25.0, 0.0)
+    """inclinación con --target peduncle: la hoja corta de través si la herramienta va casi horizontal"""
     max_final_error: float = 0.03
     """m: error de agarre final sobre el que se descarta el episodio. Con el centro de la pinza
     como punto de agarre, el tomate choca con la base de la pinza y la deja a ~1.7 cm (1.2–2 cm),
@@ -172,10 +179,11 @@ def min_jerk(s: np.ndarray) -> np.ndarray:
 
 
 def plan_episode(kin: Kinematics, q0: np.ndarray, tomato, point, args: Args, rng) -> dict | None:
-    """Trayectoria articular a control_hz hacia el tomate, o None si no hay solución."""
+    """Trayectoria articular a control_hz hacia el tomate (o a --target), o None si no hay solución."""
     u = lambda r: float(rng.uniform(*r))  # noqa: E731
+    pitch_range = args.peduncle_pitch_deg if args.target == "peduncle" else args.pitch_deg
     for _ in range(6):         # otras inclinaciones si esta no alcanza
-        pitch = np.radians(u(args.pitch_deg))
+        pitch = np.radians(u(pitch_range))
         pos, rot = grasp_pose(tomato, pitch, point)
         back = u(args.pregrasp)
         pre_pos = pos - back * rot[:, 2]
@@ -220,7 +228,14 @@ def plan_episode(kin: Kinematics, q0: np.ndarray, tomato, point, args: Args, rng
                         np.repeat(q_pre[None], steps(phases["settle"]), 0) if phases["settle"] > 0
                         else np.zeros((0, ARM_JOINTS)),
                         approach, np.repeat(path[-1][None], steps(phases["hold"]), 0)])
-    return {"q": q, "pitch_deg": float(np.degrees(pitch)), "pregrasp": back,
+    gripper = np.full(len(q), args.gripper)
+    target_end = len(q)                      # último frame en la pose objetivo
+    if args.target == "peduncle":
+        gripper[:] = 0.0                     # hand_held_XL330: 0 = abierta
+        gripper[-steps(phases["hold"]):] = 1.0
+        q = np.concatenate([q, approach[::-1]])   # cut-and-hold: se retira cerrada, con el tomate
+        gripper = np.concatenate([gripper, np.ones(len(approach))])
+    return {"q": q, "gripper": gripper, "target_end": target_end, "pitch_deg": float(np.degrees(pitch)), "pregrasp": back,
             "phases": {k: round(v, 3) for k, v in phases.items()}}
 
 
@@ -256,13 +271,13 @@ class Positions:
 
 
 # ── ejecución ────────────────────────────────────────────────────────────────
-def execute(server, plan: dict, tomato, gripper: float, folder: Path) -> np.ndarray:
+def execute(server, plan: dict, tomato, folder: Path) -> np.ndarray:
     """Corre la trayectoria en el servidor (un comando por frame) y graba el estado; devuelve
     los state de cada frame."""
     server.reset_robot()
     server.apple.move_to(tomato)
     states = []
-    for k, q in enumerate(plan["q"], 1):
+    for k, (q, gripper) in enumerate(zip(plan["q"], plan["gripper"]), 1):
         server.command_joint_state(np.array([*q, gripper]))
         obs = server.state_observation()
         save_frame(str(folder), k, obs)
@@ -276,13 +291,20 @@ def main(args: Args):
     existing = [int(e.name) for e in out.iterdir() if e.is_dir() and e.name.isdigit()]
     # con semilla fija, completar una carpeta no repite las posiciones de los que ya tiene
     rng = np.random.default_rng(args.seed if args.seed is None or not existing else [args.seed, len(existing)])
-    point = load_grasp_point()
+    point = None if args.target == "peduncle" else load_grasp_point()
     positions = Positions(args, rng)
     first = max(existing, default=-1) + 1
     todo = args.episodes - len(existing)
     if todo <= 0:
         print(f"{out} ya tiene {len(existing)} episodios (pedidos {args.episodes}): nada que generar", flush=True)
         return
+    server = make_server(args.robot_name, [], control_hz=args.control_hz)
+    cut_offset = np.zeros(3)
+    if args.target == "peduncle":
+        if server.peduncle is None or server.peduncle.blade_link is None:
+            raise SystemExit(f"--target peduncle necesita una escena con cortadora y tallo: {args.robot_name} no lo es")
+        point = gripper_center(server.urdf_path)
+        cut_offset = np.asarray(server.peduncle.stem["cut"])  # el tomate no gira: basta sumarlo
     info = {"generated": datetime.now().strftime("%Y-%m-%d %H:%M"), "grasp_point": point.tolist(),
             **asdict(args)}
     runs = []
@@ -292,7 +314,6 @@ def main(args: Args):
     with open(out / PLAN_INFO_FILE, "w") as f:
         yaml.safe_dump({"runs": runs}, f, sort_keys=False, allow_unicode=True)
 
-    server = make_server(args.robot_name, [], control_hz=args.control_hz)
     server.reset_robot()
     q0 = np.asarray(server.state_observation()["joint_positions"][:ARM_JOINTS])
     kin = Kinematics(server.urdf_path)
@@ -307,29 +328,34 @@ def main(args: Args):
         start = time.time()
         for attempt in range(args.max_attempts):
             tomato = positions.sample()
-            plan = plan_episode(kin, q0, tomato, point, args, rng)
+            aim = np.asarray(tomato) + cut_offset
+            plan = plan_episode(kin, q0, aim, point, args, rng)
             if plan is None:
                 rejected += 1
                 continue
             tmp = out / f".{name}.tmp"
             shutil.rmtree(tmp, ignore_errors=True)
             tmp.mkdir()
-            states = execute(server, plan, tomato, args.gripper, tmp)
-            err = grasp_error(states, tomato, point)
-            if err[-1] > args.max_final_error:
+            states = execute(server, plan, tomato, tmp)
+            err = grasp_error(states, aim, point)
+            final_err = err[plan["target_end"] - 1]
+            was_cut = server.peduncle.cut if server.peduncle is not None else None
+            held = server.peduncle.held if server.peduncle is not None else None
+            if final_err > args.max_final_error or (args.target == "peduncle" and not held):
                 shutil.rmtree(tmp)
                 rejected += 1
                 continue
             with open(tmp / "meta.json", "w") as f:
                 json.dump({"source": "planner", "apple_position": tomato, "attempt": attempt,
                            "pitch_deg": round(plan["pitch_deg"], 2), "pregrasp": round(plan["pregrasp"], 4),
-                           "phases": plan["phases"], "final_grasp_error": round(float(err[-1]), 4),
+                           "phases": plan["phases"], "final_grasp_error": round(float(final_err), 4),
+                           "target": args.target, "peduncle_cut": was_cut, "peduncle_held": held,
                            "seed": args.seed}, f, indent=2)
             os.rename(tmp, out / name)
             saved, failed_in_row = saved + 1, 0
             print(f"[{saved}/{todo}] {name}: {len(states)} frames "
                   f"({len(states) / args.control_hz:.1f} s), inclinación {plan['pitch_deg']:.0f}°, "
-                  f"error final {err[-1] * 100:.1f} cm, {time.time() - start:.1f} s", flush=True)
+                  f"error final {final_err * 100:.1f} cm, {time.time() - start:.1f} s", flush=True)
             break
         else:
             failed_in_row, skipped = failed_in_row + 1, skipped + 1

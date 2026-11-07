@@ -14,6 +14,7 @@ from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 from gaussian_renderer import render
 
 from .apple import AppleController
+from .peduncle import PeduncleCutter
 from .cameras import AppleCamera, BaseCamera, WristCamera
 from splatsim.robots.joint_controller import ControllerGains, JointController
 
@@ -108,7 +109,9 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         self._remove_wall()
         self._lower_floor(FLOOR_Z)
 
+        self.peduncle = None
         self.apple = AppleController(self, movable=move_apple and gui == "pybullet")
+        self.peduncle = PeduncleCutter.for_server(self)
         base_cams = [BaseCamera(self, name, xyz, rpy)
                      for name, (xyz, rpy) in base_camera_poses().items()]
         self.cameras = {cam.name: cam for cam in base_cams}
@@ -197,6 +200,8 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             self._step(k)
             self._tick_left -= k
             n -= k
+        if self.peduncle is not None:
+            self.peduncle.update()
 
     def _arm_positions(self) -> np.ndarray:
         return np.array([self.pybullet_client.getJointState(self.dummy_robot, i)[0]
@@ -290,6 +295,8 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
     def set_object_pose(self, *args, **kwargs) -> None:
         with self.lock:  # también se llama desde el hilo ZMQ
             super().set_object_pose(*args, **kwargs)
+            if self.peduncle is not None:   # el único objeto es el tomate
+                self.peduncle.reset()
 
     def render_image(self, camera_name, cached_link_states=None):
         if camera_name not in self.cameras:
@@ -409,6 +416,10 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         obs["sim_clock"] = self.sim_clock
         obs["sim_joint_positions"] = np.array(
             [c.getJointState(self.dummy_robot, i)[0] for i in range(c.getNumJoints(self.dummy_robot))])
+        if self.peduncle is not None:
+            obs["peduncle_error"] = self.peduncle.error()
+            obs["peduncle_cut"] = self.peduncle.cut
+            obs["peduncle_held"] = self.peduncle.held
 
     def get_observations(self):
         with self.lock, self.render_lock:
