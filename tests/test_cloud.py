@@ -1065,6 +1065,44 @@ class TestUnfinishedPodCost(Base):
         self.assertGreaterEqual(job["cost"], job["estimate"]["transfer_cost"])
 
 
+class TestPanelAwayWhilePodFinishes(Base):
+    def setUp(self):
+        super().setUp()
+        self.provider.autostart = False
+        self.orch.settings.budget_usd = 8.0
+        self.job = self.submit(max_cost=3.0, batch_size=7)
+        self.job["download"] = False
+        self.run_until(lambda: self.job["status"] == "starting")
+        self.job["billing_ts"] = time.time() - 20 * 3600    # el panel se entera 20 h después: $20 a $1/h
+
+    def finish_pod(self, **fields):
+        key = stages.STAGES["train"].output_key(self.job)
+        self.storage.write(f"{key}/model.safetensors", "x")
+        self.storage.write(f"{self.job['run_key']}/result.json", json.dumps(
+            {"ok": True, "reason": "done", "total_s": 1800, "outputs": {key: {}}, **fields}))
+
+    def test_only_the_time_it_ran_is_counted(self):
+        self.finish_pod()
+        self.run_until(lambda: self.job["status"] == "done")
+        self.assertAlmostEqual(self.job["cost"], 0.5 + self.job["estimate"]["transfer_cost"], places=3)
+
+    def test_the_next_job_is_not_held_by_the_budget(self):
+        self.finish_pod()
+        waiting = self.orch.submit("next", self.cfg("next"), str(self.dataset), Requirements(), 3.0)
+        self.run_until(lambda: self.job["status"] == "done")
+        self.run_until(lambda: waiting["status"] == "starting")
+
+    def test_a_failed_pod_counts_the_same_way(self):
+        self.finish_pod(ok=False, reason="command_failed")
+        self.run_until(lambda: self.job["status"] == "failed")
+        self.assertLess(self.job["cost"], 3.0)
+
+    def test_a_pod_without_a_result_is_still_counted_by_the_clock(self):
+        self.orch.tick()
+        self.assertEqual(self.job["status"], "failed")
+        self.assertIn("máximo", self.job["error"])
+
+
 class TestRunKey(Base):
     def setUp(self):
         super().setUp()

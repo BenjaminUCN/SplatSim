@@ -431,12 +431,14 @@ class Orchestrator:
     def _check(self, job: dict, instance) -> None:
         if "billing_ts" not in job and instance is not None and instance.status in ("running", "exited"):
             job["billing_ts"] = time.time()
-        self._update_cost(job)
         result = self.storage.read(f"{job['run_key']}/result.json")
         if result:
+            job["result"] = json.loads(result)    # antes del costo: dice cuánto corrió de verdad
+            self._update_cost(job)
             self._note_boot(job)
-            self._on_result(job, json.loads(result))
+            self._on_result(job, job["result"])
             return
+        self._update_cost(job)
         now = time.time()
         status = self.storage.read(f"{job['run_key']}/status.json")
         if status:
@@ -523,16 +525,22 @@ class Orchestrator:
         cobra por hora. El valor exacto sale en la factura."""
         if "offer" not in job:
             return
-        hours = (time.time() - job["billing_ts"]) / 3600 if "billing_ts" in job else 0.0
-        job["cost"] = round(job.get("cost_before", 0.0) + hours * job["offer"]["dph"]
+        job["cost"] = round(job.get("cost_before", 0.0) + self._hours(job) * job["offer"]["dph"]
                             + job["estimate"]["transfer_cost"], 4)
+
+    @staticmethod
+    def _hours(job: dict) -> float:
+        """Lo que el pod dice haber corrido, si ya terminó: el panel puede enterarse horas después."""
+        ran = (job.get("result") or {}).get("total_s")
+        if ran is not None:
+            return ran / 3600
+        return (time.time() - job["billing_ts"]) / 3600 if "billing_ts" in job else 0.0
 
     def _settle(self, job: dict) -> None:
         """Un pod que no terminó no subió sus salidas: se queda lo que corrió y lo que bajó, no lo previsto."""
         if "offer" not in job or job.get("settled") or (job.get("result") or {}).get("ok"):
             return
-        hours = (time.time() - job["billing_ts"]) / 3600 if "billing_ts" in job else 0.0
-        job["cost"] = round(job.get("cost_before", 0.0) + hours * job["offer"]["dph"]
+        job["cost"] = round(job.get("cost_before", 0.0) + self._hours(job) * job["offer"]["dph"]
                             + self.workload(job).down_gb * job["offer"]["down_cost_gb"], 4)
         job["settled"] = True
 
