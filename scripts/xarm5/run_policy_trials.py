@@ -34,6 +34,7 @@ from gello.zmq_core.robot_node import ZMQClientRobot
 
 from splatsim.utils.trials.grasp_point import grasp_error, load_grasp_point
 from splatsim.utils.remote_call import ask_operator, call
+from splatsim.utils.trials.durations import other_durations
 
 APPLE_NAME = "plastic_apple"
 APPLE_QUAT = (0.0, 0.0, 0.0, 1.0)
@@ -150,6 +151,11 @@ def main(args: Args) -> None:
     root = os.path.join(os.path.expanduser(args.output_dir), run_name,
                         datetime.datetime.now().strftime("%y%m%d_%H%M%S"))
     os.makedirs(root, exist_ok=True)
+    # corridas anteriores del mismo modelo con otra duración: compare_trials.py no las mezcla
+    for seconds, runs in other_durations(os.path.dirname(root), args.trial_seconds, skip=root).items():
+        print(f"[Trials] AVISO: {run_name} ya tiene corridas de {seconds:g} s ({', '.join(runs)}) y esta "
+              f"es de {args.trial_seconds:g} s. Sus resultados no son comparables: compare_trials.py "
+              "las separa por duración; usa la misma --trial_seconds para juntarlas.")
 
     robot = ZMQClientRobot(port=args.robot_port, host=args.hostname)
     agent = LeRobotDiffusionAgent(checkpoint=args.checkpoint, dataset_root=args.dataset_root,
@@ -174,7 +180,7 @@ def main(args: Args) -> None:
         positions = args.positions if args.positions is not None else range(len(apple_grid))
     total = len(positions) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
-              "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point"]
+              "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point", "trial_seconds"]
     if not manual:
         fields += list(occlusion_columns(call(robot, "measure_occlusion")))
     grasp_point = load_grasp_point()
@@ -220,7 +226,8 @@ def main(args: Args) -> None:
                             print(f"[Trials] Descartado por el operador ({result['folder']})")
                             continue
                         result["manual_success"] = int(answer == "Success")
-                    row = {"pos_idx": pos_idx, "trial": trial, **result, "grasp_point": point_text}
+                    row = {"pos_idx": pos_idx, "trial": trial, **result, "grasp_point": point_text,
+                           "trial_seconds": args.trial_seconds}
                     if apple_pos:
                         row.update(x=apple_pos[0], y=apple_pos[1], z=apple_pos[2])
                     writer.writerow(row)

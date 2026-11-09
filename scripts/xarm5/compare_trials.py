@@ -38,6 +38,7 @@ from scipy import stats  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.utils.trials.grasp_point import SUCCESS_RADIUS, grasp_error, load_grasp_point  # noqa: E402
+from splatsim.utils.trials.durations import trial_seconds  # noqa: E402
 
 # paleta de referencia (modo claro): una serie = un color; magnitud = rampa azul de un tono
 SERIES = "#2a78d6"
@@ -80,10 +81,31 @@ def load_runs(entries) -> pd.DataFrame:
                  or "grasp_point" not in df or (df.grasp_point[~manual] != _point_text()).any())
         if stale:
             df = _backfill_grasp(df, skip=manual)
-        df["model"] = label
+        df["trial_seconds"] = _durations(df)
+        durations = sorted(df.trial_seconds.dropna().unique())
+        if len(durations) > 1:
+            # más segundos = más tiempo para llegar al tomate: separar en vez de mezclar
+            print(f"AVISO: {label} junta corridas de {', '.join(f'{s:g}' for s in durations)} s; "
+                  "se comparan por separado")
+            df["model"] = [f"{label} {s:g}s" if pd.notna(s) else f"{label} ?s" for s in df.trial_seconds]
+        else:
+            df["model"] = label
         frames.append(df)
         print(f"{label}: {len(df)} ensayos de {len(csvs)} corrida(s)")
-    return pd.concat(frames, ignore_index=True)
+    out = pd.concat(frames, ignore_index=True)
+    durations = sorted(out.trial_seconds.dropna().unique())
+    if len(durations) > 1:
+        print(f"AVISO: los ensayos tienen distinta duración ({', '.join(f'{s:g}' for s in durations)} s): "
+              "las diferencias entre modelos pueden deberse a eso")
+    return out
+
+
+def _durations(df: pd.DataFrame) -> pd.Series:
+    """trial_seconds de cada fila: la columna del CSV o, en corridas anteriores a ella, el meta.json."""
+    given = df["trial_seconds"] if "trial_seconds" in df else pd.Series(np.nan, df.index)
+    return pd.Series([float(v) if pd.notna(v) else trial_seconds(folder) if isinstance(folder, str) else None
+                      for v, folder in zip(given, df.get("folder", pd.Series(None, df.index)))],
+                     index=df.index, dtype=float)
 
 
 def _point_text() -> str:
