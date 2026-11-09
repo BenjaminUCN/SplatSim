@@ -40,10 +40,13 @@ Each scene also needs `data/labels_path/<robot_name>_labels.npy` and `data/pcds_
 ## Run the simulation server
 
 ```bash
-python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --hz 10
+python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3 --hz 10
 ```
 
-- `--robot_name`: the scene from `objects.yaml` (`xarm5_lite_plant_v3` is the latest).
+- `--robot`: `sim_xarm5` (default) for the simulation, `xarm5` for the real robot.
+- `--robot_name`: the scene from `objects.yaml` (default `xarm5_lite_plant_v3`, the latest).
+
+Both defaults point at this setup, so `python scripts/launch_nodes.py --hz 10` is the same command.
 - `--gui`: `viser` (default) opens a web control panel at http://localhost:8080 (`--panel_port`); `pybullet` keeps the old PyBullet sliders and buttons instead.
 - `--control_mode`: how joint targets (from the policy or GELLO) are followed: `position` (default), `interp` or `velocity`; see [Control modes](#control-modes).
 - `--move_apple`: only with `--gui pybullet`, adds the tomato sliders and buttons (the viser panel always has them).
@@ -86,7 +89,7 @@ Record with all cameras (the default) so every arrangement is trained on the sam
 
 ## Control modes
 
-The policy and GELLO always send joint positions; `--control_mode` only changes how the low-level loop (30 Hz) follows them. The same law, in `splatsim/robots/joint_controller.py`, runs in the simulator and in the real xArm5 driver (`--robot xarm5_lite`), so both behave alike:
+The policy and GELLO always send joint positions; `--control_mode` only changes how the low-level loop (30 Hz) follows them. The same law, in `splatsim/robots/joint_controller.py`, runs in the simulator and in the real xArm5 driver (`--robot xarm5`), so both behave alike:
 
 | Mode | Real xArm | Behavior |
 |---|---|---|
@@ -101,7 +104,7 @@ Start the real robot with the same `--hz` the client uses (e.g. `--hz 10` for th
 The real arm runs behind the same ZMQ protocol, recorder and control panel as the simulator (`splatsim/robots/station/`), so `run_env_sim.py` (GELLO or the policy), `run_policy_trials.py` and the panel work against both. Settings are in `configs/xarm5_real.yaml`: IP, `urdf` (shown in the panel's 3D view; `null` = the one of `--robot_name` in `objects.yaml`), `home_joints` (the pose **Reset Robot** moves to, slowly; `null` = Reset Robot does nothing), `reset_speed`, the cameras and the recordings folder.
 ```bash
 python scripts/launch_camera_nodes.py --config configs/xarm5_real.yaml   # one ZMQ node per RealSense
-python scripts/launch_nodes.py --robot xarm5_lite --hz 10 [--control_mode interp] [--gui none]
+python scripts/launch_nodes.py --robot xarm5 --hz 10 [--control_mode interp] [--gui none]
 ```
 - Cameras: each entry of `cameras` maps the name the policy sees (`base_rgb`, `wrist_rgb`, as in the sim) to a RealSense serial and a port. With `serial: null` the nodes take the detected cameras in order, which is not stable across reboots; set the serials (`launch_camera_nodes.py` prints them) once the cameras are mounted. Images are 640×480 RGB uint8, the sim's size.
 - The panel (http://localhost:8080) has the *Run* tab: Reset Robot, control mode, Policy (Run / Stop), Recording and the camera views. There is no Scene tab: the tomato is placed by hand.
@@ -143,7 +146,7 @@ Check these on the station:
 ```bash
 python scripts/xarm5/build_hand_held_urdf.py                 # xarm5_hand_held.urdf, next to xarm5.urdf
 python scripts/xarm5/hand_held_splat.py --scene xarm5_lite_plant_v3   # adds xarm5_lite_plant_v3_hand_held
-python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3_hand_held --hz 10
+python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3_hand_held --hz 10
 python scripts/xarm5/estimate_grasp_point.py                 # the grasp point becomes the middle of the blade edge
 ```
 Edit `urdf_path` in `configs/object_configs/objects.yaml` or pass `--urdf` if your URDF is elsewhere. For the real station's 3D view, set `urdf` in `configs/xarm5_real.yaml` to the new file.
@@ -206,7 +209,7 @@ It joins every `summary.csv` of the folder (or the files given) and, since each 
 
 Rendering one observation takes ~0.25 s (mostly deforming the robot splat to the current pose), so a loop that renders every step can't follow a hand in real time, and recording a frame per rendered step gives an irregular, mislabeled time step. With `--sim_clock realtime` teleoperation and rendering are decoupled:
 ```bash
-python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --sim_clock realtime
+python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3 --sim_clock realtime
 python scripts/run_env_sim.py --agent gello --gello_port /dev/ttyACM0 --start_joints -3.1415 0.4712 -1.8151 0.4188 1.5708 0
 ```
 - The client sends commands at `--hz` (30) without asking for observations; the server's physics follows the clock and the arm follows the leader smoothly (in sim the joint step limit is `SIM_MAX_DELTA`, 0.15 rad per 30 Hz tick, looser than the real arm's 0.05).
@@ -285,7 +288,7 @@ Open http://localhost:8083: the scene's splat, seen from `base_rgb`. With *Pick*
 **Place it in the scene:**
 
 ```bash
-python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --occluders configs/occluders.yaml
+python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3 --occluders configs/occluders.yaml
 ```
 
 Without `--occluders` no leaf is loaded. With it, the panel's *Scene* tab has an *Occluders* folder: **Add to Scene** adds a saved leaf (the same one several times if you want; leaves saved after the server started need a restart to be listed), a gizmo moves and rotates it, and **Put Between Camera and Tomato** places it on the line from the tomato to the chosen base camera (*Tomato → camera*: 0 = at the tomato, 1 = at the camera). **Save Occluders** writes the file. The file holds each leaf's center position in the world and its rotation (`wxyz`; identity = as in the plant).
@@ -422,7 +425,7 @@ The policy needs `lerobot` (and with it `huggingface_hub`) in the same environme
 1. Define the tomato positions `(x, y, z)` to test in `configs/apple_grid.yaml`. The easiest way is to place the tomato from the control panel (*Tomato* folder) and press **Save Position to Grid** for each position you want; you can also edit the file by hand.
 2. Start the server:
    ```bash
-   python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --hz 10
+   python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3 --hz 10
    ```
 3. Run the trials:
    ```bash

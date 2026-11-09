@@ -1,7 +1,7 @@
 """Corre ensayos automáticos de la política con el tomate en una grilla de posiciones.
 
 Primero lanzar el servidor (con el mismo --hz con que se entrenó la política):
-    python scripts/launch_nodes.py --robot sim_xarm5_splat_camera_2 --robot_name xarm5_lite_plant_v3 --hz 10
+    python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3 --hz 10
 Luego:
     python scripts/xarm5/run_policy_trials.py --trials-per-position 3 --trial-seconds 15
 
@@ -15,7 +15,7 @@ la grabación (trial_seconds de tiempo simulado). La política se carga una sola
 Salida en output_dir/<nombre del modelo>/<fecha>/: una carpeta por ensayo (000/, 001/, ... con meta.json)
 y trials.csv con un resumen (distancia final y mínima del efector al tomate).
 
-Robot real (launch_nodes.py --robot xarm5_lite): no hay posición del tomate, así que los ensayos se
+Robot real (launch_nodes.py --robot xarm5): no hay posición del tomate, así que los ensayos se
 hacen con el operador, por el panel: antes de cada uno pide poner el tomate en la posición de la
 grilla (Start / Skip / Stop trials) y al final marcar el resultado (Success / Fail / Discard), que
 queda en la columna manual_success (Discard no escribe fila). La duración es de reloj.
