@@ -36,9 +36,9 @@ ROOT = Path(__file__).resolve().parents[2]       # raíz del repo
 SCRIPTS = Path(__file__).resolve().parent      # scripts/xarm5
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(SCRIPTS))
-from splatsim.utils.camera_setup import load_camera_setup  # noqa: E402
-from splatsim.utils.registry import load_registry  # noqa: E402
-from splatsim.utils.episode_selection import load_discarded  # noqa: E402
+from splatsim.utils.render.camera_setup import load_camera_setup  # noqa: E402
+from splatsim.utils.data.registry import load_registry  # noqa: E402
+from splatsim.utils.data.episode_selection import load_discarded  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
 from data_jobs import DATA_KINDS, SCRIPTS as JOB_SCRIPTS, command, kind, lane, plan_pipeline  # noqa: E402
 from train_queue import _train_fields, build_runs  # noqa: E402

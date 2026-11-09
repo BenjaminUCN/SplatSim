@@ -18,8 +18,8 @@ import viser
 from scipy.spatial.transform import Rotation
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
-from splatsim.utils.camera_setup import base_camera_poses  # noqa: E402
-from splatsim.utils.leaf_segmentation import (  # noqa: E402
+from splatsim.utils.render.camera_setup import base_camera_poses  # noqa: E402
+from splatsim.utils.scene.leaf_segmentation import (  # noqa: E402
     GrowParams,
     LeafSelection,
     SplatCloud,

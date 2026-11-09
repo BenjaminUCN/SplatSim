@@ -37,7 +37,7 @@ from matplotlib.colors import LinearSegmentedColormap  # noqa: E402
 from scipy import stats  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
-from splatsim.utils.grasp_point import SUCCESS_RADIUS, grasp_error, load_grasp_point  # noqa: E402
+from splatsim.utils.trials.grasp_point import SUCCESS_RADIUS, grasp_error, load_grasp_point  # noqa: E402
 
 # paleta de referencia (modo claro): una serie = un color; magnitud = rampa azul de un tono
 SERIES = "#2a78d6"

@@ -8,8 +8,8 @@ import time
 import numpy as np
 
 from splatsim.robots.sim_robot_pybullet_base import PybulletRobotServerBase
-from splatsim.utils.camera_setup import base_camera_poses
-from splatsim.utils.occlusion import measure_camera
+from splatsim.utils.render.camera_setup import base_camera_poses
+from splatsim.utils.render.occlusion import measure_camera
 from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 
 from gaussian_renderer import render
@@ -406,7 +406,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         return self.occluders.set_episode(entries)
 
     def measure_occlusion(self, camera_names=None) -> dict:
-        """Cuánto del tomate tapa la escena en cada cámara (splatsim/utils/occlusion.py), con el
+        """Cuánto del tomate tapa la escena en cada cámara (splatsim/utils/render/occlusion.py), con el
         brazo y los oclusores como estén ahora. Por defecto, las cámaras del servidor."""
         if getattr(self, "gaussians_backup", None) is None:
             return {}

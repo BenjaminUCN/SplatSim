@@ -13,7 +13,7 @@ from lerobot.policies.utils import build_inference_frame
 from torchvision import transforms
 
 from splatsim.image_classifier import SimpleCNN
-from splatsim.utils.registry import dataset_source_for_checkpoint, hub_repo_id
+from splatsim.utils.data.registry import dataset_source_for_checkpoint, hub_repo_id
 
 # Constants from config.json
 _IMAGE_KEY   = "observation.images.base_rgb"

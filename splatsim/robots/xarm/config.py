@@ -26,7 +26,7 @@ IMAGE_W = 640
 IMAGE_H = 480
 
 # Las cámaras base (poses) y los arreglos de cámaras viven en configs/camera_poses.yaml
-# (ver splatsim/utils/camera_setup.py)
+# (ver splatsim/utils/render/camera_setup.py)
 BASE_CAM_RANGE_XYZ = 1.5  # ± metros alrededor del valor inicial
 BASE_CAM_RANGE_RPY = 3.15 # ± radianes
 
@@ -45,7 +45,7 @@ APPLE_HEMISPHERE = {"center": (0.0, 0.0, 0.267), "radius": (0.5, 0.95), "facing"
 # Valor inicial de los sliders. Antes x=0.3 (fuera de rango); ahora dentro.
 APPLE_INIT = (-0.3, 0.2, 0.1)
 # grilla de posiciones para scripts/xarm5/run_policy_trials.py (se llena con el botón de guardar)
-from splatsim.utils.apple_grid import APPLE_GRID_PATH  # noqa: E402,F401  (antes vivía aquí)
+from splatsim.utils.scene.apple_grid import APPLE_GRID_PATH  # noqa: E402,F401  (antes vivía aquí)
 
 ENV_CONFIG = {
     "objects": [

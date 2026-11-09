@@ -21,10 +21,10 @@ import tyro
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
-from splatsim.utils.episode_selection import load_discarded  # noqa: E402
+from splatsim.utils.data.episode_selection import load_discarded  # noqa: E402
 from typing import Literal  # noqa: E402
 
-from splatsim.utils.grasp_point import (  # noqa: E402
+from splatsim.utils.trials.grasp_point import (  # noqa: E402
     GRASP_POINT_PATH,
     POINT_HEADER,
     SUCCESS_RADIUS,

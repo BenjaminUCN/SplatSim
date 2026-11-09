@@ -15,7 +15,7 @@ import xml.etree.ElementTree as ET
 import numpy as np
 
 from splatsim.robots.xl330_gripper import ALERT_BIT, XL330Gripper
-from splatsim.utils.hand_held import (
+from splatsim.utils.scene.hand_held import (
     FLANGE_CENTER_MM, GRIPPER_CENTER_MM, JAW_JOINT, JAW_TRAVEL_RAD, MESH_DIR, PIVOT_MM, build_urdf, in_box, load_manifest, merge_splat, origin_matrix, read_ply, read_stl, sample_surface, write_ply,
 )
 

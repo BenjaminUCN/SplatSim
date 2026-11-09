@@ -34,16 +34,16 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.robots.station.recorder import save_frame  # noqa: E402
-from splatsim.utils.camera_setup import arrangement_cameras  # noqa: E402
-from splatsim.utils.episode_selection import SELECTION_FILE  # noqa: E402
-from splatsim.utils.leaf_segmentation import load_occluder_config  # noqa: E402
-from splatsim.utils.leaf_variation import (  # noqa: E402
+from splatsim.utils.render.camera_setup import arrangement_cameras  # noqa: E402
+from splatsim.utils.data.episode_selection import SELECTION_FILE  # noqa: E402
+from splatsim.utils.scene.leaf_segmentation import load_occluder_config  # noqa: E402
+from splatsim.utils.scene.leaf_variation import (  # noqa: E402
     DEFAULT_TARGETS,
     arm_path,
     draw_episode,
     place_episode_leaf,
 )
-from splatsim.utils.parallel_episodes import own_argv, run_workers  # noqa: E402
+from splatsim.utils.render.parallel_episodes import own_argv, run_workers  # noqa: E402
 
 
 @dataclass

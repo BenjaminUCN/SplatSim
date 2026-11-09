@@ -16,7 +16,7 @@ import pybullet as p
 import yaml
 from pybullet_utils.bullet_client import BulletClient
 
-from splatsim.utils.hand_held import MESH_DIR, PIVOT_MM, load_manifest, merge_splat, read_ply, read_stl, sample_surface, write_ply
+from splatsim.utils.scene.hand_held import MESH_DIR, PIVOT_MM, load_manifest, merge_splat, read_ply, read_stl, sample_surface, write_ply
 from splatsim.utils.paths import load_yaml
 
 OBJECTS = "configs/object_configs/objects.yaml"

@@ -10,10 +10,10 @@ Los .pkl traen las imágenes (≈7 MB cada uno), así que leer un episodio toma 
 trayectorias se guardan en caché (~/.cache/splatsim/trails/) y un hilo carga el resto de la
 carpeta en segundo plano para poder mostrar todas a la vez.
 
-La selección se guarda en <carpeta>/selection.yaml (splatsim/utils/episode_selection.py);
+La selección se guarda en <carpeta>/selection.yaml (splatsim/utils/data/episode_selection.py);
 lerobot_conversion.py omite los episodios descartados.
 
-Etiquetas de parada para el clasificador visual (splatsim/utils/stop_labels.py): en sim se
+Etiquetas de parada para el clasificador visual (splatsim/utils/data/stop_labels.py): en sim se
 proponen solas con el error de agarre (configs/grasp_point.yaml); en la carpeta Stop labels se
 aceptan, se corrigen ("válido desde este frame") o se excluyen, y quedan en
 <carpeta>/stop_labels.yaml. Las grabaciones reales (sin posición del tomate) se etiquetan a mano.
@@ -47,11 +47,11 @@ from scipy.spatial.transform import Rotation
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 from splatsim.robots.station.urdf_view import xarm5_urdf_joints  # noqa: E402
-from splatsim.utils.camera_setup import load_camera_setup  # noqa: E402
+from splatsim.utils.render.camera_setup import load_camera_setup  # noqa: E402
 from splatsim.utils.paths import load_yaml  # noqa: E402
-from splatsim.utils.episode_selection import load_discarded, save_discarded  # noqa: E402
+from splatsim.utils.data.episode_selection import load_discarded, save_discarded  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
-from splatsim.utils.grasp_point import (  # noqa: E402
+from splatsim.utils.trials.grasp_point import (  # noqa: E402
     GRASP_POINT_PATH,
     SUCCESS_RADIUS,
     grasp_error,
@@ -62,7 +62,7 @@ from splatsim.utils.grasp_point import (  # noqa: E402
     save_grasp_point,
     tomato_in_ee,
 )
-from splatsim.utils.stop_labels import (  # noqa: E402
+from splatsim.utils.data.stop_labels import (  # noqa: E402
     VALID_RADIUS,
     auto_valid_from,
     episode_labels,
@@ -480,7 +480,7 @@ class Reviewer:
         if not re.fullmatch(r"[\w.-]+", suffix):
             self.job_status.content = "**Name suffix**: letters, digits, `_`, `-` or `.`"
             return
-        cmd = ["splatsim/utils/lerobot_conversion.py", "--input_dir", str(self.folder.path),
+        cmd = ["splatsim/utils/data/lerobot_conversion.py", "--input_dir", str(self.folder.path),
                "--output_dir", os.path.expanduser(self.conv_out.value.strip() or DEFAULT_DATASETS_DIR),
                "--fps", str(int(self.conv_fps.value)), "--repo_suffix", suffix]
         if self.conv_cams.value.split():

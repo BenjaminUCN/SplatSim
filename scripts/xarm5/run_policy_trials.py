@@ -32,7 +32,7 @@ import tyro
 import yaml
 from gello.zmq_core.robot_node import ZMQClientRobot
 
-from splatsim.utils.grasp_point import grasp_error, load_grasp_point
+from splatsim.utils.trials.grasp_point import grasp_error, load_grasp_point
 from splatsim.utils.remote_call import ask_operator, call
 
 APPLE_NAME = "plastic_apple"
@@ -62,7 +62,7 @@ class Args:
 
 def run_name_for(checkpoint: str) -> str:
     """Nombre del modelo en configs/registry.yaml (name o suggested_name), o su carpeta."""
-    from splatsim.utils.registry import model_for_checkpoint, model_label
+    from splatsim.utils.data.registry import model_for_checkpoint, model_label
     found = model_for_checkpoint(checkpoint)
     return model_label(*found) if found else os.path.basename(checkpoint.rstrip("/"))
 

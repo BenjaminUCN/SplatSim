@@ -3,7 +3,7 @@ import numpy as np
 
 from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 
-from splatsim.utils.hand_held import JAW_JOINT
+from splatsim.utils.scene.hand_held import JAW_JOINT
 
 from .config import (
     GRIPPER_RANGE, GRIPPER_MAX_ANGLE, SPLAT_GRIPPER_POSE,

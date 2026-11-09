@@ -10,7 +10,7 @@ import numpy as np
 import torch
 from gaussian_splatting.scene.gaussian_model import GaussianModel
 
-from splatsim.utils.leaf_segmentation import (
+from splatsim.utils.scene.leaf_segmentation import (
     canonical_transformation,
     load_leaf_info,
     load_occluder_config,

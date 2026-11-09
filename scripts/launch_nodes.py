@@ -229,7 +229,7 @@ def launch_robot_server(args: Args):
     
     elif args.robot == "sim_xarm5":
         from splatsim.robots.xarm.server import XArm5PybulletRobotServerCamera
-        from splatsim.utils.camera_setup import arrangement_cameras
+        from splatsim.utils.render.camera_setup import arrangement_cameras
 
         server = XArm5PybulletRobotServerCamera(
             port=port,

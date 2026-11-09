@@ -36,7 +36,7 @@ import pandas as pd
 import tyro
 import yaml
 
-from splatsim.utils.dataset_sources import read_sources
+from splatsim.utils.data.dataset_sources import read_sources
 from splatsim.utils.paths import contract_tree
 from safetensors.numpy import load_file
 

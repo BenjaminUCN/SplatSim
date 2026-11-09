@@ -38,7 +38,7 @@ from lerobot.transforms import (
 )
 from lerobot.utils.feature_utils import dataset_to_policy_features
 
-from splatsim.utils.camera_setup import arrangement_cameras
+from splatsim.utils.render.camera_setup import arrangement_cameras
 from splatsim.utils.paths import expand
 
 DEFAULT_CONFIG = "configs/train/diffusion.yaml"

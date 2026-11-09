@@ -2,7 +2,7 @@
 import cv2
 import numpy as np
 
-from splatsim.utils.camera_setup import CAMERA_POSES_PATH, save_base_camera_poses
+from splatsim.utils.render.camera_setup import CAMERA_POSES_PATH, save_base_camera_poses
 
 from .config import BASE_CAM_RANGE_RPY, BASE_CAM_RANGE_XYZ
 

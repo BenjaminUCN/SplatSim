@@ -29,8 +29,8 @@ import tyro
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from render_recordings import make_server  # noqa: E402
-from splatsim.utils.camera_setup import arrangement_cameras  # noqa: E402
-from splatsim.utils.occlusion import LEVELS, OUT_OF_VIEW, occlusion_level  # noqa: E402
+from splatsim.utils.render.camera_setup import arrangement_cameras  # noqa: E402
+from splatsim.utils.render.occlusion import LEVELS, OUT_OF_VIEW, occlusion_level  # noqa: E402
 
 ARM_JOINTS = 5
 APPLE_KEY = "plastic_apple_position"

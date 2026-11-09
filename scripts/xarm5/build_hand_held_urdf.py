@@ -10,7 +10,7 @@ import argparse
 import os
 
 from splatsim.robots.station.urdf_view import HAND_HELD_TRAVEL_RAD
-from splatsim.utils.hand_held import build_urdf
+from splatsim.utils.scene.hand_held import build_urdf
 
 DEFAULT_SRC = "~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5.urdf"
 # la tapa azul (top_cover) hacia abajo con joint5 en 0; a 0° quedaba hacia arriba

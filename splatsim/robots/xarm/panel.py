@@ -5,7 +5,7 @@ import numpy as np
 import viser
 
 from splatsim.robots.station.panel import StationPanel, wxyz_to_xyzw, xyzw_to_wxyz
-from splatsim.utils.apple_grid import (
+from splatsim.utils.scene.apple_grid import (
     APPLE_GRID_PATH,
     RANGE_SHAPES,
     NO_X_LIMIT,
@@ -13,8 +13,8 @@ from splatsim.utils.apple_grid import (
     in_hemisphere,
     load_grid,
 )
-from splatsim.utils.leaf_segmentation import place_between, saved_leaves
-from splatsim.utils.occlusion import fit_lateral_offset, fit_message
+from splatsim.utils.scene.leaf_segmentation import place_between, saved_leaves
+from splatsim.utils.render.occlusion import fit_lateral_offset, fit_message
 
 from .config import BASE_CAM_FOV, SIM_CLOCKS
 

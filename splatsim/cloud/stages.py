@@ -11,7 +11,7 @@ import yaml
 
 from scripts.xarm5.data_jobs import SCRIPTS, command, dataset_path
 from splatsim.cloud.estimate import PNG_GB, Workload, convert_workload, render_workload, train_workload
-from splatsim.utils.episode_selection import load_discarded
+from splatsim.utils.data.episode_selection import load_discarded
 
 IMAGE_DIRS = ("image_1", "images")     # los mismos que acepta lerobot_conversion.py
 CAMERA_FILE = re.compile(r"^(.+_rgb)_\d+\.png$")
@@ -111,7 +111,7 @@ def pod_files() -> dict[str, str]:
 
 def describe_pipeline(plan: list[dict]) -> list[dict]:
     """Agrega a cada etapa de plan_pipeline lo que hace falta para estimarla, antes de que exista su entrada."""
-    from splatsim.utils.camera_setup import arrangement_cameras
+    from splatsim.utils.render.camera_setup import arrangement_cameras
     stages, frames, cameras, gb = [], 0, [], 0.0
     for i, item in enumerate(plan):
         a, kind = dict(item["args"]), item["kind"]
