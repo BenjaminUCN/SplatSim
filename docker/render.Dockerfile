@@ -1,4 +1,5 @@
-# Etapas de render y espejado del orquestador (splatsim/cloud): la de entrenamiento más el rasterizador.
+# Etapas de render, espejado y splat del orquestador (splatsim/cloud): la de entrenamiento más el
+# rasterizador y COLMAP (pycolmap-cuda12, en requirements-render.txt).
 # Se construye en GitHub Actions (.github/workflows/images.yml):
 #     docker build -f docker/render.Dockerfile --build-arg BASE=splatsim-train -t splatsim-render .
 ARG BASE=ghcr.io/benjaminucn/splatsim-train:latest

@@ -4,6 +4,8 @@ tipo de trabajo está en stages.py.
 
     pending → preparing (sube entradas, crea el pod) → starting → running → finishing → done
                                                                                       ↘ failed / stopped
+Un splat baja al lab y queda en aligning hasta que approve() comprueba la alineación en CloudCompare;
+lo que dependa de él espera hasta entonces.
 
 El estado vive en <qdir>/jobs.yaml, así que el panel se puede cerrar: los pods siguen, y al volver
 se retoman. Un pod nunca depende de este proceso para detenerse (ver runner.py).
@@ -24,10 +26,11 @@ import yaml
 
 from scripts.xarm5.data_jobs import dataset_path
 from splatsim.cloud.estimate import (SEED_HISTORY, Estimate, Workload, convert_workload, prefer_machines, rank,
-                                     train_workload)
+                                     splat_workload, train_workload)
 from splatsim.cloud.providers import Offer, Requirements
 from splatsim.cloud.runner import MAX_BOOTS, sha256
-from splatsim.cloud.stages import DEFAULT_SCRIPTS, STAGES, describe_pipeline, scan_recordings
+from splatsim.cloud.stages import (DEFAULT_SCRIPTS, STAGES, alignment_problems, describe_pipeline, probe_video,
+                                   scan_recordings)
 from splatsim.cloud.storage import Storage, item_label
 
 ACTIVE = ("preparing", "starting", "running", "finishing")
@@ -50,6 +53,8 @@ DEFAULT_IMAGE = "ghcr.io/benjaminucn/splatsim-train:latest"
 DEFAULT_RENDER_IMAGE = "ghcr.io/benjaminucn/splatsim-render:latest"
 POD_ROOT = "/workspace"
 DATASETS_ROOT = "~/lerobot/splatsim_test_data"
+SCENES_ROOT = "~/data/Colmaps"
+ALIGNING = "aligning"
 
 
 def train_config(base: dict, name: str, dataset: str, overrides: dict, has_wandb_key: bool) -> dict:
@@ -194,6 +199,25 @@ class Orchestrator:
         scan = scan_recordings(args["input"], args.get("cameras"), args.get("ignore_selection", False))
         work = convert_workload(scan["frames"], len(scan["cameras"]), scan["gb"])
         return scan, self.rank_offers(work, req)
+
+    def estimate_splat(self, args: dict, req: Requirements) -> tuple[dict, list[Estimate]]:
+        probe = probe_video(args["source"], args.get("fps", 0.0))
+        work = splat_workload(probe["frames"], args.get("matcher", "exhaustive"), args["iterations"], probe["gb"])
+        return probe, self.rank_offers(work, req)
+
+    def submit_splat(self, name: str, scene: str, args: dict, req: Requirements, max_cost: float,
+                     offer_id: int | None = None, scenes_root: str = SCENES_ROOT) -> dict:
+        """args: source (video o carpeta de fotos), iterations y opcionalmente fps y matcher."""
+        if not re.fullmatch(r"[\w.+-]+", scene):
+            raise ValueError(f"Nombre de escena inválido: {scene!r}")
+        output = str(Path(scenes_root).expanduser() / scene)
+        taken = any(j.get("output") == output and j["status"] not in RETRYABLE for j in self.jobs)
+        if taken or Path(output).exists():
+            raise ValueError(f"Ya existe o está en cola la escena {output}")
+        probe = probe_video(args["source"], args.get("fps", 0.0))
+        return self._add({"name": name, "description": "", "kind": "splat", "args": dict(args), "output": output,
+                          "frames": probe["frames"], "source_gb": probe["gb"], "depends_on": None},
+                         req, max_cost, offer_id)
 
     def estimate_pipeline(self, plan: list[dict], gpu: Requirements, cpu: Requirements) -> list[tuple[dict, list[Estimate]]]:
         """Por cada etapa de plan_pipeline (data_jobs.py), lo que hará y sus ofertas."""
@@ -577,11 +601,33 @@ class Orchestrator:
             self._record_history(job)
             if job.get("download", True):
                 job["output_dir"] = str(target)
+            if getattr(stage, "needs_approval", False):
+                self._enter_phase(job, "align it in CloudCompare, then Approve")
+                job.update(status=ALIGNING, downloaded=datetime.now().strftime("%Y-%m-%d %H:%M"))
+                self.save()
+                return
             job.update(status="done", phase="done",
                        finished=datetime.now().strftime("%Y-%m-%d %H:%M"))
             self.save()
         if self.on_ready:
             self.on_ready(job)
+
+    def approve(self, job_id: int, robot: str) -> list[str]:
+        """Da por alineada la escena de un splat si objects.yaml y las etiquetas están al día; si no,
+        devuelve lo que falta y el trabajo sigue esperando."""
+        job = self.get(job_id)
+        if job is None or job["status"] != ALIGNING:
+            return [f"el trabajo #{job_id} no espera una alineación"]
+        problems = alignment_problems(robot, job["output"])
+        if problems:
+            return problems
+        with self.lock:
+            job.update(status="done", phase="done", robot_name=robot,
+                       finished=datetime.now().strftime("%Y-%m-%d %H:%M"))
+            self.save()
+        if self.on_ready:
+            self.on_ready(job)
+        return []
 
     def _clean_bucket(self, job: dict, output_key: str | None) -> None:
         """Lo que ya llegó verificado no sigue cobrando. Si falla, solo queda el aviso."""
