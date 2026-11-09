@@ -1,0 +1,11 @@
+# Solo lo que importa el panel (scripts/xarm5/cloud_server.py) y lo que sube a los pods.
+*
+!requirements-panel.txt
+!configs/**
+!data/labels_path/**
+!splatsim/__init__.py
+!splatsim/cloud/**
+!splatsim/utils/**
+!scripts/xarm5/cloud_server.py
+!scripts/xarm5/data_jobs.py
+**/__pycache__

@@ -14,6 +14,9 @@ on:
       - scripts/xarm5/mirror_recordings.py
       - scripts/xarm5/splat_from_video.py
       - requirements-render.txt
+      - requirements-panel.txt
+      - scripts/xarm5/cloud_server.py
+      - scripts/xarm5/data_jobs.py
       - splatsim/robots/**
       - submodules/**
       - splatsim/cloud/**
@@ -77,3 +80,28 @@ jobs:
         run: |
           docker push "$RENDER_IMAGE:${{ github.sha }}"
           docker push "$RENDER_IMAGE:latest"
+
+  # El panel de la nube para cualquier PC (docker/panel.compose.yml): sin torch, en paralelo con las otras.
+  panel:
+    runs-on: ubuntu-24.04
+    env:
+      IMAGE: ghcr.io/benjaminucn/splatsim-panel
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: docker build -f docker/panel.Dockerfile --label "org.opencontainers.image.source=https://github.com/${{ github.repository }}" -t "$IMAGE:${{ github.sha }}" -t "$IMAGE:latest" .
+
+      - name: Smoke test
+        run: |
+          docker run --rm "$IMAGE:latest" --help > /dev/null
+          docker run --rm --entrypoint python "$IMAGE:latest" -c "import plyfile, splatsim.cloud.sync, splatsim.cloud.orchestrator; print('ok')"
+          docker run --rm --entrypoint rclone "$IMAGE:latest" version
+          docker run --rm --entrypoint vastai "$IMAGE:latest" --help > /dev/null
+          docker images "$IMAGE"
+
+      - name: Push
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker push "$IMAGE:${{ github.sha }}"
+          docker push "$IMAGE:latest"

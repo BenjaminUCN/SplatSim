@@ -9,7 +9,11 @@ en ~/data/cloud_queue/, así que el panel se puede cerrar: los pods siguen y al 
 No reemplaza a train_server.py, que entrena en este PC.
 
 Necesita ~/.config/splatsim/cloud.env (configs/cloud.env.example), rclone y la CLI de vastai.
+
+La cola también queda en R2, así que se puede seguir desde otro PC (o desde docker/panel.compose.yml):
+solo un panel la avanza, los otros la muestran y pueden pedirle el control (splatsim/cloud/sync.py).
 """
+import signal
 import math
 import subprocess
 import sys
@@ -32,6 +36,7 @@ from splatsim.cloud.orchestrator import (ACTIVE, ALIGNING, DATASETS_ROOT, DEFAUL
 from splatsim.cloud.stages import OBJECTS_FILE, ROBOT, latest_splat, scene_entry  # noqa: E402
 from splatsim.cloud.providers import Requirements, VastProvider  # noqa: E402
 from splatsim.cloud.storage import SECRETS_FILE, Storage, load_secrets, storage_env  # noqa: E402
+from splatsim.cloud.sync import QueueSync, panel_name  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
 
 TICK_PERIOD = 20.0
@@ -52,6 +57,12 @@ class Args:
     image: str = DEFAULT_IMAGE
     render_image: str = DEFAULT_RENDER_IMAGE
     secrets: str = SECRETS_FILE
+    update_registry: bool = True
+    """Regenera configs/registry.yaml cuando llega un modelo o dataset. Apagado en el contenedor."""
+    sync: bool = True
+    """Comparte la cola por R2 con los paneles de otros PCs. Sin esto, la cola es solo de este PC."""
+    name: str = ""
+    """Cómo ven este panel los demás; por defecto $SPLATSIM_PANEL_NAME o el nombre del PC."""
 
 
 def money(value) -> str:
@@ -59,8 +70,8 @@ def money(value) -> str:
 
 
 class Panel:
-    def __init__(self, orch: Orchestrator, port: int, has_wandb_key: bool):
-        self.orch, self.has_wandb_key = orch, has_wandb_key
+    def __init__(self, orch: Orchestrator, port: int, has_wandb_key: bool, sync: QueueSync | None = None):
+        self.orch, self.has_wandb_key, self.sync = orch, has_wandb_key, sync
         self.v = viser.ViserServer(port=port, label="Cloud queue", verbose=False)
         set_page_title(self.v, "Cloud queue")
         tabs = self.v.gui.add_tab_group()
@@ -78,12 +89,21 @@ class Panel:
     # ── cola ─────────────────────────────────────────────────────────────────
     def _build_queue(self):
         gui = self.v.gui
+        if self.sync:
+            self.control = gui.add_markdown("")
+            self.take_button = gui.add_button("Take control", hint="Free: takes it now. Otherwise asks the other "
+                                              "panel, which hands it over after its uploads and downloads")
+            self.take_button.on_click(lambda _: self._run_sync(self.sync.request_control))
+            self.release_button = gui.add_button("Release control", hint="Before switching to another PC")
+            self.release_button.on_click(lambda _: self._run_sync(self.sync.release))
         self.summary = gui.add_markdown("")
         self.table = gui.add_markdown("")
         self.selected = gui.add_dropdown("Job", ("—",))
         gui.add_button("Stop (deletes the pod)", color="red").on_click(lambda _: self._act(self.orch.stop))
         gui.add_button("Retry").on_click(lambda _: self._act(self.orch.retry))
         gui.add_button("Remove").on_click(lambda _: self._act(self.orch.remove))
+        gui.add_button("Download output", hint="For a job whose output was left in R2: downloads it to this PC"
+                       ).on_click(lambda _: self._act(self.orch.download))
         self.new_max = gui.add_number("Max cost of the selected job ($)", 0.0, min=0.0, step=0.5,
                                       hint="Only without a pod running. A failed job then needs Retry.")
         gui.add_button("Set max cost").on_click(lambda _: self._set_max_cost())
@@ -112,20 +132,37 @@ class Panel:
 
     def _set_max_cost(self):
         job_id = self._selected_id()
-        if job_id is None:
+        if job_id is None or not self._can_edit(self.max_note):
             return
         changed = self.orch.set_max_cost(job_id, self.new_max.value)
         self.max_note.content = (f"Max cost of job {job_id}: {money(self.new_max.value)}." if changed else
                                  "Not changed: it must be above 0, and the job can't have a pod or be done.")
         self.refresh()
 
+    def _can_edit(self, note=None) -> bool:
+        """Solo el panel con el control cambia la cola: otro lanzaría pods dobles."""
+        if self.sync is None or self.sync.in_control:
+            return True
+        if note is not None:
+            note.content = "**Read only:** another panel controls the queue. Use *Take control* in *Queue*."
+        return False
+
+    def _run_sync(self, action):
+        threading.Thread(target=action, daemon=True).start()     # tomar el control espera unos segundos
+
     def _act(self, action):
+        if not self._can_edit(self.max_note):
+            return
         if (job_id := self._selected_id()) is not None:
             action(job_id)
             self.refresh()
 
     def refresh(self):
         orch = self.orch
+        if self.sync:
+            self.control.content = self.sync.status()
+            self.take_button.visible = not self.sync.in_control
+            self.release_button.visible = self.sync.in_control
         with orch.lock:
             rows = ["| # | Job | Status | Progress | Machine | Est. | Cost | Max |", "|---|---|---|---|---|---|---|---|"]
             for j in orch.jobs:
@@ -162,6 +199,8 @@ class Panel:
             lines.append(f"Pod started in {job['boot_s'] / 60:.1f} min")
         if job.get("output_dir"):
             lines.append(f"Output: `{job['output_dir']}`")
+        if job.get("remote_output"):
+            lines.append(f"Output left in R2: `{job['remote_output']}` · *Download output* brings it to this PC")
         if job.get("run_key"):
             log = self.orch.storage.read(f"{job['run_key']}/run.log") or ""
             tail = "\n".join(line[:150] for line in log.splitlines()[-12:])
@@ -216,7 +255,7 @@ class Panel:
                                  f"```yaml\n{text}```")
 
     def _approve(self):
-        if self.a_job is None:
+        if self.a_job is None or not self._can_edit(self.a_result):
             return
         robot = self.a_robot.value.strip()
         try:
@@ -266,6 +305,8 @@ class Panel:
         self.f_offer = gui.add_dropdown("Machine offer", (AUTO,))
         self.f_max = gui.add_number("Max cost ($)", 0.0, min=0.0, step=0.5,
                                     hint="The pod stops at this cost, even if this PC is off")
+        self.f_keep = gui.add_checkbox("Leave output in R2", False, hint="Download it later, from any PC, "
+                                       "with *Download output*")
         self.f_queue = gui.add_button("Add to queue", disabled=True)
         self.f_queue.on_click(lambda _: self._submit())
 
@@ -294,11 +335,13 @@ class Panel:
         self._show_offers(ranked, self.f_offers, self.f_offer, self.f_max, self.f_queue)
 
     def _submit(self):
+        if not self._can_edit(self.f_offers):
+            return
         try:
             cfg, dataset, req, parent = self._form()
             offer_id = None if self.f_offer.value == AUTO else int(self.f_offer.value)
             self.orch.submit(self.f_name.value.strip(), cfg, dataset, req, float(self.f_max.value), offer_id,
-                             depends_on=parent)
+                             depends_on=parent, keep_output=self.f_keep.value)
         except Exception as e:  # noqa: BLE001  se muestra en el panel
             self.f_offers.content = f"**Error:** {e}"
             return
@@ -353,6 +396,8 @@ class Panel:
         self.d_plan = gui.add_markdown("Press *Estimate cost* to see each stage and what it costs.")
         self.d_max = gui.add_number("Max cost per stage ($)", 0.0, min=0.0, step=0.1,
                                     hint="Each pod stops at this cost, even if this PC is off")
+        self.d_keep = gui.add_checkbox("Leave output in R2", False, hint="Download it later, from any PC, "
+                                       "with *Download output*")
         self.d_queue = gui.add_button("Add to queue", disabled=True)
         self.d_queue.on_click(lambda _: self._submit_data())
 
@@ -405,9 +450,11 @@ class Panel:
         self.d_queue.disabled = False
 
     def _submit_data(self):
+        if not self._can_edit(self.d_plan):
+            return
         try:
             plan, gpu, cpu = self._data_plan()
-            self.orch.submit_pipeline(plan, gpu, cpu, float(self.d_max.value))
+            self.orch.submit_pipeline(plan, gpu, cpu, float(self.d_max.value), keep_output=self.d_keep.value)
         except Exception as e:  # noqa: BLE001  se muestra en el panel
             self.d_plan.content = f"**Error:** {e}"
             return
@@ -460,6 +507,8 @@ class Panel:
             self.s_offers.content += "\n\n**No speed measured for a scene yet: set the max cost yourself.**"
 
     def _submit_scene(self):
+        if not self._can_edit(self.s_offers):
+            return
         try:
             args, req = self._scene_form()
             offer_id = None if self.s_offer.value == AUTO else int(self.s_offer.value)
@@ -480,6 +529,8 @@ class Panel:
         self.l_paused = gui.add_checkbox("Paused (no new pods)", s.paused)
 
         def apply(_):
+            if not self._can_edit(self.l_balance):
+                return
             with self.orch.lock:
                 s.max_pods, s.budget_usd, s.paused = int(self.l_pods.value), float(self.l_budget.value), self.l_paused.value
                 self.orch.save()
@@ -509,13 +560,27 @@ def main(args: Args):
     if "WANDB_API_KEY" in secrets:
         pod_env["WANDB_API_KEY"] = secrets["WANDB_API_KEY"]
     orch = Orchestrator(args.queue_dir, VastProvider(), Storage(env["SPLATSIM_REMOTE"], env), pod_env,
-                        image=args.image, render_image=args.render_image, on_ready=update_registry)
-    panel = Panel(orch, args.port, "WANDB_API_KEY" in secrets)
+                        image=args.image, render_image=args.render_image,
+                        on_ready=update_registry if args.update_registry else None)
+    sync = QueueSync(orch, args.name or panel_name()) if args.sync else None
+    if sync:
+        sync.start()
+        print(f"[Cloud] {sync.status()}")
+    panel = Panel(orch, args.port, "WANDB_API_KEY" in secrets, sync)
+
+    def stop(*_):
+        """Ctrl+C o docker stop: suelta el control para que otro panel lo tome sin esperar a que venza."""
+        if sync:
+            sync.shutdown()
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
 
     def worker():
         while True:
             try:
-                orch.tick()
+                sync.cycle() if sync else orch.tick()
             except Exception as e:  # noqa: BLE001  un error de red no debe parar el seguimiento
                 print(f"[Cloud] error: {type(e).__name__}: {e}")
             time.sleep(TICK_PERIOD)

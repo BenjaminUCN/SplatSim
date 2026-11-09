@@ -1,0 +1,33 @@
+# Panel de la nube en un contenedor, en http://localhost:8083.
+#     docker compose -f docker/panel.compose.yml up -d        # usa la imagen de GHCR
+#     docker compose -f docker/panel.compose.yml up -d --build  # o la construye desde este repo
+#     docker compose -f docker/panel.compose.yml logs -f
+#
+# Antes: ~/.config/splatsim/cloud.env (configs/cloud.env.example) y `vastai set api-key ...`, que deja
+# la clave en ~/.config/vastai. Si tu uid no es 1000: PANEL_UID=$(id -u) PANEL_GID=$(id -g) docker compose ...
+services:
+  panel:
+    image: ghcr.io/benjaminucn/splatsim-panel:latest
+    build:
+      context: ..
+      dockerfile: docker/panel.Dockerfile
+    init: true
+    restart: unless-stopped
+    # Mismo usuario y HOME que afuera: lo que baja queda a tu nombre y las rutas de la cola coinciden.
+    user: "${PANEL_UID:-1000}:${PANEL_GID:-1000}"
+    environment:
+      HOME: ${HOME}
+      SPLATSIM_PANEL_NAME: ${PANEL_NAME:-laptop}          # cómo lo ven los otros paneles
+    stop_grace_period: 30s                              # sube la cola y suelta el control antes de salir
+    # Solo en localhost: el panel no pide contraseña y gasta saldo de Vast.
+    ports:
+      - "127.0.0.1:8083:8083"
+    volumes:
+      - ${HOME}/data:${HOME}/data                       # grabaciones, hojas y la cola (~/data/cloud_queue)
+      - ${HOME}/lerobot:${HOME}/lerobot                 # datasets y modelos que bajan
+      - ${HOME}/.config/splatsim:${HOME}/.config/splatsim:ro
+      - ${HOME}/.config/vastai:${HOME}/.config/vastai
+      # Las configs de este checkout, no las de la imagen: los pods renderizan con las poses de cámara de
+      # hoy, y *Approve scene* escribe objects.yaml.
+      - ../configs:/app/configs
+      - ../data/labels_path:/app/data/labels_path:ro

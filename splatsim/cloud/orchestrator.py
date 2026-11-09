@@ -32,7 +32,7 @@ from splatsim.cloud.runner import MAX_BOOTS, sha256
 from splatsim.cloud.stages import (DEFAULT_SCRIPTS, STAGES, alignment_problems, describe_pipeline, probe_video,
                                    scan_recordings)
 from splatsim.cloud.storage import Storage, item_label
-from splatsim.utils.paths import DATASETS_DIR
+from splatsim.utils.paths import DATASETS_DIR, contract
 
 ACTIVE = ("preparing", "starting", "running", "finishing")
 RETRYABLE = ("failed", "stopped")
@@ -48,6 +48,7 @@ MACHINE_MEMORY_S = 14 * 24 * 3600   # después, el host pudo borrar la imagen o 
 RESET_ON_RETRY = ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "billing_ts", "boot_s", "result",
                   "settled", "phase_since", "moved_ts", "detail")
 POD_PYTHON = "/opt/venv/bin/python"
+SafeLoader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)   # jobs.yaml guarda los sha256 de cada salida: pesa
 GPU_CHECK = [POD_PYTHON, "-c",     # 1 GB en la GPU: detecta hosts como el del "out of memory" en RunPod
              "import torch; x = torch.ones(1024, 1024, 256, device='cuda'); assert (x * 2).sum() > 0"]
 DEFAULT_IMAGE = "ghcr.io/benjaminucn/splatsim-train:latest"
@@ -120,32 +121,45 @@ class Orchestrator:
         self.qdir.mkdir(parents=True, exist_ok=True)
         self.python, self.pod_root = python, pod_root
         self.scripts = {**DEFAULT_SCRIPTS, **(scripts or {})}
-        # cada cola solo responde por sus pods: otra cola o una prueba aparte no son huérfanos suyos
-        self.label_prefix = f"splatsim-{hashlib.sha1(str(self.qdir).encode()).hexdigest()[:6]}-"
+        # cada cola solo responde por sus pods: otra cola o una prueba aparte no son huérfanos suyos. Con ~,
+        # la misma cola compartida por R2 (splatsim/cloud/sync.py) tiene el mismo prefijo en cada PC.
+        self.label_prefix = f"splatsim-{hashlib.sha1(contract(str(self.qdir)).encode()).hexdigest()[:6]}-"
         self.provider, self.storage, self.health = provider, storage, health
         self.images = {"train": image, "render": render_image}
         self.pod_env = pod_env or {}
         self.on_ready = on_ready
         self.lock = threading.RLock()
+        self.read_only = False          # otro panel avanza la cola (sync.py): este no la escribe
         self.busy: set[int] = set()      # trabajos con un hilo de preparación o descarga en curso
         self.warnings: list[str] = []
-        data = yaml.safe_load((self.qdir / "jobs.yaml").read_text()) if (self.qdir / "jobs.yaml").exists() else {}
-        data = data or {}
-        self.jobs: list[dict] = data.get("jobs") or []
-        self.settings = Settings(**(data.get("settings") or {}))
-        self.next_id = max((j["id"] for j in self.jobs), default=0) + 1
-        path = self.qdir / "history.yaml"
-        self.history: list[dict] = (yaml.safe_load(path.read_text()) if path.exists() else None) or []
-        path = self.qdir / "machines.yaml"
-        self.machines: dict[int, dict] = (yaml.safe_load(path.read_text()) if path.exists() else None) or {}
-        self._orphans_checked = False
-        for job in self.jobs:            # lo que hacía un hilo de la sesión anterior
-            if job["status"] == "preparing":
-                job["status"] = "pending"
+        self.load()
 
     # ── estado ───────────────────────────────────────────────────────────────
+    def load(self, resume: bool = True) -> None:
+        """Lee la cola de qdir. resume: este panel la va a avanzar, así que lo que hacía un hilo de otra
+        sesión vuelve a empezar; un panel de solo lectura la muestra tal cual."""
+        path = self.qdir / "jobs.yaml"
+        data = (yaml.load(path.read_text(), Loader=SafeLoader) if path.exists() else None) or {}
+        path = self.qdir / "history.yaml"
+        history = (yaml.safe_load(path.read_text()) if path.exists() else None) or []
+        path = self.qdir / "machines.yaml"
+        machines = (yaml.safe_load(path.read_text()) if path.exists() else None) or {}
+        with self.lock:
+            self.jobs: list[dict] = data.get("jobs") or []
+            self.settings = Settings(**(data.get("settings") or {}))
+            self.next_id = max((j["id"] for j in self.jobs), default=0) + 1
+            self.history: list[dict] = history
+            self.machines: dict[int, dict] = machines
+            self._orphans_checked = False
+            if resume:
+                for job in self.jobs:
+                    if job["status"] == "preparing":
+                        job["status"] = "pending"
+
     def save(self) -> None:
         with self.lock:
+            if self.read_only:
+                return
             tmp = self.qdir / "jobs.tmp"
             tmp.write_text(yaml.safe_dump({"settings": asdict(self.settings), "jobs": self.jobs},
                                           sort_keys=False, allow_unicode=True))
@@ -225,8 +239,10 @@ class Orchestrator:
         return [(s, self.rank_offers(self.workload(s), gpu if STAGES[s["kind"]].needs_gpu else cpu))
                 for s in describe_pipeline(plan)]
 
-    def submit_pipeline(self, plan: list[dict], gpu: Requirements, cpu: Requirements, max_cost: float) -> list[dict]:
-        """Encola las etapas encadenadas. Lo intermedio queda solo en el bucket: al lab baja lo último."""
+    def submit_pipeline(self, plan: list[dict], gpu: Requirements, cpu: Requirements, max_cost: float,
+                        keep_output: bool = False) -> list[dict]:
+        """Encola las etapas encadenadas. Lo intermedio queda solo en el bucket: al lab baja lo último, salvo
+        con keep_output, que lo deja en el bucket para bajarlo después (download)."""
         stages = describe_pipeline(plan)
         for stage in stages:
             if Path(stage["output"]).expanduser().exists() or any(
@@ -236,7 +252,8 @@ class Orchestrator:
         for i, stage in enumerate(stages):
             req = gpu if STAGES[stage["kind"]].needs_gpu else cpu
             jobs.append(self._add({**stage, "description": "", "depends_on": jobs[-1]["id"] if jobs else None,
-                                   "download": i == len(stages) - 1}, req, max_cost, None))
+                                   **(_last_stage(keep_output) if i == len(stages) - 1 else {"download": False})},
+                                  req, max_cost, None))
         return jobs
 
     def _dataset_gb(self, dataset: str, depends_on: int | None) -> float:
@@ -264,11 +281,12 @@ class Orchestrator:
             return job
 
     def submit(self, name: str, cfg: dict, dataset: str, req: Requirements, max_cost: float,
-               offer_id: int | None = None, description: str = "", depends_on: int | None = None) -> dict:
+               offer_id: int | None = None, description: str = "", depends_on: int | None = None,
+               keep_output: bool = False) -> dict:
         gb = round(self._dataset_gb(dataset, depends_on), 2)
         return self._add({"name": name, "description": description, "kind": "train", "config": cfg,
-                          "dataset": str(dataset), "dataset_gb": gb, "depends_on": depends_on},
-                         req, max_cost, offer_id)
+                          "dataset": str(dataset), "dataset_gb": gb, "depends_on": depends_on,
+                          **_last_stage(keep_output)}, req, max_cost, offer_id)
 
     def submit_convert(self, name: str, args: dict, req: Requirements, max_cost: float,
                        offer_id: int | None = None, output_dir: str = DATASETS_ROOT) -> dict:
@@ -390,6 +408,12 @@ class Orchestrator:
             job["attempts"] += 1
             job["run_key"] = run_key = self._run_key(job)
         stage = STAGES[job["kind"]]
+        # la cola pudo llegar de otro PC (sync.py): sin sus archivos, espera en vez de fallar
+        missing = [item["local"] for item in stage.uploads(job) if not Path(item["local"]).expanduser().exists()]
+        if missing:
+            self._wait(job, f"falta en este PC: {contract(str(Path(missing[0]).expanduser()))}"
+                            + (f" y {len(missing) - 1} más" if len(missing) > 1 else ""))
+            return
         stage.refresh(job, folder_gb)
         self._enter_phase(job, "uploading inputs")
         uploads = stage.uploads(job)
@@ -597,11 +621,14 @@ class Orchestrator:
             self.storage.copy(key, publish)
         # con una etapa esperándola, la salida es su entrada: la borra esa etapa al terminar
         has_child = stage.output_feeds_children and any(j.get("depends_on") == job["id"] for j in self.jobs)
-        self._clean_bucket(job, None if has_child else key)
+        keep = job.get("keep_output", False)
+        self._clean_bucket(job, None if has_child or keep else key)
         with self.lock:
             self._record_history(job)
             if job.get("download", True):
                 job["output_dir"] = str(target)
+            elif keep:
+                job["remote_output"] = key
             if getattr(stage, "needs_approval", False):
                 self._enter_phase(job, "align it in CloudCompare, then Approve")
                 job.update(status=ALIGNING, downloaded=datetime.now().strftime("%Y-%m-%d %H:%M"))
@@ -643,8 +670,9 @@ class Orchestrator:
 
     def _record_history(self, job: dict) -> None:
         rate = STAGES[job["kind"]].rate(job)
-        if not rate:
+        if not rate or job.get("recorded"):      # download() repite _finish: el pod corrió una vez
             return
+        job["recorded"] = True
         self.history.append({"kind": job["kind"], "profile": self.workload(job).profile,
                              "gpu": job["offer"]["gpu_name"],
                              "cpu": job["offer"]["cpu_name"], "rate": rate, "job": job["id"],
@@ -692,6 +720,17 @@ class Orchestrator:
                     job.pop(key, None)
             self.save()
 
+    def download(self, job_id: int) -> bool:
+        """Baja a este PC una salida que se dejó en el bucket; la verificación y la limpieza son las de siempre."""
+        with self.lock:
+            job = self.get(job_id)
+            if not job or job["status"] != "done" or not job.get("remote_output") or job["id"] in self.busy:
+                return False
+            job.update(status="finishing", download=True, keep_output=False)
+            job.pop("remote_output", None)
+            self.save()
+            return True
+
     def remove(self, job_id: int) -> None:
         with self.lock:
             job = self.get(job_id)
@@ -701,6 +740,11 @@ class Orchestrator:
             elif job and job["status"] not in ACTIVE:
                 self.jobs.remove(job)
                 self.save()
+
+
+def _last_stage(keep_output: bool) -> dict:
+    """Lo que entrega un trabajo: baja a este PC, o queda en el bucket hasta pedirlo."""
+    return {"download": not keep_output, "keep_output": keep_output}
 
 
 def _estimate_fields(e: Estimate) -> dict:
