@@ -10,7 +10,11 @@ Cómo se relacionan:
     comparan con meta/stats.json de cada dataset. Si ninguno coincide (dataset borrado o
     reconvertido), se propone el último dataset creado antes del entrenamiento con las
     mismas cámaras (dataset_match: date).
-  - dataset -> grabaciones: por la secuencia de largos de episodio. Cada episodio del
+  - dataset -> grabaciones: exacto si el dataset tiene meta/splatsim_sources.yaml (lo escribe
+    la conversión: carpeta y episodio de origen de cada episodio, y la grabación original si
+    la carpeta era un render). Así se relaciona aunque el render se haya hecho en la nube y
+    no esté en esta máquina (matched_episodes: meta, converted_from: el render).
+    Datasets antiguos, sin ese archivo: por la secuencia de largos de episodio. Cada episodio del
     dataset guarda su largo y cada carpeta de bc_data tiene un .pkl por frame; se busca
     el desplazamiento que alinea ambas secuencias (un dataset puede juntar varias carpetas).
     Se admite que cada episodio del dataset tenga 0-2 frames menos (frames_dropped).
@@ -32,6 +36,7 @@ import pandas as pd
 import tyro
 import yaml
 
+from splatsim.utils.dataset_sources import read_sources
 from splatsim.utils.paths import contract_tree
 from safetensors.numpy import load_file
 
@@ -179,6 +184,7 @@ def scan_datasets(root: Path) -> dict:
             "_created": created,
             "_lengths": _episode_lengths(ds_dir),
             "_state_stats": stats.get("observation.state"),
+            "_sources": read_sources(ds_dir),
         }
     return datasets
 
@@ -189,6 +195,31 @@ def _episode_lengths(ds_dir: Path) -> list[int]:
         return []
     df = pd.concat([pd.read_parquet(f, columns=["episode_index", "length"]) for f in files])
     return df.sort_values("episode_index")["length"].astype(int).tolist()
+
+
+def sources_from_meta(meta: list[dict], recordings: dict) -> list[dict]:
+    """Fuentes según meta/splatsim_sources.yaml del dataset (lo escribe la conversión). Si la
+    carpeta convertida no está en esta máquina (render hecho en la nube) y era un render, se
+    relaciona con la grabación original que lo generó."""
+    sources = []
+    for m in meta:
+        render = m.get("render") or {}
+        name = m["folder"]
+        if name not in recordings and render.get("source"):
+            name = render["source"]
+        entry = {
+            "recording": name,
+            "recording_episodes": _ranges([int(e) for e in m["episodes"]]),
+            "dataset_episodes": _ranges(m["dataset_episodes"]),
+            "matched_episodes": "meta",
+        }
+        if name != m["folder"]:
+            entry["converted_from"] = (f"{m['folder']} ({render.get('fps')} fps, "
+                                       f"{', '.join(render.get('cameras') or [])}"
+                                       + (f", {render['leaves']} hojas" if render.get("leaves") else "")
+                                       + "; no está en esta máquina)")
+        sources.append(entry)
+    return sources
 
 
 def match_sources(ds_lengths: list[int], recordings: dict) -> list[dict]:
@@ -367,7 +398,8 @@ def main(args: Args) -> None:
     print(f"  {len(models)} modelos")
 
     for ds in datasets.values():
-        ds["sources"] = match_sources(ds["_lengths"], recordings)
+        ds["sources"] = (sources_from_meta(ds["_sources"], recordings) if ds["_sources"] is not None
+                         else match_sources(ds["_lengths"], recordings))
     for m in models.values():
         m["dataset"], m["dataset_match"], m["same_stats_datasets"] = match_dataset(m, datasets)
         m["suggested_name"] = suggest_name(m, datasets)

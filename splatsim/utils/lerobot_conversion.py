@@ -69,6 +69,7 @@ from tqdm import tqdm
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
+from splatsim.utils.dataset_sources import describe_folder, write_sources
 from splatsim.utils.episode_selection import load_discarded
 
 # ============================================================
@@ -609,7 +610,7 @@ def process_episode(
     pkl_files = sorted(episode_dir.glob("*.pkl"), key=pkl_sort_key)
 
     if not pkl_files:
-        return
+        return False
 
     # Offset base, en imágenes, del primer base_rgb del episodio.
     # SplatSim (image_1/): primer base_rgb en índice 0 -> base_idx = 2*pos
@@ -703,6 +704,7 @@ def process_episode(
         )
 
     dataset.save_episode()
+    return True
 
 
 # ============================================================
@@ -781,6 +783,10 @@ def run_conversion(config: ConversionConfig, repo_suffix: str):
         repo_suffix=repo_suffix,
     )
 
+    # de qué carpeta y episodio sale cada episodio del dataset (meta/splatsim_sources.yaml)
+    sources: dict[Path, dict] = {}
+    n_saved = 0
+
     for ep_dir in tqdm(episode_dirs, desc="episodes"):
 
         ep_schema = detect_episode_schema(ep_dir)
@@ -794,7 +800,7 @@ def run_conversion(config: ConversionConfig, repo_suffix: str):
                 f"resultante tenga sentido."
             )
 
-        process_episode(
+        saved = process_episode(
             dataset=dataset,
             episode_dir=ep_dir,
             image_keys=image_keys,
@@ -802,6 +808,12 @@ def run_conversion(config: ConversionConfig, repo_suffix: str):
             schema=ep_schema,
             config=config,
         )
+        if saved:
+            folder = ep_dir.parent
+            entry = sources.setdefault(folder, describe_folder(folder))
+            entry["episodes"].append(ep_dir.name)
+            entry["dataset_episodes"].append(n_saved)
+            n_saved += 1
 
     print("\nFinalizing dataset...")
 
@@ -810,6 +822,7 @@ def run_conversion(config: ConversionConfig, repo_suffix: str):
     except Exception:
         pass
     dataset.finalize()
+    write_sources(dataset.root, list(sources.values()))
 
     print("\nDone.")
     print(
