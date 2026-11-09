@@ -397,15 +397,18 @@ The queue is also kept in R2 (`queue/` in the bucket), so a panel on another PC 
 
 The files don't move with the queue. Uploads come from the PC in control, and a job whose recordings or dataset aren't there waits with *falta en este PC* instead of failing. Outputs come down to the PC in control, unless *Leave output in R2* was checked when queuing: then the output stays in the bucket until *Download output* (in *Queue*) brings it to whichever PC has control. The first time a PC shares its queue, a queue with jobs wins over an empty one, and local changes that never reached R2 are kept as `jobs.yaml.bak<time>`.
 
-On a laptop without the lab's environment, the panel runs in Docker (`docker/panel.Dockerfile`, Python and `rclone` only, no torch):
+On a laptop, as a fallback to keep watching and launching jobs when the lab is offline, the panel runs in Docker without cloning the repo (`docker/panel.Dockerfile`: Python and `rclone`, no torch). Once, run `vastai set api-key <key>` (it stays in `~/.config/vastai`) and copy `~/.config/splatsim/cloud.env` from the lab. Then:
 
 ```bash
-vastai set api-key <key>                                # once; it stays in ~/.config/vastai
-docker compose -f docker/panel.compose.yml up -d        # http://localhost:8083
-docker compose -f docker/panel.compose.yml logs -f
+docker run -d --name splatsim-panel --restart unless-stopped --init --stop-timeout 30 \
+  --user "$(id -u):$(id -g)" -e HOME="$HOME" -e SPLATSIM_PANEL_NAME=laptop -p 127.0.0.1:8083:8083 \
+  -v "$HOME/data:$HOME/data" -v "$HOME/lerobot:$HOME/lerobot" \
+  -v "$HOME/.config/splatsim:$HOME/.config/splatsim:ro" -v "$HOME/.config/vastai:$HOME/.config/vastai" \
+  ghcr.io/benjaminucn/splatsim-panel:latest                 # http://localhost:8083
+docker stop splatsim-panel                                  # lets go of control
 ```
 
-It needs this repo cloned on the laptop: it mounts its `configs/` (camera poses travel to the pods, and *Approve scene* writes `objects.yaml`), plus `~/data`, `~/lerobot`, `~/.config/splatsim` and `~/.config/vastai`. It runs as your user (`PANEL_UID`/`PANEL_GID` if it isn't 1000), so downloads belong to you and paths match the ones outside. The port only listens on localhost, since the panel has no password and spends Vast credit.
+`docker/panel.compose.yml` does the same from a checkout. It runs as your user with your home, so downloads belong to you and paths match the ones outside. The port only listens on localhost, since the panel has no password and spends Vast credit. The configs (camera poses, `objects.yaml`, training bases) are the ones in the image, from the last push that rebuilt it, so scene alignment and config changes stay in the lab.
 
 A pod's start is mostly the image download: 18 s on a machine that already had it, 7–25 min otherwise. So the queue goes first to a machine where one of its pods ran in the last 14 days (`machines.yaml`, *cached* in the offers table), as long as it costs at most $0.15 more than the best offer (`PREFER_CACHED_USD`), and leaves for last a machine that failed in that time. An offer you choose by hand still comes first. The hosts can delete the image, so *cached* is likely, not certain; each job's detail shows how long its pod took to start.
 

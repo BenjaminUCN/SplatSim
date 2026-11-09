@@ -27,7 +27,3 @@ services:
       - ${HOME}/lerobot:${HOME}/lerobot                 # datasets y modelos que bajan
       - ${HOME}/.config/splatsim:${HOME}/.config/splatsim:ro
       - ${HOME}/.config/vastai:${HOME}/.config/vastai
-      # Las configs de este checkout, no las de la imagen: los pods renderizan con las poses de cámara de
-      # hoy, y *Approve scene* escribe objects.yaml.
-      - ../configs:/app/configs
-      - ../data/labels_path:/app/data/labels_path:ro
