@@ -822,6 +822,7 @@ class TestRestart(Base):
         self.assertEqual(data["jobs"][0]["name"], "m")
 
 
+@unittest.skipIf(shutil.which("rclone") is None, "sin rclone: Storage lo necesita aunque el bucket sea local")
 class TestEpisodePacks(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())

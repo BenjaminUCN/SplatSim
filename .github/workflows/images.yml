@@ -70,6 +70,7 @@ jobs:
           docker run --rm --entrypoint /opt/venv/bin/python "$RENDER_IMAGE:latest" scripts/xarm5/mirror_recordings.py --help > /dev/null
           docker run --rm --entrypoint /opt/venv/bin/python "$RENDER_IMAGE:latest" -c "import pycolmap; assert pycolmap.has_cuda, 'pycolmap sin CUDA'"
           docker run --rm --entrypoint /opt/venv/bin/python "$RENDER_IMAGE:latest" scripts/xarm5/splat_from_video.py --help > /dev/null
+          docker run --rm --entrypoint /opt/venv/bin/python "$RENDER_IMAGE:latest" submodules/gaussian-splatting-wrapper/gaussian_splatting/train.py --help > /dev/null
           docker images "$RENDER_IMAGE"
 
       - name: Push render image

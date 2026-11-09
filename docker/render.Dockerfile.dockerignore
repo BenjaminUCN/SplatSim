@@ -4,6 +4,7 @@
 !requirements-train.txt
 !scripts/xarm5/render_recordings.py
 !scripts/xarm5/mirror_recordings.py
+!scripts/xarm5/splat_from_video.py
 !configs/camera_poses.yaml
 !configs/object_configs/objects.yaml
 !configs/folder_configs.yaml
@@ -13,6 +14,7 @@
 !submodules/simple-knn/**
 !submodules/gaussian-splatting-wrapper/setup.py
 !submodules/gaussian-splatting-wrapper/gaussian_splatting/__init__.py
+!submodules/gaussian-splatting-wrapper/gaussian_splatting/train.py
 !submodules/gaussian-splatting-wrapper/gaussian_splatting/arguments/**
 !submodules/gaussian-splatting-wrapper/gaussian_splatting/gaussian_renderer/**
 !submodules/gaussian-splatting-wrapper/gaussian_splatting/scene/**
