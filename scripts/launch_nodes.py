@@ -18,7 +18,6 @@ Robot = Literal[
     "sim_ur_pybullet_orange", "sim_ur_pybullet_orange_interactive",
     "sim_ur_pybullet_apple", "sim_ur_pybullet_apple_interactive",
     "sim_ur_pybullet_apple_interactive-nosplat",
-    "sim_ur_pybullet_apple_search", "sim_ur_pybullet_apple_search_interactive",
     "sim_ur_pybullet_banana", "sim_ur_pybullet_banana_interactive",
     "ur", "bimanual_ur", "ur_pybullet",
     # otros
@@ -154,22 +153,6 @@ def launch_robot_server(args: Args):
         server = AppleOnPlatePybulletRobotServer(
            port=port, host=args.hostname, serve_mode=AppleOnPlatePybulletRobotServer.SERVE_MODES.INTERACTIVE,
            camera_names=[], robot_name=args.robot_name, cam_i=3, use_gripper=use_gripper
-        )
-
-    elif args.robot == "sim_ur_pybullet_apple_search":
-        from splatsim.robots.sim_robot_pybullet_apple_search import AppleSearchPybulletRobotServer
-
-        server = AppleSearchPybulletRobotServer(
-           port=port, host=args.hostname, serve_mode=AppleSearchPybulletRobotServer.SERVE_MODES.GENERATE_DEMOS,
-           camera_names=[], robot_name=args.robot_name, cam_i=3, use_gripper=use_gripper
-        )
-
-    elif args.robot == "sim_ur_pybullet_apple_search_interactive":
-        from splatsim.robots.sim_robot_pybullet_apple_search import AppleSearchPybulletRobotServer
-
-        server = AppleSearchPybulletRobotServer(
-           port=port, host=args.hostname, serve_mode=AppleSearchPybulletRobotServer.SERVE_MODES.INTERACTIVE,
-           camera_names=camera_names, robot_name=args.robot_name, cam_i=3, use_gripper=use_gripper
         )
 
     elif args.robot == "sim_ur_pybullet_banana":
