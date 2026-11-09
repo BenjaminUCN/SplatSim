@@ -6,7 +6,7 @@ import einops
 import numpy as np
 import pybullet as p
 
-from splatsim.utils.utils_fk import *
+from splatsim.utils.geometry.utils_fk import *
 
 def get_curr_link_states(robot_uid, use_link_centers=True):
     link_states = []
