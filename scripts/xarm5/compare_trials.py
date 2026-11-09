@@ -39,6 +39,7 @@ from scipy import stats  # noqa: E402
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.utils.trials.grasp_point import SUCCESS_RADIUS, grasp_error, load_grasp_point  # noqa: E402
 from splatsim.utils.trials.durations import trial_seconds  # noqa: E402
+from splatsim.robots.xarm.config import APPLE_KEY  # noqa: E402
 
 # paleta de referencia (modo claro): una serie = un color; magnitud = rampa azul de un tono
 SERIES = "#2a78d6"
@@ -128,7 +129,7 @@ def _backfill_grasp(df: pd.DataFrame, skip: pd.Series) -> pd.DataFrame:
             try:
                 with open(p, "rb") as f:
                     obs = pickle.load(f)
-                errs.append(float(grasp_error(obs["state"], obs["plastic_apple_position"], point)))
+                errs.append(float(grasp_error(obs["state"], obs[APPLE_KEY], point)))
             except Exception:  # noqa: BLE001  .pkl ilegible: se omite ese frame
                 continue
         finals.append(errs[-1] if errs else np.nan)

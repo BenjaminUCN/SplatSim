@@ -13,14 +13,17 @@ from scripts.xarm5.data_jobs import SCRIPTS, command, dataset_path
 from splatsim.cloud.estimate import (PNG_GB, Workload, convert_workload, render_workload, splat_workload,
                                      train_workload)
 from splatsim.utils.data.episode_selection import load_discarded
+from splatsim.robots.xarm.config import APPLE_NAME as APPLE
+from splatsim.utils.paths import OBJECTS_CONFIG
 
 IMAGE_DIRS = ("image_1", "images")     # los mismos que acepta lerobot_conversion.py
 CAMERA_FILE = re.compile(r"^(.+_rgb)_\d+\.png$")
 ROBOT = "xarm5_lite_plant_v3"          # el que usan por defecto render_recordings y mirror_recordings
-APPLE = "plastic_apple"
-SCENE_CAMERAS = (0, 347)               # cámaras COLMAP que carga make_server: de 1189 fotos bastan estas
+# fotos COLMAP que cargaba el servidor del xArm cuando heredaba de la base del paper (Scene). El de
+# xarm/sim_base.py lee solo el .ply; se siguen subiendo mientras haya imágenes del pod anteriores
+SCENE_CAMERAS = (0, 347)
 ALL_CAMERAS = ["base_rgb", "base_left_rgb", "base_right_rgb", "wrist_rgb"]   # --cameras por defecto
-OBJECTS_FILE = "configs/object_configs/objects.yaml"
+OBJECTS_FILE = OBJECTS_CONFIG
 LABELS_DIR = "data/labels_path"         # etiquetas por link de articulated_robot_pipeline.py
 LAB_CONFIGS = (OBJECTS_FILE, "configs/camera_poses.yaml", "configs/apple_grid.yaml", "configs/grasp_point.yaml",
                "configs/folder_configs.yaml")

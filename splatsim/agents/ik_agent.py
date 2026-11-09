@@ -14,12 +14,6 @@ from lerobot.datasets import LeRobotDatasetMetadata
 from lerobot.policies import make_pre_post_processors
 from lerobot.policies.utils import build_inference_frame
 
-# Constants from config.json
-_IMAGE_KEY   = "observation.images.base_rgb"
-_SIM_OBS_KEY = "base_rgb"
-_IMAGE_H     = 480
-_IMAGE_W     = 640
-_STATE_DIM   = 6   # joints only, no gripper in state
 _N_OBS_STEPS = 2   # temporal window size
 _N_ACT_STEPS = 32  # action chunk size
 

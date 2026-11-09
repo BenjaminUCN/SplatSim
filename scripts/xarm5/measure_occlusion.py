@@ -33,7 +33,7 @@ from splatsim.utils.render.camera_setup import arrangement_cameras  # noqa: E402
 from splatsim.utils.render.occlusion import LEVELS, OUT_OF_VIEW, occlusion_level  # noqa: E402
 
 ARM_JOINTS = 5
-APPLE_KEY = "plastic_apple_position"
+from splatsim.robots.xarm.config import APPLE_KEY  # noqa: E402
 
 
 @dataclass

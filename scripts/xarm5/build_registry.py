@@ -37,7 +37,7 @@ import tyro
 import yaml
 
 from splatsim.utils.data.dataset_sources import read_sources
-from splatsim.utils.paths import contract_tree
+from splatsim.utils.paths import DATASETS_DIR, contract_tree
 from safetensors.numpy import load_file
 
 MANUAL_FIELDS = ("name", "description", "notes")
@@ -57,7 +57,7 @@ _HEADER = """\
 @dataclass
 class Args:
     recordings: str = "~/data/bc_data"
-    datasets: str = "~/lerobot/splatsim_test_data"
+    datasets: str = DATASETS_DIR
     models: str = "~/lerobot/examples/tutorial/diffusion/outputs"
     out: str = "configs/registry.yaml"
 

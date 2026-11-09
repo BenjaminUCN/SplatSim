@@ -32,6 +32,7 @@ from splatsim.cloud.runner import MAX_BOOTS, sha256
 from splatsim.cloud.stages import (DEFAULT_SCRIPTS, STAGES, alignment_problems, describe_pipeline, probe_video,
                                    scan_recordings)
 from splatsim.cloud.storage import Storage, item_label
+from splatsim.utils.paths import DATASETS_DIR
 
 ACTIVE = ("preparing", "starting", "running", "finishing")
 RETRYABLE = ("failed", "stopped")
@@ -52,7 +53,7 @@ GPU_CHECK = [POD_PYTHON, "-c",     # 1 GB en la GPU: detecta hosts como el del "
 DEFAULT_IMAGE = "ghcr.io/benjaminucn/splatsim-train:latest"
 DEFAULT_RENDER_IMAGE = "ghcr.io/benjaminucn/splatsim-render:latest"
 POD_ROOT = "/workspace"
-DATASETS_ROOT = "~/lerobot/splatsim_test_data"
+DATASETS_ROOT = DATASETS_DIR   # nombre con que lo usa cloud_server.py
 SCENES_ROOT = "~/data/Colmaps"
 ALIGNING = "aligning"
 

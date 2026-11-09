@@ -36,9 +36,9 @@ from splatsim.utils.trials.grasp_point import grasp_error, load_grasp_point
 from splatsim.utils.remote_call import ask_operator, call
 from splatsim.utils.trials.durations import other_durations
 
-APPLE_NAME = "plastic_apple"
+from splatsim.robots.xarm.config import APPLE_KEY, APPLE_NAME
+
 APPLE_QUAT = (0.0, 0.0, 0.0, 1.0)
-APPLE_KEY = f"{APPLE_NAME}_position"
 
 
 @dataclass

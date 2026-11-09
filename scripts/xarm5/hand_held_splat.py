@@ -19,7 +19,7 @@ from pybullet_utils.bullet_client import BulletClient
 from splatsim.utils.scene.hand_held import MESH_DIR, PIVOT_MM, load_manifest, merge_splat, read_ply, read_stl, sample_surface, write_ply
 from splatsim.utils.paths import load_yaml
 
-OBJECTS = "configs/object_configs/objects.yaml"
+from splatsim.utils.paths import OBJECTS_CONFIG as OBJECTS  # noqa: E402
 DEFAULT_URDF = "~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held.urdf"
 
 
