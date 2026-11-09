@@ -1,18 +1,20 @@
 """
 Servidor PyBullet + Gaussian Splat para el xArm5 Lite.
-Clase delgada: orquesta componentes que viven en sus propios archivos.
+Clase delgada: orquesta componentes que viven en sus propios archivos. La escena (robot, objetos,
+splats) la carga XArm5SimBase (sim_base.py).
 """
 import threading  # noqa: I001
 import time
 
 import numpy as np
 
-from splatsim.robots.sim_robot_pybullet_base import PybulletRobotServerBase
 from splatsim.utils.render.camera_setup import base_camera_poses
 from splatsim.utils.render.occlusion import measure_camera
 from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 
-from gaussian_renderer import render
+# antes que gaussian_renderer: importar gaussian_splatting agrega su carpeta al path
+from .sim_base import XArm5SimBase  # noqa: I001
+from gaussian_renderer import render  # noqa: E402
 
 from .apple import AppleController
 from .peduncle import PeduncleCutter
@@ -20,8 +22,6 @@ from .cameras import AppleCamera, BaseCamera, WristCamera
 from splatsim.robots.joint_controller import ControllerGains, JointController
 
 from .config import (
-    ENV_CONFIG,
-    FLOOR_Z,
     IDLE_STEP_AFTER,
     MAX_REALTIME_STEP,
     LOW_LEVEL_HZ,
@@ -49,9 +49,8 @@ from splatsim.robots.station.recorder import TrajectoryRecorder, to_uint8_image
 from .trail import EETrail
 
 
-class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
-    ENV_CONFIG = ENV_CONFIG
-    # métodos que el cliente puede llamar por ZMQ además de los de la base
+class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
+    # métodos que el cliente puede llamar por ZMQ además de los de ZMQRobotServer
     REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording", "get_preview",
                       "set_control_mode", "operator_prompt", "operator_answer", "measure_occlusion")
 
@@ -104,17 +103,14 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         self._last_images_time = 0.0
         self._last_command_time = 0.0    # time.monotonic() del último comando
         self._last_command = None        # último objetivo recibido (se graba como joint_command)
-        # el recorder no toca la base en su constructor, así que es seguro crearlo antes
+        # el recorder no toca la escena en su constructor, así que es seguro crearlo antes
         self.recorder = TrajectoryRecorder(
             self, MAX_RECORD_SECONDS, RECORD_EVERY, state_only_max_seconds=TELEOP_MAX_RECORD_SECONDS)
-        self.gripper = None  # se crea en setup_gripper(), que la base llama en su __init__
+        self.gripper = None  # se crea en setup_gripper(), que XArm5SimBase llama en su __init__
         self.occluders = None
         super().__init__(**kwargs)
         if occluders:
             self.occluders = OccluderSet(self, occluders)
-
-        self._remove_wall()
-        self._lower_floor(FLOOR_Z)
 
         self.peduncle = None
         self.apple = AppleController(self, movable=move_apple and gui == "pybullet")
@@ -146,25 +142,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         self.trail = EETrail(self)
         self.recorder.start_keyboard_listener()
 
-    # ── escena ───────────────────────────────────────────────────────────────
-    def _remove_wall(self):
-        if getattr(self, "wall", None) is not None:
-            try:
-                self.pybullet_client.removeBody(self.wall)
-                self.wall = None
-            except Exception:  # noqa: BLE001, S110
-                pass
-
-    def _lower_floor(self, z):
-        if getattr(self, "plane", None) is not None:
-            try:
-                self.pybullet_client.resetBasePositionAndOrientation(
-                    self.plane, [0, 0, z],
-                    self.pybullet_client.getQuaternionFromEuler([0, 0, 0]))
-            except Exception:  # noqa: BLE001, S110
-                pass
-
-    # ── métodos que llama la base: delegadores de una línea ──────────────────
+    # ── métodos que llama XArm5SimBase: delegadores de una línea ─────────────
     def setup_gripper(self):
         # gripper de la escena en objects.yaml: xarm (por defecto) o hand_held_xl330
         kind = self.object_config[self.robot_name].get("gripper", "xarm")
@@ -186,9 +164,6 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             arm = [self.pybullet_client.getJointState(self.dummy_robot, i)[0]
                    for i in range(1, 6)]
             return np.array([*arm, self.gripper.get_state()])
-
-    def get_joint_state_dummy(self) -> np.ndarray:
-        return self.get_joint_state()
 
     def _step(self, n: int = 1) -> None:
         for _ in range(n):
@@ -567,9 +542,6 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             c.resetJointState(self.dummy_robot, i,
                               self.initial_joint_state[i - 1] * self.joint_signs[i - 1])
         self.initial_link_states = get_curr_link_states(self.dummy_robot, self.use_link_centers)
-
-        _, ee_quat = self.get_current_ee_pose()
-        self.iniital_ee_quat = ee_quat  # (sic) nombre original, por si la base lo usa
 
         for i in range(1, self.num_dofs()):
             c.setJointMotorControl2(self.dummy_robot, i, c.VELOCITY_CONTROL,

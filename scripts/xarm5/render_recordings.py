@@ -76,7 +76,8 @@ class Args:
     (~8 GB cada uno: en una GPU de 16 GB cabe solo uno)"""
 
 
-RENDER_INFO_FILE = "render_info.yaml"
+from splatsim.utils.data.dataset_sources import RENDER_INFO_FILE  # noqa: E402
+from splatsim.utils.paths import OBJECTS_CONFIG  # noqa: E402
 
 # campos que se recalculan desde la pose interpolada (el resto viene del frame más cercano)
 RECOMPUTED = ("joint_positions", "all_joint_positions", "joint_positions_dummy", "ee_pos_quat",
@@ -129,11 +130,11 @@ def make_server(robot_name: str, cameras: list[str], **kwargs):
     """Servidor xArm5 en este proceso, sin ZMQ ni serve_loop: solo para renderizar (o, sin
     cámaras, para simular sin GPU). kwargs pasa al servidor, p.ej. control_hz."""
     from splatsim.robots.xarm.server import XArm5PybulletRobotServerCamera
-    with open("configs/object_configs/objects.yaml") as f:
+    with open(OBJECTS_CONFIG) as f:
         use_gripper = yaml.safe_load(f)[robot_name].get("use_gripper", True)
     server = XArm5PybulletRobotServerCamera(
         port=free_port(), host="127.0.0.1", camera_names=cameras, robot_name=robot_name,
-        cam_i=347, use_gripper=use_gripper, gui="pybullet", show_apple_window=False, **kwargs)
+        use_gripper=use_gripper, gui="pybullet", show_apple_window=False, **kwargs)
     server.setup_scene()
     return server
 

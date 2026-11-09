@@ -220,7 +220,6 @@ def launch_robot_server(args: Args):
             camera_names=(arrangement_cameras(args.arrangement) if args.arrangement
                           else list(args.cameras)),
             robot_name=args.robot_name,
-            cam_i=347,
             use_gripper=use_gripper,
             move_apple=args.move_apple,
             control_hz=args.hz,

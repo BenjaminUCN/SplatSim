@@ -606,7 +606,7 @@ class TestSimGripper(unittest.TestCase):
         s = types.SimpleNamespace(
             pybullet_client=FakeBullet(), dummy_robot=0, use_gripper=True, robot_name="r", joints=[None] * 3 + [joint],
             object_config={"r": cfg or {}}, use_link_centers=True, initial_link_states=[{"pos": -1}] * 5)
-        s.__dict__["__parse_joint_info__"] = lambda: None
+        s.parse_joint_info = lambda: None
         s.joints = [types.SimpleNamespace(name="x", id=i, maxForce=0) for i in range(3)] + [joint]
         return s
 
