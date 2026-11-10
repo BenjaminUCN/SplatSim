@@ -10,6 +10,7 @@ How this fork uses SplatSim with a **uFactory xArm5 Lite** for robotic tomato ha
 - [Replay recordings in each control mode](#replay-recordings-in-each-control-mode)
 - [Teleoperate and record with GELLO](#teleoperate-and-record-with-gello)
 - [Record demonstrations](#record-demonstrations)
+- [Perception episodes (starting arm pose × tomato category)](#perception-episodes-starting-arm-pose--tomato-category)
 - [Train the diffusion policy](#train-the-diffusion-policy)
 - [Training queue](#training-queue)
 - [Training queue panel](#training-queue-panel)
@@ -338,6 +339,44 @@ Each episode's `meta.json` records `occluders` (the leaf, which `measure_occlusi
 - `no_camera`: no camera sees the whole tomato, so no leaf is added.
 
 The leaf has no collisions, so the fit looks for a distance that keeps its center at least 10 cm from where the arm passes during the episode, moving it toward the camera if needed. `arm_distance` records what was left. Only recordings with `sim_joint_positions` can be rendered this way (`gello_3plants` can't).
+
+## Perception episodes (starting arm pose × tomato category)
+
+Planner episodes for studying how the scene's appearance changes with where the arm starts and with whether the tomato can be seen, from the fixed base camera (eye-to-hand). They follow the structure of `gello_3plants`, where each tomato position has a group of 5 demonstrations that start from different poses: the reset pose, out of view to each side, and two with the arm in view. Each tomato position (a *set*) gives 4 tomato categories × 5 starting poses = 20 episodes. Each one starts at its pose and ends grasping the tomato with the [planner](#record-demonstrations) (same trajectory, same server, state only), and is rendered afterwards with `render_recordings.py`.
+
+```bash
+python scripts/xarm5/plan_perception_episodes.py --positions 10 [--out ~/data/bc_data/perception] [--seed 0]
+python scripts/xarm5/render_recordings.py ~/data/bc_data/perception --fps 10
+```
+
+| ID | Starting pose | How it is chosen | In `gello_3plants` (p10–p90) |
+|---|---|---|---|
+| A1 | `OUT_LEFT` | The arm low (joint2–4 = `--side-joints` ± `--side-jitter`), joint1 turned until no pixel of it is in the image, plus `--side-extra`. Which side is left is read from the image | joint1 +0.80 to +1.08 |
+| A2 | `OUT_RIGHT` | Same, to the other side | joint1 −1.30 to −0.92 |
+| A3 | `BASE` | The reset pose: centered, above the image | the reset pose |
+| A4 | `IN_VIEW_FAR` | Grasp point `--far-distance` (0.4–0.6 m) from the tomato, within ±`--start-cone-deg` (35°) of the tomato → base direction, with the arm in view | 0.34–0.61 m, arm 7–26 % of the image |
+| A5 | `IN_VIEW_NEAR` | Same, at `--near-distance` (0.2–0.3 m) | 0.22–0.42 m |
+
+| ID | Tomato | Where |
+|---|---|---|
+| B1 | visible, in place | A position sampled from the hemisphere in `configs/apple_grid.yaml`, in frame and not covered by the plant |
+| B2 | hidden, in place | The same position, covered by a leaf from `--leaf-dir` (default `~/data/occluders/<scene>`) fitted in the camera (`--hidden-target` 98 %) away from where the arm passes in its 5 episodes. The leaf goes in `meta.json` (`occluders`), and `render_recordings.py` and `measure_occlusion.py` put it back |
+| B3 | hidden, displaced | B4 moved sideways until no pixel of the tomato is in the image |
+| B4 | visible, displaced | B1 moved `--float-offset` (0.15 m) toward the camera: same pixel, larger |
+
+The tomato goes wherever the hemisphere allows, with or without the plant behind it, so "in place" means the set's position, not a check that it touches the plant. B1 positions are spread out (farthest-point sampling over `--candidates`) and are kept only if every condition can be met: there is a grasp, A4 and A5 have a pose with the arm in view, B1 and B4 are visible, and B3 is out of frame. They are saved in `<out>/positions.yaml`. A finished set is marked in `<out>/sets/<set>.json` and skipped when running again. A set cut off halfway is regenerated, and a higher `--positions` adds sets far from the existing ones.
+
+**Checks on the first instant of each episode** (`splatsim/utils/scene/perception_design.py`, limits in `--thresholds.*`, calibrated on `gello_3plants`):
+
+- Arm: a PyBullet mask of the robot seen from the camera (`splatsim/utils/render/camera_view.py`, same pose and FOV as the splat render). This is geometry only, so the plant does not cover the arm here. A1–A3 need 0 pixels, and in A3 the end effector must project above the image and centered. A4/A5 need the arm to cover 3–35 % of the image, with the grasp point ≥ 0.35 m (A4) or ≤ 0.33 m (A5) from the tomato.
+- Tomato: the splat occlusion ([Occlusion percentage](#occlusion-percentage)) with the arm in the reset pose (out of frame). B1/B4 need ≤ 50 % covered and not cut by the frame. B2 needs ≥ 90 % covered or out of frame. B3 needs to be out of frame.
+- The episode must end with the tomato within `--max-final-error` (3 cm) of the grasp point. Each episode gets up to `--plan-attempts` plans (tilt, speeds, pauses).
+
+An episode that fails is saved with `valid: false` and its reasons, or not saved with `--invalid skip`. `start.tomato_with_arm` records the occlusion with the arm at its starting pose: with the camera next to the arm's base, A4/A5 often hide the tomato.
+
+**Output:** episodes `000/`, `001/`, … like `plan_trajectories.py`, 20 in a row per set. Each `meta.json` has `set`, `tomato_category`, `arm_config`, `apple_position`, `valid`, `reasons`, `start` (pose, arm mask, end effector projection, grasp distance), `tomato_scene`, `occluders`, and the plan. There is also `perception_episodes.csv` (one row per condition, including those not saved), `positions.yaml`, `sets/<set>.json` and `perception_info.yaml` (camera pose, reset pose, arguments). A set takes about 30 s on an RTX 5080, plus choosing the positions (it needs the GPU for the splat occlusion). Rendering it takes about 4 minutes at 5 fps with one camera.
+
+Limits: the leaf in B2 has no collisions and sits between the camera and the tomato, so at the end of the approach the gripper is behind it (`leaf_fit.arm_distance` records how close the arm passes). The plant has no collisions either.
 
 ## Train the diffusion policy
 
