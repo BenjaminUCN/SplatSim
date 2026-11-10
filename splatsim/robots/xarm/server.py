@@ -58,8 +58,9 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
                  gui: str = "viser", panel_port: int = 8080, control_mode: str = "position",
                  sim_clock: str = "fixed", occluders: str | None = None, **kwargs):
-        """gui: "viser" (panel web en http://localhost:<panel_port>) o "pybullet"
-        (sliders y botones de PyBullet; --move_apple agrega los de la manzana).
+        """gui: "viser" (panel web en http://localhost:<panel_port>), "pybullet"
+        (sliders y botones de PyBullet; --move_apple agrega los de la manzana) o "none" (sin
+        controles: solo lo que pidan los clientes por ZMQ, p.ej. ensayos automáticos).
         control_mode: position / interp / velocity (ver splatsim/robots/joint_controller.py),
         la misma ley que usa el driver real del xArm5.
         sim_clock: quién avanza la física. "fixed": cada comando avanza exactamente 1/control_hz
@@ -136,8 +137,10 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
             self.controls = [*(BaseCameraTuner(self, cam) for cam in base_cams),
                              SaveCameraPosesButton(self, base_cams),
                              ResetJointsButton(self)]
+        elif gui == "none":
+            self.controls = []
         else:
-            raise ValueError(f"gui debe ser 'viser' o 'pybullet', no {gui!r}")
+            raise ValueError(f"gui debe ser 'viser', 'pybullet' o 'none', no {gui!r}")
         self.apple_window = AppleWindow(show_apple_window)
         self.trail = EETrail(self)
         self.recorder.start_keyboard_listener()

@@ -41,8 +41,8 @@ class Args:
     # arrangement (p.ej. 2cam, ver configs/camera_poses.yaml) reemplaza a cameras
     cameras: tuple[str, ...] = ("base_rgb", "base_left_rgb", "base_right_rgb", "wrist_rgb")
     arrangement: str | None = None
-    # controles del xArm5: "viser" (panel web) o "pybullet" (sliders de PyBullet, solo sim);
-    # en el real: "viser" o "none"
+    # controles del xArm5: "viser" (panel web), "pybullet" (sliders de PyBullet, solo sim) o
+    # "none" (sin controles; se maneja solo por ZMQ)
     gui: Literal["viser", "pybullet", "none"] = "viser"
     # xArm5 real (--robot xarm5): IP, home, cámaras y carpeta de grabaciones; --robot_ip
     # explícito reemplaza a la IP del archivo
