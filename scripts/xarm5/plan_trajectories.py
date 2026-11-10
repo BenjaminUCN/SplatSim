@@ -40,8 +40,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from render_recordings import make_server  # noqa: E402
 from splatsim.robots.station.recorder import save_frame  # noqa: E402
 from splatsim.robots.xarm.config import APPLE_HEMISPHERE, APPLE_RANGE  # noqa: E402
-from splatsim.utils.apple_grid import load_grid, load_random_range, load_random_shape, sample_hemisphere  # noqa: E402
-from splatsim.utils.grasp_point import grasp_error, gripper_center, load_grasp_point  # noqa: E402
+from splatsim.utils.scene.apple_grid import load_grid, load_random_range, load_random_shape, sample_hemisphere  # noqa: E402
+from splatsim.utils.trials.grasp_point import grasp_error, gripper_center, load_grasp_point  # noqa: E402
 
 PLAN_INFO_FILE = "plan_info.yaml"
 EE_LINK = 6          # link_eef: el de obs["state"]

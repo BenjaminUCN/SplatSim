@@ -8,7 +8,7 @@ from pathlib import Path
 
 import numpy as np
 
-from splatsim.utils.leaf_variation import (
+from splatsim.utils.scene.leaf_variation import (
     FRACTIONS,
     EpisodeDraw,
     draw_episode,

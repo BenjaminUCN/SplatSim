@@ -5,7 +5,7 @@ El tallo no tiene cuerpo en PyBullet: no lo empuja nada y se mueve con el tomate
 """
 import numpy as np
 
-from splatsim.utils.peduncle import CLOSED_FRACTION, DROPPED, HELD, INTACT, cut_check, next_stem_state, to_world
+from splatsim.utils.scene.peduncle import CLOSED_FRACTION, DROPPED, HELD, INTACT, cut_check, next_stem_state, to_world
 
 from .config import APPLE_NAME
 

@@ -10,3 +10,5 @@ pybullet==3.2.7
 pybullet-planning==0.6.0
 pyzmq==27.1.0
 scipy==1.17.1
+# COLMAP con CUDA para splat_from_video.py (la de apt no lo usa); trae cudart y curand de pip, los de torch
+pycolmap-cuda12==4.2.1

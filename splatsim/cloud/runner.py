@@ -54,9 +54,19 @@ def sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _linked(path: Path, folder: Path) -> bool:
+    """El archivo o alguna carpeta entre él y `folder` es un symlink."""
+    while path != folder:
+        if path.is_symlink():
+            return True
+        path = path.parent
+    return False
+
+
 def manifest(folder: Path, progress=None) -> dict[str, str]:
-    """sha256 de cada archivo: el panel lo compara con lo que descarga."""
-    files = [p for p in sorted(folder.rglob("*")) if p.is_file()]
+    """sha256 de cada archivo: el panel lo compara con lo que descarga. Sin symlinks (wandb deja
+    varios): rclone no los sube, así que el panel nunca los vería llegar."""
+    files = [p for p in sorted(folder.rglob("*")) if p.is_file() and not _linked(p, folder)]
     digests = {}
     for i, path in enumerate(files, 1):
         digests[str(path.relative_to(folder))] = sha256(path)

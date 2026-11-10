@@ -21,19 +21,19 @@ import tyro
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
-from splatsim.utils.episode_selection import load_discarded  # noqa: E402
+from splatsim.utils.data.episode_selection import load_discarded  # noqa: E402
 from typing import Literal  # noqa: E402
 
-from splatsim.utils.grasp_point import (  # noqa: E402
+from splatsim.utils.trials.grasp_point import (  # noqa: E402
     GRASP_POINT_PATH,
     POINT_HEADER,
     SUCCESS_RADIUS,
     gripper_center,
     tomato_in_ee,
 )
-from splatsim.utils.paths import contract, expand, load_yaml  # noqa: E402
+from splatsim.utils.paths import OBJECTS_CONFIG, contract, expand, load_yaml  # noqa: E402
 
-APPLE_KEY = "plastic_apple_position"
+from splatsim.robots.xarm.config import APPLE_KEY  # noqa: E402
 
 
 @dataclass
@@ -77,7 +77,7 @@ def main(args: Args):
     rels = np.array(rels)
     demo_point = np.median(rels, axis=0)
     if args.point == "gripper":
-        robots = load_yaml("configs/object_configs/objects.yaml")
+        robots = load_yaml(OBJECTS_CONFIG)
         name = args.robot_name or ("xarm5_lite_plant_v3_hand_held" if "xarm5_lite_plant_v3_hand_held" in robots
                                    else "xarm5_lite_plant_v3")
         urdf = expand(robots[name]["urdf_path"][0])

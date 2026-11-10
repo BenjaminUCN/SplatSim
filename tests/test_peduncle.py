@@ -8,8 +8,8 @@ from pathlib import Path
 
 import numpy as np
 
-from splatsim.utils.hand_held import MESH_DIR, flange_from_assembly, read_stl
-from splatsim.utils.peduncle import (
+from splatsim.utils.scene.hand_held import MESH_DIR, flange_from_assembly, read_stl
+from splatsim.utils.scene.peduncle import (
     DROPPED,
     EMBED,
     HELD,

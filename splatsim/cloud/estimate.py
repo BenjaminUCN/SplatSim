@@ -19,6 +19,9 @@ STARTUP_S = 260               # GPU, dataset, carga y torch.compile, medidos en 
 CHECKPOINT_GB = 1.1           # model.safetensors del modelo de 2 cámaras
 CONVERT_STARTUP_S = 60        # sin GPU ni torch.compile
 DATASET_GB_PER_FRAME_CAMERA = 14.6e-6   # 13.0-14.6 kB en los datasets de 640x480 del lab: el mayor
+SCENE_GB_PER_FRAME = 2.8e-3   # images/ y sparse/ de 260729_2003: 3.3 GB para 1189 fotos 4K sin distorsión
+SPLAT_GB = 0.4                # output/ de 260729_2003: 363 MB
+SPLAT_STARTUP_S = 60          # extraer las fotos del video
 CONFIDENCE_ORDER = {"alta": 0, "baja": 1, "sin datos": 2}
 # Con la imagen ya en la máquina, el pod arrancó en 18 s en vez de 7-25 min. La espera no se cobra, así
 # que esto es lo que vale ahorrarla: un trabajo largo no acaba en una máquina mucho más lenta por esto.
@@ -108,6 +111,14 @@ def render_workload(kind: str, frames: int, cameras: int, workers: int, input_gb
     return Workload(kind, f"{kind}-cam{cameras}-w{workers}", frames, RENDER_IMAGE_GB + ASSETS_GB + input_gb,
                     frames * cameras * PNG_GB, RENDER_STARTUP_S + leaf_episodes * LEAF_FIT_S / workers,
                     image_gb=RENDER_IMAGE_GB,
+                    image_disk_gb=RENDER_IMAGE_DISK_GB)
+
+
+def splat_workload(frames: int, matcher: str, iterations: int, video_gb: float) -> Workload:
+    """work = fotos. Emparejar todas con todas crece con su cuadrado: la velocidad solo vale para
+    escenas de un tamaño parecido."""
+    return Workload("splat", f"splat-{matcher}-it{iterations}", frames, RENDER_IMAGE_GB + video_gb,
+                    frames * SCENE_GB_PER_FRAME + SPLAT_GB, SPLAT_STARTUP_S, image_gb=RENDER_IMAGE_GB,
                     image_disk_gb=RENDER_IMAGE_DISK_GB)
 
 

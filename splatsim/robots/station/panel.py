@@ -34,9 +34,9 @@ import viser
 import yaml
 
 from splatsim.robots.joint_controller import MODES
-from splatsim.utils.apple_grid import load_grid
-from splatsim.utils.camera_setup import load_camera_setup
-from splatsim.utils.registry import (
+from splatsim.utils.scene.apple_grid import load_grid
+from splatsim.utils.render.camera_setup import load_camera_setup
+from splatsim.utils.data.registry import (
     dataset_source_for_checkpoint,
     describe_dataset,
     describe_model,

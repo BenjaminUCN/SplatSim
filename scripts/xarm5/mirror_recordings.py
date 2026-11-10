@@ -40,9 +40,9 @@ import yaml
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from render_recordings import make_server  # noqa: E402
 from splatsim.robots.station.recorder import save_frame  # noqa: E402
-from splatsim.utils.camera_setup import arrangement_cameras  # noqa: E402
-from splatsim.utils.episode_selection import load_discarded, save_discarded  # noqa: E402
-from splatsim.utils.parallel_episodes import own_argv, run_workers  # noqa: E402
+from splatsim.utils.render.camera_setup import arrangement_cameras  # noqa: E402
+from splatsim.utils.data.episode_selection import load_discarded, save_discarded  # noqa: E402
+from splatsim.utils.render.parallel_episodes import own_argv, run_workers  # noqa: E402
 
 
 @dataclass

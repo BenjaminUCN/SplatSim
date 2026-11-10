@@ -19,11 +19,11 @@ import numpy as np
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
-from splatsim.utils.hand_held import read_ply, write_ply  # noqa: E402
-from splatsim.utils.peduncle import LENGTH, RADIUS, SPACING, STEM_RGB, cylinder_points, stem_from_tomato  # noqa: E402
+from splatsim.utils.scene.hand_held import read_ply, write_ply  # noqa: E402
+from splatsim.utils.scene.peduncle import LENGTH, RADIUS, SPACING, STEM_RGB, cylinder_points, stem_from_tomato  # noqa: E402
 
-OBJECTS = "configs/object_configs/objects.yaml"
-SOURCE = "plastic_apple"
+from splatsim.utils.paths import OBJECTS_CONFIG as OBJECTS  # noqa: E402
+from splatsim.robots.xarm.config import APPLE_NAME as SOURCE  # noqa: E402
 NAME = f"{SOURCE}_peduncle"
 SH_C0 = 0.28209479177387814
 OPACITY = 0.98

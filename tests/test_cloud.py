@@ -290,6 +290,7 @@ class TestPipeline(Base):
         job = self.submit()
         self.run_until(lambda: job["status"] == "failed")
         self.assertIn("sha256", job["error"])
+        self.assertNotIn("phase", job, "un trabajo fallido no sigue mostrando 'downloading'")
         self.storage.corrupt = False
         self.orch.retry(job["id"])
         self.run_until(lambda: job["status"] == "done")
@@ -821,6 +822,7 @@ class TestRestart(Base):
         self.assertEqual(data["jobs"][0]["name"], "m")
 
 
+@unittest.skipIf(shutil.which("rclone") is None, "sin rclone: Storage lo necesita aunque el bucket sea local")
 class TestEpisodePacks(unittest.TestCase):
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
@@ -909,6 +911,15 @@ class TestEpisodePacks(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (self.bucket / "recordings/x").iterdir()), ["000.tar"])
         result = json.loads(self.storage.read("runs/p/result.json"))
         self.assertIn("000/00001.pkl", result["outputs"]["recordings/x"])
+
+    def test_the_manifest_skips_symlinks_because_rclone_does_not_upload_them(self):
+        out = self.tmp / "model"
+        (out / "wandb/run-1/logs").mkdir(parents=True)
+        (out / "model.safetensors").write_text("pesos")
+        (out / "wandb/run-1/logs/debug.log").write_text("log")
+        (out / "wandb/debug.log").symlink_to(out / "wandb/run-1/logs/debug.log")
+        (out / "wandb/latest-run").symlink_to(out / "wandb/run-1", target_is_directory=True)
+        self.assertEqual(sorted(runner.manifest(out)), ["model.safetensors", "wandb/run-1/logs/debug.log"])
 
     def test_recordings_are_packed_in_every_stage_that_moves_them(self):
         job = {"args": {"input": "/lab/g", "fps": 10, "arrangement": "2cam", "workers": 1}, "output": "/lab/g_10hz",
@@ -1463,6 +1474,195 @@ class TestVastCli(unittest.TestCase):
         self.assertEqual(command[-2:], ["--args", "runs/a"])
         self.assertIn("--raw", command)
         self.assertLess(command.index("--raw"), command.index("--args"))
+
+
+FAKE_SPLAT = """
+import argparse
+from pathlib import Path
+import numpy as np
+from plyfile import PlyData, PlyElement
+p = argparse.ArgumentParser()
+p.add_argument("source"); p.add_argument("--out"); p.add_argument("--fps", type=float); p.add_argument("--matcher")
+p.add_argument("--iterations", type=int); p.add_argument("--clean", action="store_true")
+a = p.parse_args()
+assert a.clean
+photos = sorted(Path(a.source).iterdir())
+assert len(photos) == 3, photos
+out = Path(a.out)
+(out / "images").mkdir(parents=True); (out / "sparse/0").mkdir(parents=True)
+for photo in photos:
+    (out / "images" / photo.name).write_bytes(photo.read_bytes())
+(out / "sparse/0/cameras.bin").write_bytes(b"cams")
+print(f"[{a.iterations // 2}/{a.iterations}] train.py", flush=True)
+ply = out / f"output/point_cloud/iteration_{a.iterations}/point_cloud.ply"
+ply.parent.mkdir(parents=True)
+xyz = np.array([(0, 0, 0), (1, 0, 0), (0, 1, 0), (5, 5, 5)], dtype=[("x", "f4"), ("y", "f4"), ("z", "f4")])
+PlyData([PlyElement.describe(xyz, "vertex")]).write(str(ply))
+"""
+SCALE_HALF = [[0.5, 0, 0, 0.1], [0, 0.5, 0, 0], [0, 0, 0.5, 0], [0, 0, 0, 1]]
+
+
+class SplatBase(Base):
+    def setUp(self):
+        super().setUp()
+        self.splat_script = self.tmp / "fake_splat.py"
+        self.splat_script.write_text(FAKE_SPLAT)
+        self.orch.scripts["splat"] = str(self.splat_script)
+        self.orch.settings = Settings(max_pods=2, budget_usd=100)
+        self.photos = self.tmp / "photos"
+        self.photos.mkdir()
+        for i in range(3):
+            (self.photos / f"{i:04d}.jpg").write_bytes(b"jpg%d" % i)
+        self.scenes = self.tmp / "scenes"
+        self.objects = self.tmp / "objects.yaml"
+        self.labels = self.tmp / "labels"
+        self.labels.mkdir()
+        for name, value in (("OBJECTS_FILE", str(self.objects)), ("LABELS_DIR", str(self.labels))):
+            self.addCleanup(setattr, stages, name, getattr(stages, name))
+            setattr(stages, name, value)
+
+    def submit_splat(self, name="s1", **args):
+        return self.orch.submit_splat(f"splat {name}", name, {"source": str(self.photos), "iterations": 1000, **args},
+                                      Requirements(), 1.0, scenes_root=str(self.scenes))
+
+    def align(self, robot, scene, matrix, box=((-0.1, -0.1, -0.1), (0.7, 0.7, 0.7)), labels=None):
+        self.objects.write_text(yaml.safe_dump({robot: {
+            "source_path": str(scene), "model_path": str(scene / "output"), "transformation": {"matrix": matrix},
+            "aabb": {"bounding_box": [list(box[0]), list(box[1])]}}}))
+        if labels is not None:
+            import numpy as np
+            np.save(self.labels / f"{robot}_labels.npy", np.zeros(labels))
+
+
+class TestSplat(SplatBase):
+    """Video → splat en un pod; baja al lab y espera la alineación antes de soltar a quien dependa de él."""
+
+    def test_scene_comes_down_and_waits_for_alignment(self):
+        job = self.submit_splat()
+        self.assertEqual((job["frames"], job["output"]), (3, str(self.scenes / "s1")))
+        self.run_until(lambda: job["status"] in ("aligning", "failed", "done"))
+        self.assertEqual(job["status"], "aligning", job.get("error"))
+        scene = self.scenes / "s1"
+        self.assertEqual((scene / "images/0001.jpg").read_bytes(), b"jpg1")
+        self.assertTrue((scene / "output/point_cloud/iteration_1000/point_cloud.ply").is_file())
+        self.assertEqual([p for p in (self.tmp / "bucket").rglob("*") if p.is_file()
+                          and ("outputs" in p.parts or "videos" in p.parts)], [], "el video y la escena no siguen cobrando en el bucket")
+        self.assertIn("CloudCompare", describe_progress(job))
+        self.assertEqual(self.orch.history[-1]["kind"], "splat")
+        self.assertEqual(self.provider.live, {})
+
+    def test_dependents_wait_until_approved(self):
+        job = self.submit_splat()
+        child = self.orch._add({"name": "m", "description": "", "kind": "train", "config": self.cfg("m"),
+                                "dataset": str(self.dataset), "dataset_gb": 0.1, "depends_on": job["id"]},
+                               Requirements(), 1.0, None)
+        self.run_until(lambda: job["status"] == "aligning")
+        for _ in range(5):
+            self.orch.tick()
+        self.assertEqual(child["status"], "pending")
+        self.assertIn("aligning", child["wait"])
+        scene = self.scenes / "s1"
+        self.align("robot_s1", scene, SCALE_HALF)
+        self.assertTrue(any("labels" in p for p in self.orch.approve(job["id"], "robot_s1")))
+        self.assertEqual(job["status"], "aligning")
+        self.align("robot_s1", scene, SCALE_HALF, labels=3)
+        self.assertEqual(self.orch.approve(job["id"], "robot_s1"), [])
+        self.assertEqual((job["status"], job["robot_name"]), ("done", "robot_s1"))
+        self.run_until(lambda: child["status"] in ("done", "failed"))
+        self.assertEqual(child["status"], "done", child.get("error"))
+
+    def test_existing_scene_is_rejected(self):
+        (self.scenes / "s1").mkdir(parents=True)
+        with self.assertRaisesRegex(ValueError, "Ya existe"):
+            self.submit_splat()
+        with self.assertRaisesRegex(ValueError, "inválido"):
+            self.submit_splat(name="a/b")
+
+    def test_pod_gets_the_video_and_cleans_up(self):
+        job = {**self.submit_splat(fps=2.0, matcher="sequential"), "run_key": "runs/x"}
+        splat = stages.STAGES["splat"]
+        self.assertEqual(splat.uploads(job), [{"local": str(self.photos), "key": "videos/s1/photos"}])
+        pod = splat.pod(job, "runs/x", "/workspace")
+        self.assertEqual(pod["args"], ["/workspace/videos/s1/photos", "--out", "/workspace/scenes/s1", "--fps", "2.0",
+                                       "--matcher", "sequential", "--iterations", "1000", "--clean"])
+        self.assertEqual(pod["inputs"], [{"key": "videos/s1", "path": "/workspace/videos/s1"}])
+        self.assertTrue(pod["outputs"][0]["packed"])
+        self.assertEqual(self.orch._spec(job, orchestrator.Estimate(offer(), 1.0, "alta", "", 1, 1, 0, 1), "runs/x")
+                         ["command"][2], str(self.splat_script))
+
+
+class TestAlignment(SplatBase):
+    def setUp(self):
+        super().setUp()
+        self.scene = self.tmp / "scene"
+        ply = self.scene / "output/point_cloud/iteration_7000/point_cloud.ply"
+        ply.parent.mkdir(parents=True)
+        (self.scene / "output/point_cloud/iteration_30000").mkdir()
+        import numpy as np
+        from plyfile import PlyData, PlyElement
+        # con SCALE_HALF caen en la caja los tres primeros
+        xyz = np.array([(0, 0, 0), (1, 0, 0), (0, 1, 0), (5, 5, 5)], dtype=[("x", "f4"), ("y", "f4"), ("z", "f4")])
+        PlyData([PlyElement.describe(xyz, "vertex")]).write(str(ply))
+        (self.scene / "output/point_cloud/iteration_30000/point_cloud.ply").write_bytes(ply.read_bytes())
+
+    def problems(self):
+        return stages.alignment_problems("r", self.scene)
+
+    def test_aligned_scene_passes(self):
+        self.align("r", self.scene, SCALE_HALF, labels=3)
+        self.assertEqual(self.problems(), [])
+
+    def test_identity_matrix_is_not_aligned(self):
+        self.align("r", self.scene, stages.IDENTITY, labels=3)
+        self.assertIn("identidad", " ".join(self.problems()))
+
+    def test_labels_from_another_matrix_are_stale(self):
+        self.align("r", self.scene, SCALE_HALF, labels=40)
+        self.assertIn("vuelve a correr", " ".join(self.problems()))
+
+    def test_entry_must_point_to_this_scene(self):
+        self.align("r", self.tmp / "other", SCALE_HALF, labels=3)
+        self.assertIn("source_path", " ".join(self.problems()))
+        self.objects.write_text("{}")
+        self.assertIn("no está", " ".join(self.problems()))
+
+    def test_bad_matrix(self):
+        self.align("r", self.scene, [[1, 0, 0], [0, 1, 0]], labels=3)
+        self.assertIn("4×4", " ".join(self.problems()))
+
+    def test_latest_iteration_is_used(self):
+        self.assertEqual(stages.latest_splat(self.scene / "output").parent.name, "iteration_30000")
+
+    def test_new_entry_copies_the_base_and_waits_for_the_matrix(self):
+        self.objects.write_text(yaml.safe_dump({"base": {
+            "urdf_path": ["~/u.urdf"], "joint_states": [[0.0, 0.1]], "source_path": "~/old", "model_path": "~/old/output",
+            "transformation": {"matrix": SCALE_HALF}, "object_overrides": {"apple": "x"},
+            "aabb": {"bounding_box": [[1, 1, 1], [2, 2, 2]], "urdf_bbox_adjustment": [[0.0, 0.1]]}}}))
+        text = stages.scene_entry("new", self.scene, "base")
+        self.assertIn("- [0.0, 0.1]", text, "listas de números en una línea, como objects.yaml")
+        entry = yaml.safe_load(text)["new"]
+        self.assertEqual(entry["source_path"], str(self.scene))
+        self.assertEqual(entry["model_path"], f"{self.scene}/output")
+        self.assertEqual(entry["transformation"]["matrix"], stages.IDENTITY)
+        self.assertEqual(entry["aabb"]["urdf_bbox_adjustment"], [[0.0, 0.1]])
+        self.assertNotIn("object_overrides", entry)
+        self.assertEqual(entry["urdf_path"], ["~/u.urdf"])
+        with self.assertRaisesRegex(ValueError, "no está"):
+            stages.scene_entry("new", self.scene, "missing")
+
+
+class TestProbeVideo(unittest.TestCase):
+    @unittest.skipIf(shutil.which("ffmpeg") is None, "sin ffmpeg")
+    def test_frames_of_a_video(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        video = tmp / "v.mp4"
+        subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", "testsrc=size=64x64:rate=10:duration=3",
+                        "-pix_fmt", "yuv420p", str(video)], check=True)
+        self.assertEqual(stages.probe_video(video)["frames"], 30)
+        self.assertEqual(stages.probe_video(video, fps=2)["frames"], 7)
+        with self.assertRaisesRegex(ValueError, "No existe"):
+            stages.probe_video(tmp / "nada.mp4")
 
 
 if __name__ == "__main__":

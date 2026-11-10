@@ -17,7 +17,7 @@ SCRIPTS = {"train": "scripts/xarm5/train_diffusion.py",
            "plan": "scripts/xarm5/plan_trajectories.py",
            "render": "scripts/xarm5/render_recordings.py",
            "mirror": "scripts/xarm5/mirror_recordings.py",
-           "convert": "splatsim/utils/lerobot_conversion.py"}
+           "convert": "splatsim/utils/data/lerobot_conversion.py"}
 LANES = {"train": "gpu", "plan": "cpu", "render": "gpu", "mirror": "gpu", "convert": "cpu"}
 ROBOT_TYPE = "xarm5_lite"      # --robot_type por defecto del convertidor, va en el nombre del dataset
 

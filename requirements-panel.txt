@@ -1,0 +1,7 @@
+# Lo que importa el panel de la nube (docker/panel.Dockerfile). Mismas versiones que requirements-train.txt.
+# numpy: los estados de las grabaciones (pickle) traen arreglos de numpy. plyfile: Approve scene lee el splat.
+numpy==2.2.6
+plyfile==1.1.2
+pyyaml==6.0.3
+tyro==1.0.13
+viser==1.1.1

@@ -3,7 +3,7 @@
 # Edita a mano solo name / description / notes: se conservan al regenerar.
 #   name: nombre corto para elegir el modelo (vacío -> se usa suggested_name)
 #   description: qué se intentó mejorar (p.ej. "1 cámara, más pasos")
-generated: 2026-10-28 17:42
+generated: 2026-11-09 19:16
 roots: {recordings: ~/data/bc_data, datasets: ~/lerobot/splatsim_test_data, models: ~/lerobot/examples/tutorial/diffusion/outputs}
 recordings:
   gello:
@@ -44,7 +44,20 @@ recordings:
     first_episode: 2026-08-10 15:07
     last_episode: 2026-08-26 16:01
     shared_episodes: {}
-    datasets: [splatsim_xarm5_lite_10fps_261020_2010]
+    datasets: [splatsim_xarm5_lite_10fps_261020_2010, splatsim_xarm5_lite_10fps_261105_1459]
+  gello_3plants_mirrored:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/data/bc_data/gello_3plants_mirrored
+    episodes: 412
+    frames: 30282
+    cameras: [base_rgb, wrist_rgb]
+    image_numbering: per_frame
+    first_episode: 2026-11-02 14:13
+    last_episode: 2026-10-31 13:58
+    shared_episodes: {}
+    datasets: [splatsim_xarm5_lite_10fps_261020_2010, splatsim_xarm5_lite_10fps_261105_1459]
   gello_model:
     name: ''
     description: ''
@@ -58,6 +71,19 @@ recordings:
     last_episode: 2026-06-26 15:39
     shared_episodes: {}
     datasets: []
+  gello_test_viser:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/data/bc_data/gello_test_viser
+    episodes: 200
+    frames: 127408
+    cameras: []
+    image_numbering: null
+    first_episode: 2026-10-29 18:07
+    last_episode: 2026-11-05 19:26
+    shared_episodes: {}
+    datasets: [splatsim_xarm5_lite_10fps_261106_1643]
   gello_v2_dual:
     name: ''
     description: ''
@@ -92,6 +118,71 @@ recordings:
       splatsim_xarm5_lite_10fps_260616_0234, splatsim_xarm5_lite_10fps_260617_0248, splatsim_xarm5_lite_10fps_260617_1732,
       splatsim_xarm5_lite_10fps_260618_1445, splatsim_xarm5_lite_10fps_260619_1723, splatsim_xarm5_lite_10fps_260622_1924,
       splatsim_xarm5_lite_10fps_260623_0204, splatsim_xarm5_lite_10fps_260704_1203]
+  planned:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/data/bc_data/planned
+    episodes: 50
+    frames: 14796
+    cameras: []
+    image_numbering: null
+    first_episode: 2026-11-02 16:48
+    last_episode: 2026-11-02 16:50
+    shared_episodes: {}
+    datasets: []
+  planned_261103:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/data/bc_data/planned_261103
+    episodes: 300
+    frames: 91391
+    cameras: []
+    image_numbering: null
+    first_episode: 2026-11-03 16:16
+    last_episode: 2026-11-03 16:38
+    shared_episodes: {}
+    datasets: []
+  planned_261103_10hz:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/data/bc_data/planned_261103_10hz
+    episodes: 300
+    frames: 30566
+    cameras: [base_rgb, base_left_rgb, base_right_rgb, wrist_rgb]
+    image_numbering: per_frame
+    first_episode: 2026-11-06 05:08
+    last_episode: 2026-11-06 05:11
+    shared_episodes: {}
+    datasets: [splatsim_xarm5_lite_10fps_261103_1616, splatsim_xarm5_lite_10fps_261104_1625]
+  planned_cut_v2:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/data/bc_data/planned_cut_v2
+    episodes: 6
+    frames: 2426
+    cameras: []
+    image_numbering: null
+    first_episode: 2026-11-06 21:19
+    last_episode: 2026-11-06 21:19
+    shared_episodes: {}
+    datasets: []
+  planned_cut_v2_10hz:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/data/bc_data/planned_cut_v2_10hz
+    episodes: 6
+    frames: 810
+    cameras: [base_rgb, base_left_rgb, base_right_rgb, wrist_rgb]
+    image_numbering: per_frame
+    first_episode: 2026-11-06 21:19
+    last_episode: 2026-11-06 21:22
+    shared_episodes: {}
+    datasets: []
 datasets:
   '0512_1621':
     name: ''
@@ -652,8 +743,177 @@ datasets:
     state_dim: 7
     sources:
     - {recording: gello_3plants, recording_episodes: 0-205, dataset_episodes: 0-205, matched_episodes: 206/206, frames_dropped: 1}
+    - {recording: gello_3plants_mirrored, recording_episodes: 206-411, dataset_episodes: 0-205, matched_episodes: 206/206,
+      frames_dropped: 0}
     models: [robot_learning_tutorial/diffusion_1021_1640]
+  splatsim_xarm5_lite_10fps_261103_1616:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261103_1616
+    created: 2026-11-03 16:16
+    episodes: 300
+    frames: 30566
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, base_left_rgb, base_right_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: planned_261103_10hz, recording_episodes: 0-299, dataset_episodes: 0-299, matched_episodes: 300/300, frames_dropped: 0}
+    models: []
+  splatsim_xarm5_lite_10fps_261104_1625:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261104_1625
+    created: 2026-11-04 16:25
+    episodes: 300
+    frames: 30566
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: planned_261103_10hz, recording_episodes: 0-299, dataset_episodes: 0-299, matched_episodes: 300/300, frames_dropped: 0}
+    models: [robot_learning_tutorial/300-planner-trajectories-2cam_1104_1706]
+  splatsim_xarm5_lite_10fps_261105_1459:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261105_1459
+    created: 2026-11-05 14:59
+    episodes: 412
+    frames: 30282
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_3plants, recording_episodes: 0-205, dataset_episodes: 0-205, matched_episodes: 206/206, frames_dropped: 1}
+    - {recording: gello_3plants_mirrored, recording_episodes: 0-411, dataset_episodes: 0-411, matched_episodes: 412/412, frames_dropped: 0}
+    models: [robot_learning_tutorial/3plants-mirrored-2cam_1105_2037]
+  splatsim_xarm5_lite_10fps_261106_1643:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261106_1643
+    created: 2026-11-06 16:43
+    episodes: 200
+    frames: 43537
+    fps: 10
+    robot_type: xarm5_lite
+    cameras: [base_rgb, wrist_rgb]
+    image_shape: [3, 480, 640]
+    state_dim: 7
+    sources:
+    - {recording: gello_test_viser, recording_episodes: '3-6,8,10-204', dataset_episodes: 0-199, matched_episodes: meta, converted_from: 'gello_test_viser_10hz
+        (10 fps, base_rgb, wrist_rgb; no está en esta máquina)'}
+    models: [robot_learning_tutorial/gello_benjamin_200_2cam_1106_1648]
 models:
+  robot_learning_tutorial/300-planner-trajectories-2cam_1104_1706:
+    name: 300-planner-trajectories-2cam
+    description: test training a model with planner trajectories
+    notes: ''
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/300-planner-trajectories-2cam_1104_1706
+    started: 2026-11-04 17:06
+    saved: 2026-11-04 21:24
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config:
+      model_name: 300-planner-trajectories-2cam_1104_1706
+      name: 300-planner-trajectories-2cam
+      description: test training a model with planner trajectories
+      output_root: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial
+      device: cuda
+      dataset_id: local/splatsim_xarm5_lite_10fps_261104_1625
+      dataset_root: ~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261104_1625
+      cameras: [base_rgb, wrist_rgb]
+      arrangement: null
+      n_obs_steps: 2
+      horizon: 64
+      n_action_steps: 32
+      training_steps: 50000
+      batch_size: 32
+      num_workers: 12
+      prefetch_factor: 3
+      image_augmentation: false
+      log_freq: 1
+      save_freq: 10000
+      push_to_hub: true
+      hub_user: LuEduSoHu
+      wandb: true
+      wandb_project: splatsim-diffusion
+      wandb_entity: null
+      wandb_mode: online
+      wandb_log_freq: 10
+      wandb_run: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/300-planner-trajectories-2cam_1104_1706/wandb/offline-run-20261104_170714-zymeyjav/files
+      wandb_id: zymeyjav
+    dataset: splatsim_xarm5_lite_10fps_261104_1625
+    dataset_match: stats
+    same_stats_datasets: [splatsim_xarm5_lite_10fps_261103_1616]
+    suggested_name: 2cam-planned_261103_10hz-300ep-h64-1104
+  robot_learning_tutorial/3plants-mirrored-2cam_1105_2037:
+    name: 3plants-mirrored-2cam
+    description: 412 episodios 3plants con espejo, 2 camaras, torch_compile, RTX 5090 RunPod
+    notes: ''
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/3plants-mirrored-2cam_1105_2037
+    started: 2026-11-05 20:37
+    saved: 2026-11-05 20:43
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config:
+      model_name: 3plants-mirrored-2cam_1105_2037
+      name: 3plants-mirrored-2cam
+      description: 412 episodios 3plants con espejo, 2 camaras, torch_compile, RTX 5090 RunPod
+      output_root: /root/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial
+      device: cuda
+      dataset_id: local/splatsim_xarm5_lite_10fps_261105_1459
+      dataset_root: /root/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261105_1459
+      cameras: [base_rgb, wrist_rgb]
+      arrangement: null
+      n_obs_steps: 2
+      horizon: 64
+      n_action_steps: 32
+      training_steps: 50000
+      batch_size: 32
+      num_workers: 12
+      prefetch_factor: 3
+      image_augmentation: false
+      torch_compile: true
+      log_freq: 1
+      save_freq: 10000
+      push_to_hub: false
+      hub_user: LuEduSoHu
+      wandb: true
+      wandb_project: splatsim-diffusion
+      wandb_entity: null
+      wandb_mode: offline
+      wandb_log_freq: 10
+      wandb_run: /root/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/3plants-mirrored-2cam_1105_2037/wandb/offline-run-20261105_203726-m25ih66q/files
+      wandb_id: m25ih66q
+    dataset: splatsim_xarm5_lite_10fps_261105_1459
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-3plants+3plants_mirrored-412ep-h64-1105
   robot_learning_tutorial/diffusion:
     name: ''
     description: ''
@@ -1049,4 +1309,31 @@ models:
     dataset: splatsim_xarm5_lite_10fps_261020_2010
     dataset_match: stats
     same_stats_datasets: []
-    suggested_name: 2cam-3plants-206ep-h64-1021
+    suggested_name: 2cam-3plants+3plants_mirrored-206ep-h64-1021
+  robot_learning_tutorial/gello_benjamin_200_2cam_1106_1648:
+    name: gello benjamin 200 2cam
+    description: ''
+    notes: ''
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/gello_benjamin_200_2cam_1106_1648
+    started: 2026-11-06 16:48
+    saved: 2026-11-07 06:06
+    finished: true
+    policy: diffusion
+    cameras: [base_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 64
+    n_action_steps: 32
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: [10000, 20000, 30000, 40000]
+    train_config: {model_name: gello_benjamin_200_2cam_1106_1648, name: gello benjamin 200 2cam, description: '', output_root: /root/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial,
+      device: cuda, dataset_id: local/splatsim_xarm5_lite_10fps_261106_1643, dataset_root: /root/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261106_1643,
+      cameras: null, arrangement: 2cam, n_obs_steps: 2, horizon: 64, n_action_steps: 32, training_steps: 50000, batch_size: 32,
+      num_workers: 12, prefetch_factor: 3, image_augmentation: false, torch_compile: true, log_freq: 1, save_freq: 10000,
+      push_to_hub: false, hub_user: LuEduSoHu, wandb: true, wandb_project: splatsim-diffusion, wandb_entity: null, wandb_mode: online,
+      wandb_log_freq: 10, wandb_run: 'https://wandb.ai/benjamin-donoso-ucn/splatsim-diffusion/runs/xb7m9dwf', wandb_id: xb7m9dwf}
+    dataset: splatsim_xarm5_lite_10fps_261106_1643
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 2cam-test_viser-200ep-h64-1106

@@ -3,7 +3,7 @@ import numpy as np
 
 from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 
-from splatsim.utils.hand_held import JAW_JOINT
+from splatsim.utils.scene.hand_held import JAW_JOINT
 
 from .config import (
     GRIPPER_RANGE, GRIPPER_MAX_ANGLE, SPLAT_GRIPPER_POSE,
@@ -27,11 +27,10 @@ class XArm5Gripper:
         self._patched = False
         self.splat_pose = SPLAT_GRIPPER_POSE
 
-    # ── setup (lo llama setup_gripper de la base) ────────────────────────────
+    # ── setup (lo llama el setup_gripper del servidor) ───────────────────────
     def setup(self) -> None:
         s = self.s
-        s.__parse_joint_info__()
-        s.gripper_range = GRIPPER_RANGE
+        s.parse_joint_info()
 
         parents = [j.id for j in s.joints if j.name == self.PARENT]
         if not parents:
@@ -42,10 +41,6 @@ class XArm5Gripper:
         self.parent_id = parents[0]
         self.children = {j.id: self.CHILDREN[j.name]
                          for j in s.joints if j.name in self.CHILDREN}
-
-        # la base podría leer estos atributos directamente
-        s.mimic_parent_id = self.parent_id
-        s.mimic_child_multiplier = self.children
 
         client = s.pybullet_client
         for joint_id, mult in self.children.items():
@@ -84,7 +79,7 @@ class XArm5Gripper:
         return float(np.clip(angle / GRIPPER_MAX_ANGLE, 0.0, 1.0))
 
     def base_state(self) -> float:
-        """Lo que la base divide por 0.8 para obs["state"] (get_current_gripper_state)."""
+        """Lo que get_observations divide por 0.8 para obs["state"] (get_current_gripper_state)."""
         return self.s.pybullet_client.getJointState(self.s.dummy_robot, self.parent_id)[0]
 
     def _splat_poses(self) -> dict:
