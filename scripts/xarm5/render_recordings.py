@@ -144,6 +144,13 @@ def portable_path(path: Path) -> Path:
     return Path("~") / path.relative_to(Path.home()) if path.is_relative_to(Path.home()) else path
 
 
+def episode_leaves(episode: Path) -> list[dict]:
+    """Las hojas anotadas en el meta.json del episodio: la que le puso render_recordings.py --leaf_dir
+    o la de B2 de plan_perception_episodes.py."""
+    path = episode / "meta.json"
+    return json.loads(path.read_text()).get("occluders", []) if path.exists() else []
+
+
 def write_leaf_meta(path: Path, entries: list[dict], leaf_fit: dict) -> None:
     """Agrega la hoja al meta.json del episodio (measure_occlusion.py la vuelve a poner desde ahí)."""
     meta = json.loads(path.read_text()) if path.exists() else {}
@@ -205,6 +212,8 @@ def main(args: Args):
             server.restore_state(frames[0])
             draw = draw_episode(episode.name, leaves, args.occlusion_targets, args.seed)
             entries, leaf_fit = place_episode_leaf(server, draw, leaf_cameras, path)
+        else:   # la hoja que trae el episodio (B2 de plan_perception_episodes.py), o ninguna
+            server.set_episode_occluders(episode_leaves(episode))
         for k, point in enumerate(points, 1):
             obs = interpolated_obs(server, frames, *point)
             images = server.render_cameras(cameras)

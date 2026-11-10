@@ -16,7 +16,6 @@ meta.json (render_recordings.py --leaf_dir), y escribe en la carpeta (o en --out
 Sirve para grabaciones sin imágenes y antiguas. Cuesta 3 renders por cámara e instante.
 """
 import csv
-import json
 import os
 import pickle
 import sys
@@ -28,7 +27,7 @@ import tyro
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from render_recordings import make_server  # noqa: E402
+from render_recordings import episode_leaves, make_server  # noqa: E402
 from splatsim.utils.render.camera_setup import arrangement_cameras  # noqa: E402
 from splatsim.utils.render.occlusion import LEVELS, OUT_OF_VIEW, occlusion_level  # noqa: E402
 
@@ -69,12 +68,6 @@ def episode_summary(values: list[float | None], cut: list[bool] | None = None) -
     numbers = [v for v, _ in seen]
     return {"start": numbers[0], "mean": round(float(np.mean(numbers)), 1), "end": numbers[-1],
             "level": occlusion_level(numbers[0]), "start_cut": seen[0][1]}
-
-
-def episode_leaves(episode: Path) -> list[dict]:
-    """La hoja que render_recordings.py --leaf_dir le puso a este episodio."""
-    path = episode / "meta.json"
-    return json.loads(path.read_text()).get("occluders", []) if path.exists() else []
 
 
 def restore_frame(server, frame: dict, rest_q: np.ndarray) -> None:
