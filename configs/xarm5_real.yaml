@@ -1,7 +1,10 @@
 # Real xArm5 station (scripts/launch_nodes.py --robot xarm5, scripts/launch_camera_nodes.py).
-ip: 192.168.123.52
+#  ip: 192.168.123.52
+ip: 172.16.33.89
 # Joint pose (rad, 5 joints) that Reset Robot moves to, slowly. null = Reset Robot does nothing.
-home_joints: null
+# Read from the real arm on 2026-10-28 (deg: 0, -27.5, -29.5, -34.7, 0.2). The sim resets to
+# [0.0, -0.4886, -0.5235, -0.6108, 0.0] (joint_states of xarm5_lite_plant_v3 in objects.yaml).
+home_joints: [0.0, -0.48, -0.5149, -0.6056, 0.0035]
 reset_speed: 0.3          # rad/s of the slowest-finishing joint during Reset Robot
 # Cameras: name the policy sees (same as in the sim) -> RealSense serial and ZMQ port of its
 # camera node. serial: null = the detection order of launch_camera_nodes.py (not stable).
