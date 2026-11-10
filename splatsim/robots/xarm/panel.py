@@ -14,11 +14,39 @@ from splatsim.utils.scene.apple_grid import (
     load_grid,
 )
 from splatsim.utils.scene.leaf_segmentation import place_between, saved_leaves
+from splatsim.utils.scene.peduncle import DROPPED, EMBED, HELD, INTACT
 from splatsim.utils.render.occlusion import fit_lateral_offset, fit_message
 
-from .config import BASE_CAM_FOV, SIM_CLOCKS
+from .config import APPLE_NAME, BASE_CAM_FOV, SIM_CLOCKS
 
 RANGE_COLOR = (255, 170, 0)   # caja del rango aleatorio (como las esferas de la grilla)
+# tallo en la vista 3D: entero (el verde del splat), cortado y sujeto, cortado y suelto
+STEM_COLORS = {INTACT: (69, 117, 33), HELD: (40, 200, 220), DROPPED: (140, 140, 140)}
+CUT_COLOR = (255, 230, 0)     # punto de corte del tallo
+
+
+def fruit_sphere(config: dict) -> tuple[np.ndarray, float]:
+    """Centro (marco del cuerpo) y radio de una esfera que cubre el tomate, desde su aabb en
+    objects.yaml; con pedúnculo, el aabb llega a la punta del tallo, así que el tomate termina
+    donde empieza el tallo (bottom + EMBED)."""
+    box = config.get("aabb", {}).get("bounding_box")
+    if box is None:
+        return np.zeros(3), 0.03
+    lo, hi = np.array(box[0], float), np.array(box[1], float)
+    stem = config.get("peduncle")
+    if stem:
+        hi[2] = min(hi[2], stem["bottom"][2] + EMBED)
+    return (lo + hi) / 2, float(np.mean(hi - lo) / 2)
+
+
+def z_to(axis) -> tuple:
+    """wxyz del giro más corto que lleva el eje z a axis (unitario)."""
+    z = np.array([0.0, 0.0, 1.0])
+    c = float(np.dot(z, axis))
+    if c < -1 + 1e-9:
+        return (0.0, 1.0, 0.0, 0.0)              # 180° en torno a x
+    w = np.r_[1.0 + c, np.cross(z, axis)]
+    return tuple(w / np.linalg.norm(w))
 from .debug_ui import save_camera_poses
 
 
@@ -45,6 +73,9 @@ class SimPanel(StationPanel):
         pos = self._apple_pos()
         if np.abs(np.subtract(pos, self._apple_xyz.value)).max() > 1e-3:
             self._sync_apple_ui(pos)
+        self._draw_fruit()
+        if self._stem is not None:
+            self._draw_stem()
         if self.s.peduncle is not None and self.s.peduncle.blade_link is not None:
             p = self.s.peduncle
             state = ("**cut, held**" if p.held else "**cut, dropped**") if p.cut else (f"not cut: {p.last_check}" if p.last_check else "not cut")
@@ -256,7 +287,18 @@ class SimPanel(StationPanel):
             self._build_range_gui()
         self._apple_gizmo = self.v.scene.add_transform_controls(
             "/apple", scale=0.12, position=pos, disable_rotations=True)
-        self.v.scene.add_icosphere("/apple/sphere", radius=0.03, color=(230, 40, 30))
+        self._fruit_center, radius = fruit_sphere(self.s.object_config[APPLE_NAME])
+        self._fruit = self.v.scene.add_icosphere("/apple/sphere", radius=radius, color=(230, 40, 30))
+        self._draw_fruit()
+        self._stem = None
+        if self.s.peduncle is not None:
+            # el tallo va en el marco del mundo (el gizmo del tomate no gira), con su punto de corte
+            p = self.s.peduncle
+            self._stem = self.v.scene.add_cylinder(
+                "/peduncle", radius=max(p.stem.get("radius", 0.0025), 0.002), height=0.05,
+                color=STEM_COLORS[INTACT], radial_segments=12)
+            self._stem_cut = self.v.scene.add_icosphere("/peduncle/cut", radius=0.004, color=CUT_COLOR)
+            self._draw_stem()
 
         self._on_user(self._apple_xyz, lambda h: self._move_apple(h.value))
         self._apple_gizmo.on_update(
@@ -403,6 +445,31 @@ class SimPanel(StationPanel):
         self._apple_xyz.value = pos
         if np.abs(np.subtract(pos, self._apple_gizmo.position)).max() > 1e-3:
             self._apple_gizmo.position = pos  # no se pisa al gizmo mientras se arrastra
+
+    def _draw_fruit(self):
+        """La esfera del tomate en su centro real: el origen del cuerpo está en su base, no en el
+        centro. Es hija del gizmo (que no gira), así que el desplazamiento se gira aquí."""
+        c = self.s.pybullet_client
+        _, quat = c.getBasePositionAndOrientation(self.s.apple.body_id)
+        rot = np.reshape(c.getMatrixFromQuaternion(quat), (3, 3))
+        self._fruit.position = rot @ self._fruit_center
+
+    def _draw_stem(self):
+        """El cilindro del tallo donde está ahora (sigue al tomate, también sujeto o al caer); el
+        color dice si está entero, cortado y sujeto, o cortado y suelto."""
+        p = self.s.peduncle
+        bottom, top, cut = p.stem_world()
+        axis = top - bottom
+        height = float(np.linalg.norm(axis))
+        if height < 1e-6:
+            return
+        axis /= height
+        self._stem.position = (bottom + top) / 2
+        self._stem.wxyz = z_to(axis)
+        self._stem.height = height
+        self._stem.color = STEM_COLORS[p.state]
+        # el punto de corte en el marco del cilindro (z = su eje, origen en el centro)
+        self._stem_cut.position = (0.0, 0.0, float(np.dot(cut - (bottom + top) / 2, axis)))
 
     def _apple_pos(self):
         pos, _ = self.s.pybullet_client.getBasePositionAndOrientation(self.s.apple.body_id)

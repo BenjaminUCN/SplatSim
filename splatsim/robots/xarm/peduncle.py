@@ -40,6 +40,10 @@ class PeduncleCutter:
         stem = server.object_config[APPLE_NAME].get("peduncle")
         return cls(server, stem) if stem else None
 
+    def stem_world(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """bottom, top y cut del tallo en el mundo, ahora."""
+        return self._stem_world()
+
     def _stem_world(self) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         c = self.s.pybullet_client
         pos, quat = c.getBasePositionAndOrientation(self.s.apple.body_id)
