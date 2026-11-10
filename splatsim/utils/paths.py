@@ -4,6 +4,10 @@ import os
 
 import yaml
 
+# rutas que comparten varios scripts (relativas a la raíz del repo, o con ~)
+OBJECTS_CONFIG = "configs/object_configs/objects.yaml"   # escenas, robots y objetos
+DATASETS_DIR = "~/lerobot/splatsim_test_data"           # datasets LeRobot (build_registry.py los busca aquí)
+
 
 def expand(path: str) -> str:
     """~ -> el home de este usuario (y $VAR -> su valor)."""

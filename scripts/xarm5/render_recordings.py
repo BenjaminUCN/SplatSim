@@ -34,16 +34,16 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.robots.station.recorder import save_frame  # noqa: E402
-from splatsim.utils.camera_setup import arrangement_cameras  # noqa: E402
-from splatsim.utils.episode_selection import SELECTION_FILE  # noqa: E402
-from splatsim.utils.leaf_segmentation import load_occluder_config  # noqa: E402
-from splatsim.utils.leaf_variation import (  # noqa: E402
+from splatsim.utils.render.camera_setup import arrangement_cameras  # noqa: E402
+from splatsim.utils.data.episode_selection import SELECTION_FILE  # noqa: E402
+from splatsim.utils.scene.leaf_segmentation import load_occluder_config  # noqa: E402
+from splatsim.utils.scene.leaf_variation import (  # noqa: E402
     DEFAULT_TARGETS,
     arm_path,
     draw_episode,
     place_episode_leaf,
 )
-from splatsim.utils.parallel_episodes import own_argv, run_workers  # noqa: E402
+from splatsim.utils.render.parallel_episodes import own_argv, run_workers  # noqa: E402
 
 
 @dataclass
@@ -76,7 +76,8 @@ class Args:
     (~8 GB cada uno: en una GPU de 16 GB cabe solo uno)"""
 
 
-RENDER_INFO_FILE = "render_info.yaml"
+from splatsim.utils.data.dataset_sources import RENDER_INFO_FILE  # noqa: E402
+from splatsim.utils.paths import OBJECTS_CONFIG  # noqa: E402
 
 # campos que se recalculan desde la pose interpolada (el resto viene del frame más cercano)
 RECOMPUTED = ("joint_positions", "all_joint_positions", "joint_positions_dummy", "ee_pos_quat",
@@ -129,13 +130,25 @@ def make_server(robot_name: str, cameras: list[str], **kwargs):
     """Servidor xArm5 en este proceso, sin ZMQ ni serve_loop: solo para renderizar (o, sin
     cámaras, para simular sin GPU). kwargs pasa al servidor, p.ej. control_hz."""
     from splatsim.robots.xarm.server import XArm5PybulletRobotServerCamera
-    with open("configs/object_configs/objects.yaml") as f:
+    with open(OBJECTS_CONFIG) as f:
         use_gripper = yaml.safe_load(f)[robot_name].get("use_gripper", True)
     server = XArm5PybulletRobotServerCamera(
         port=free_port(), host="127.0.0.1", camera_names=cameras, robot_name=robot_name,
-        cam_i=347, use_gripper=use_gripper, gui="pybullet", show_apple_window=False, **kwargs)
+        use_gripper=use_gripper, gui="pybullet", show_apple_window=False, **kwargs)
     server.setup_scene()
     return server
+
+
+def portable_path(path: Path) -> Path:
+    """Con ~: el meta.json de un render en un pod también debe servir en el lab."""
+    return Path("~") / path.relative_to(Path.home()) if path.is_relative_to(Path.home()) else path
+
+
+def episode_leaves(episode: Path) -> list[dict]:
+    """Las hojas anotadas en el meta.json del episodio: la que le puso render_recordings.py --leaf_dir
+    o la de B2 de plan_perception_episodes.py."""
+    path = episode / "meta.json"
+    return json.loads(path.read_text()).get("occluders", []) if path.exists() else []
 
 
 def write_leaf_meta(path: Path, entries: list[dict], leaf_fit: dict) -> None:
@@ -152,7 +165,7 @@ def main(args: Args):
                       and (not args.episodes or e.name in args.episodes))
     if not episodes:
         raise SystemExit(f"No hay episodios en {folder}")
-    leaves = sorted(Path(args.leaf_dir).expanduser().glob("*.ply")) if args.leaf_dir else []
+    leaves = [portable_path(p) for p in sorted(Path(args.leaf_dir).expanduser().glob("*.ply"))] if args.leaf_dir else []
     if args.leaf_dir and not leaves:
         raise SystemExit(f"No hay hojas en {args.leaf_dir}: recorta alguna con segment_leaf.py")
     leaf_cameras = list(args.leaf_cameras) or [c for c in cameras if "wrist" not in c]
@@ -199,11 +212,13 @@ def main(args: Args):
             server.restore_state(frames[0])
             draw = draw_episode(episode.name, leaves, args.occlusion_targets, args.seed)
             entries, leaf_fit = place_episode_leaf(server, draw, leaf_cameras, path)
+        else:   # la hoja que trae el episodio (B2 de plan_perception_episodes.py), o ninguna
+            server.set_episode_occluders(episode_leaves(episode))
         for k, point in enumerate(points, 1):
             obs = interpolated_obs(server, frames, *point)
             images = server.render_cameras(cameras)
             obs.update({name: img.cpu() for name, img in images.items()})
-            save_frame(str(tmp), k, obs)
+            save_frame(str(tmp), k, obs, images_in_pkl=False)   # 14.7 MB por frame si no
         if leaf_fit:
             write_leaf_meta(tmp / "meta.json", entries, leaf_fit)
         shutil.rmtree(target, ignore_errors=True)

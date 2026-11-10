@@ -5,7 +5,7 @@ import numpy as np
 import viser
 
 from splatsim.robots.station.panel import StationPanel, wxyz_to_xyzw, xyzw_to_wxyz
-from splatsim.utils.apple_grid import (
+from splatsim.utils.scene.apple_grid import (
     APPLE_GRID_PATH,
     RANGE_SHAPES,
     NO_X_LIMIT,
@@ -13,8 +13,8 @@ from splatsim.utils.apple_grid import (
     in_hemisphere,
     load_grid,
 )
-from splatsim.utils.leaf_segmentation import place_between, saved_leaves
-from splatsim.utils.occlusion import fit_lateral_offset, fit_message
+from splatsim.utils.scene.leaf_segmentation import place_between, saved_leaves
+from splatsim.utils.render.occlusion import fit_lateral_offset, fit_message
 
 from .config import BASE_CAM_FOV, SIM_CLOCKS
 
@@ -45,6 +45,10 @@ class SimPanel(StationPanel):
         pos = self._apple_pos()
         if np.abs(np.subtract(pos, self._apple_xyz.value)).max() > 1e-3:
             self._sync_apple_ui(pos)
+        if self.s.peduncle is not None and self.s.peduncle.blade_link is not None:
+            p = self.s.peduncle
+            state = ("**cut, held**" if p.held else "**cut, dropped**") if p.cut else (f"not cut: {p.last_check}" if p.last_check else "not cut")
+            self._peduncle_text.content = f"Peduncle: blade at {p.error() * 100:.1f} cm, {state}"
 
     # ── cámaras base ─────────────────────────────────────────────────────────
     def _build_camera_gui(self):
@@ -235,6 +239,8 @@ class SimPanel(StationPanel):
         self._grid_handles = []
         self._grid_note = ""
         with self.v.gui.add_folder("Tomato"):
+            if self.s.peduncle is not None:
+                self._peduncle_text = self.v.gui.add_markdown("")
             self._apple_xyz = self.v.gui.add_vector3("xyz (m)", pos, step=0.001)
             rand = self.v.gui.add_button("Random Position")
             save = self.v.gui.add_button("Save Position to Grid")

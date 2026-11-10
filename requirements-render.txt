@@ -1,0 +1,14 @@
+# Lo que el render agrega a requirements-train.txt, en las versiones del lab
+# (lo importado de verdad por render_recordings.py). Se instala con esas como restricciones.
+e3nn==0.5.6
+ghalton==0.6.2
+mujoco==3.8.1
+opt-einsum-fx==0.1.4
+opt_einsum==3.4.0
+plyfile==1.1.2
+pybullet==3.2.7
+pybullet-planning==0.6.0
+pyzmq==27.1.0
+scipy==1.17.1
+# COLMAP con CUDA para splat_from_video.py (la de apt no lo usa); trae cudart y curand de pip, los de torch
+pycolmap-cuda12==4.2.1

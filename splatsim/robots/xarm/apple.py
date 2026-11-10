@@ -1,7 +1,7 @@
 """Manzana de la escena: cuerpo estático + sliders opcionales para moverla."""
 import numpy as np
 
-from splatsim.utils.apple_grid import (
+from splatsim.utils.scene.apple_grid import (
     APPLE_GRID_PATH,
     load_grid,
     load_random_range,

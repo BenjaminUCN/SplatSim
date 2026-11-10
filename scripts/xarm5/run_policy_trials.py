@@ -1,9 +1,9 @@
 """Corre ensayos automáticos de la política con el tomate en una grilla de posiciones.
 
 Primero lanzar el servidor (con el mismo --hz con que se entrenó la política):
-    python scripts/launch_nodes.py --robot sim_xarm5_splat_camera_2 --robot_name xarm5_lite_plant_v3 --hz 10
-Luego:
-    python scripts/xarm5/run_policy_trials.py --trials-per-position 3 --trial-seconds 15
+    python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3 --hz 10
+Luego, con un modelo de configs/registry.yaml (--list-models muestra los disponibles):
+    python scripts/xarm5/run_policy_trials.py --model "gello benjamin 200 2cam" --trials-per-position 3 --trial-seconds 15
 
 Las posiciones del tomate se leen de configs/apple_grid.yaml (se agregan con el botón
 "Save Apple Position to Grid" del servidor con --move_apple, o editando el archivo).
@@ -15,7 +15,7 @@ la grabación (trial_seconds de tiempo simulado). La política se carga una sola
 Salida en output_dir/<nombre del modelo>/<fecha>/: una carpeta por ensayo (000/, 001/, ... con meta.json)
 y trials.csv con un resumen (distancia final y mínima del efector al tomate).
 
-Robot real (launch_nodes.py --robot xarm5_lite): no hay posición del tomate, así que los ensayos se
+Robot real (launch_nodes.py --robot xarm5): no hay posición del tomate, así que los ensayos se
 hacen con el operador, por el panel: antes de cada uno pide poner el tomate en la posición de la
 grilla (Start / Skip / Stop trials) y al final marcar el resultado (Success / Fail / Discard), que
 queda en la columna manual_success (Discard no escribe fila). La duración es de reloj.
@@ -32,12 +32,13 @@ import tyro
 import yaml
 from gello.zmq_core.robot_node import ZMQClientRobot
 
-from splatsim.utils.grasp_point import grasp_error, load_grasp_point
+from splatsim.utils.trials.grasp_point import grasp_error, load_grasp_point
 from splatsim.utils.remote_call import ask_operator, call
+from splatsim.utils.trials.durations import other_durations
 
-APPLE_NAME = "plastic_apple"
+from splatsim.robots.xarm.config import APPLE_KEY, APPLE_NAME
+
 APPLE_QUAT = (0.0, 0.0, 0.0, 1.0)
-APPLE_KEY = f"{APPLE_NAME}_position"
 
 
 @dataclass
@@ -49,8 +50,11 @@ class Args:
     output_dir: str = "~/data/policy_trials"
     robot_port: int = 6001
     hostname: str = "127.0.0.1"
-    # modelo a evaluar, carpeta o repo del Hub (None -> el por defecto del agente);
-    # dataset: carpeta o repo del Hub, None -> de configs/registry.yaml
+    # modelo a evaluar por su nombre en configs/registry.yaml (name, carpeta o parte única de
+    # ellos; --list-models los muestra), o por su carpeta / repo del Hub con --checkpoint
+    # (ninguno -> el por defecto del agente); dataset: carpeta o repo del Hub, None -> del registro
+    model: str | None = None
+    list_models: bool = False     # muestra los modelos del registro y termina
     checkpoint: str | None = None
     dataset_root: str | None = None
     # subcarpeta de output_dir; None -> nombre del modelo en el registro (o su carpeta)
@@ -62,9 +66,14 @@ class Args:
 
 def run_name_for(checkpoint: str) -> str:
     """Nombre del modelo en configs/registry.yaml (name o suggested_name), o su carpeta."""
-    from splatsim.utils.registry import model_for_checkpoint, model_label
+    from splatsim.utils.data.registry import model_for_checkpoint, model_label
     found = model_for_checkpoint(checkpoint)
     return model_label(*found) if found else os.path.basename(checkpoint.rstrip("/"))
+
+
+def policy_cameras(agent) -> list[str]:
+    """Cámaras con que se entrenó la política, las únicas que se renderizan y graban en un ensayo."""
+    return [key.removeprefix("observation.images.") for key in agent.policy.config.image_features]
 
 
 def reset_policy(agent) -> None:
@@ -101,7 +110,7 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     metadata = {**metadata, **occlusion}
     obs = robot.get_observations()
     folder = call(robot, "start_recording", max_seconds=trial_seconds,
-                  metadata=metadata, root=root)
+                  metadata=metadata, root=root, images_in_pkl=False, cameras=policy_cameras(agent))
 
     # robot real (trae control_hz): un comando por periodo de reloj; en el sim cada comando ya
     # vale 1/hz de tiempo simulado y no hace falta esperar
@@ -130,6 +139,19 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
 
 
 def main(args: Args) -> None:
+    from splatsim.utils.data.registry import find_model, models_table, model_label
+    if args.list_models:
+        print(models_table())
+        return
+    if args.model:
+        if args.checkpoint:
+            raise SystemExit("Usa --model o --checkpoint, no ambos")
+        try:
+            key, model = find_model(args.model)
+        except ValueError as e:
+            raise SystemExit(str(e)) from None
+        args.checkpoint = model["path"]
+        print(f"[Trials] Modelo {model_label(key, model)}: {args.checkpoint}")
     with open(args.grid_path) as f:
         apple_grid = [tuple(p) for p in (yaml.safe_load(f) or {}).get("positions") or []]
     if not apple_grid and not args.here:
@@ -145,13 +167,24 @@ def main(args: Args) -> None:
     root = os.path.join(os.path.expanduser(args.output_dir), run_name,
                         datetime.datetime.now().strftime("%y%m%d_%H%M%S"))
     os.makedirs(root, exist_ok=True)
+    # corridas anteriores del mismo modelo con otra duración: compare_trials.py no las mezcla
+    for seconds, runs in other_durations(os.path.dirname(root), args.trial_seconds, skip=root).items():
+        print(f"[Trials] AVISO: {run_name} ya tiene corridas de {seconds:g} s ({', '.join(runs)}) y esta "
+              f"es de {args.trial_seconds:g} s. Sus resultados no son comparables: compare_trials.py "
+              "las separa por duración; usa la misma --trial_seconds para juntarlas.")
 
     robot = ZMQClientRobot(port=args.robot_port, host=args.hostname)
     agent = LeRobotDiffusionAgent(checkpoint=args.checkpoint, dataset_root=args.dataset_root,
                                   device="cuda")
 
+    first_obs = robot.get_observations()
+    missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
+    if missing:
+        raise SystemExit(f"La política usa {missing}, pero el servidor no las tiene: "
+                         "relanza launch_nodes.py con esas cámaras.")
+
     # robot real: sin posición del tomate, el operador lo pone y marca el resultado
-    manual = APPLE_KEY not in robot.get_observations()
+    manual = APPLE_KEY not in first_obs
     if manual:
         print("[Trials] Sin posición del tomate (robot real): ensayos con el operador, en el panel")
     here = None
@@ -163,7 +196,7 @@ def main(args: Args) -> None:
         positions = args.positions if args.positions is not None else range(len(apple_grid))
     total = len(positions) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
-              "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point"]
+              "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point", "trial_seconds"]
     if not manual:
         fields += list(occlusion_columns(call(robot, "measure_occlusion")))
     grasp_point = load_grasp_point()
@@ -209,7 +242,8 @@ def main(args: Args) -> None:
                             print(f"[Trials] Descartado por el operador ({result['folder']})")
                             continue
                         result["manual_success"] = int(answer == "Success")
-                    row = {"pos_idx": pos_idx, "trial": trial, **result, "grasp_point": point_text}
+                    row = {"pos_idx": pos_idx, "trial": trial, **result, "grasp_point": point_text,
+                           "trial_seconds": args.trial_seconds}
                     if apple_pos:
                         row.update(x=apple_pos[0], y=apple_pos[1], z=apple_pos[2])
                     writer.writerow(row)

@@ -1,0 +1,216 @@
+{
+ "source": "hand_held_assembly_XL330.step + mount_xarm5.FCStd + pruner traced from photos",
+ "units": "mm",
+ "parts": [
+  {
+   "name": "mount_xarm5",
+   "file": "mount_xarm5.stl",
+   "link": "base",
+   "rgb": [
+    0.35,
+    0.35,
+    0.38
+   ],
+   "collision": true,
+   "volume_mm3": 35312.4,
+   "com_mm": [
+    -0.01,
+    -46.59,
+    -16.011
+   ]
+  },
+  {
+   "name": "bottom_plate",
+   "file": "bottom_plate.stl",
+   "link": "base",
+   "rgb": [
+    0.85,
+    0.35,
+    0.1
+   ],
+   "collision": true,
+   "volume_mm3": 57440.3,
+   "com_mm": [
+    -0.289,
+    -5.017,
+    -16.983
+   ]
+  },
+  {
+   "name": "top_cover",
+   "file": "top_cover.stl",
+   "link": "base",
+   "rgb": [
+    0.2,
+    0.5,
+    0.85
+   ],
+   "collision": true,
+   "volume_mm3": 15437.3,
+   "com_mm": [
+    0.0,
+    -0.104,
+    -1.162
+   ]
+  },
+  {
+   "name": "xl330",
+   "file": "xl330.stl",
+   "link": "base",
+   "rgb": [
+    0.14,
+    0.15,
+    0.17
+   ],
+   "collision": true,
+   "volume_mm3": 15218.6,
+   "com_mm": [
+    12.705,
+    6.629,
+    -24.103
+   ]
+  },
+  {
+   "name": "tornillos_m2",
+   "file": "tornillos_m2.stl",
+   "link": "base",
+   "rgb": [
+    0.15,
+    0.35,
+    0.75
+   ],
+   "collision": false,
+   "volume_mm3": 150.6,
+   "com_mm": [
+    12.7,
+    6.365,
+    -13.455
+   ]
+  },
+  {
+   "name": "horn",
+   "file": "horn.stl",
+   "link": "horn",
+   "rgb": [
+    0.62,
+    0.64,
+    0.68
+   ],
+   "collision": false,
+   "volume_mm3": 645.9,
+   "com_mm": [
+    12.7,
+    13.862,
+    -11.315
+   ]
+  },
+  {
+   "name": "fixed_steel",
+   "file": "fixed_steel.stl",
+   "link": "base",
+   "rgb": [
+    0.35,
+    0.38,
+    0.4
+   ],
+   "collision": false,
+   "volume_mm3": 9692.3,
+   "com_mm": [
+    -10.398,
+    50.761,
+    -17.8
+   ],
+   "traced": true
+  },
+  {
+   "name": "anvil",
+   "file": "anvil.stl",
+   "link": "base",
+   "rgb": [
+    0.95,
+    0.62,
+    0.15
+   ],
+   "collision": true,
+   "volume_mm3": 6246.4,
+   "com_mm": [
+    -14.695,
+    92.466,
+    -11.85
+   ],
+   "traced": true
+  },
+  {
+   "name": "anvil_lip",
+   "file": "anvil_lip.stl",
+   "link": "base",
+   "rgb": [
+    0.95,
+    0.62,
+    0.15
+   ],
+   "collision": true,
+   "volume_mm3": 977.9,
+   "com_mm": [
+    -10.397,
+    98.186,
+    -6.2
+   ],
+   "traced": true
+  },
+  {
+   "name": "pivot_bolt",
+   "file": "pivot_bolt.stl",
+   "link": "base",
+   "rgb": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "collision": false,
+   "volume_mm3": 1118.2,
+   "com_mm": [
+    9.66,
+    58.967,
+    -18.7
+   ],
+   "traced": true
+  },
+  {
+   "name": "moving_jaw",
+   "file": "moving_jaw.stl",
+   "link": "jaw",
+   "rgb": [
+    0.75,
+    0.75,
+    0.72
+   ],
+   "collision": true,
+   "volume_mm3": 6651.3,
+   "com_mm": [
+    0.473,
+    96.533,
+    -10.9
+   ],
+   "traced": true
+  },
+  {
+   "name": "moving_plate",
+   "file": "moving_plate.stl",
+   "link": "jaw",
+   "rgb": [
+    0.08,
+    0.08,
+    0.09
+   ],
+   "collision": false,
+   "volume_mm3": 3410.5,
+   "com_mm": [
+    -0.849,
+    79.578,
+    -20.8
+   ],
+   "traced": true
+  }
+ ]
+}

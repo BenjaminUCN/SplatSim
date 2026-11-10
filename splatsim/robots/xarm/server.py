@@ -1,26 +1,27 @@
 """
 Servidor PyBullet + Gaussian Splat para el xArm5 Lite.
-Clase delgada: orquesta componentes que viven en sus propios archivos.
+Clase delgada: orquesta componentes que viven en sus propios archivos. La escena (robot, objetos,
+splats) la carga XArm5SimBase (sim_base.py).
 """
 import threading  # noqa: I001
 import time
 
 import numpy as np
 
-from splatsim.robots.sim_robot_pybullet_base import PybulletRobotServerBase
-from splatsim.utils.camera_setup import base_camera_poses
-from splatsim.utils.occlusion import measure_camera
+from splatsim.utils.render.camera_setup import base_camera_poses
+from splatsim.utils.render.occlusion import measure_camera
 from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 
-from gaussian_renderer import render
+# antes que gaussian_renderer: importar gaussian_splatting agrega su carpeta al path
+from .sim_base import XArm5SimBase  # noqa: I001
+from gaussian_renderer import render  # noqa: E402
 
 from .apple import AppleController
+from .peduncle import PeduncleCutter
 from .cameras import AppleCamera, BaseCamera, WristCamera
 from splatsim.robots.joint_controller import ControllerGains, JointController
 
 from .config import (
-    ENV_CONFIG,
-    FLOOR_Z,
     IDLE_STEP_AFTER,
     MAX_REALTIME_STEP,
     LOW_LEVEL_HZ,
@@ -40,7 +41,7 @@ from .debug_ui import (
     ResetJointsButton,
     SaveCameraPosesButton,
 )
-from .gripper import XArm5Gripper
+from .gripper import GRIPPERS
 from .occluders import OccluderSet
 from .preview import PreviewStream
 from splatsim.robots.station.operator import OperatorMixin, OperatorPrompt
@@ -48,9 +49,8 @@ from splatsim.robots.station.recorder import TrajectoryRecorder, to_uint8_image
 from .trail import EETrail
 
 
-class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
-    ENV_CONFIG = ENV_CONFIG
-    # métodos que el cliente puede llamar por ZMQ además de los de la base
+class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
+    # métodos que el cliente puede llamar por ZMQ además de los de ZMQRobotServer
     REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording", "get_preview",
                       "set_control_mode", "operator_prompt", "operator_answer", "measure_occlusion")
 
@@ -59,8 +59,9 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
                  gui: str = "viser", panel_port: int = 8080, control_mode: str = "position",
                  sim_clock: str = "fixed", occluders: str | None = None, trail: bool = False,
                  **kwargs):
-        """gui: "viser" (panel web en http://localhost:<panel_port>) o "pybullet"
-        (sliders y botones de PyBullet; --move_apple agrega los de la manzana).
+        """gui: "viser" (panel web en http://localhost:<panel_port>), "pybullet"
+        (sliders y botones de PyBullet; --move_apple agrega los de la manzana) o "none" (sin
+        controles: solo lo que pidan los clientes por ZMQ, p.ej. ensayos automáticos).
         control_mode: position / interp / velocity (ver splatsim/robots/joint_controller.py),
         la misma ley que usa el driver real del xArm5.
         sim_clock: quién avanza la física. "fixed": cada comando avanza exactamente 1/control_hz
@@ -105,19 +106,18 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         self._last_images_time = 0.0
         self._last_command_time = 0.0    # time.monotonic() del último comando
         self._last_command = None        # último objetivo recibido (se graba como joint_command)
-        # el recorder no toca la base en su constructor, así que es seguro crearlo antes
+        # el recorder no toca la escena en su constructor, así que es seguro crearlo antes
         self.recorder = TrajectoryRecorder(
             self, MAX_RECORD_SECONDS, RECORD_EVERY, state_only_max_seconds=TELEOP_MAX_RECORD_SECONDS)
-        self.gripper = None  # se crea en setup_gripper(), que la base llama en su __init__
+        self.gripper = None  # se crea en setup_gripper(), que XArm5SimBase llama en su __init__
         self.occluders = None
         super().__init__(**kwargs)
         if occluders:
             self.occluders = OccluderSet(self, occluders)
 
-        self._remove_wall()
-        self._lower_floor(FLOOR_Z)
-
+        self.peduncle = None
         self.apple = AppleController(self, movable=move_apple and gui == "pybullet")
+        self.peduncle = PeduncleCutter.for_server(self)
         base_cams = [BaseCamera(self, name, xyz, rpy)
                      for name, (xyz, rpy) in base_camera_poses().items()]
         self.cameras = {cam.name: cam for cam in base_cams}
@@ -139,37 +139,26 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             self.controls = [*(BaseCameraTuner(self, cam) for cam in base_cams),
                              SaveCameraPosesButton(self, base_cams),
                              ResetJointsButton(self)]
+        elif gui == "none":
+            self.controls = []
         else:
-            raise ValueError(f"gui debe ser 'viser' o 'pybullet', no {gui!r}")
+            raise ValueError(f"gui debe ser 'viser', 'pybullet' o 'none', no {gui!r}")
         self.apple_window = AppleWindow(show_apple_window)
         self.trail = EETrail(self) if trail else None
         self.recorder.start_keyboard_listener()
 
-    # ── escena ───────────────────────────────────────────────────────────────
-    def _remove_wall(self):
-        if getattr(self, "wall", None) is not None:
-            try:
-                self.pybullet_client.removeBody(self.wall)
-                self.wall = None
-            except Exception:  # noqa: BLE001, S110
-                pass
-
-    def _lower_floor(self, z):
-        if getattr(self, "plane", None) is not None:
-            try:
-                self.pybullet_client.resetBasePositionAndOrientation(
-                    self.plane, [0, 0, z],
-                    self.pybullet_client.getQuaternionFromEuler([0, 0, 0]))
-            except Exception:  # noqa: BLE001, S110
-                pass
-
-    # ── métodos que llama la base: delegadores de una línea ──────────────────
+    # ── métodos que llama XArm5SimBase: delegadores de una línea ─────────────
     def setup_gripper(self):
-        self.gripper = XArm5Gripper(self)
+        # gripper de la escena en objects.yaml: xarm (por defecto) o hand_held_xl330
+        kind = self.object_config[self.robot_name].get("gripper", "xarm")
+        self.gripper = GRIPPERS[kind](self)
         self.gripper.setup()
 
     def move_gripper(self, open_length, velocity=2):
         self.gripper.move(open_length, velocity)
+
+    def get_current_gripper_state(self):
+        return self.gripper.base_state()
 
     def num_dofs(self) -> int:
         return NUM_DOFS
@@ -180,9 +169,6 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             arm = [self.pybullet_client.getJointState(self.dummy_robot, i)[0]
                    for i in range(1, 6)]
             return np.array([*arm, self.gripper.get_state()])
-
-    def get_joint_state_dummy(self) -> np.ndarray:
-        return self.get_joint_state()
 
     def _step(self, n: int = 1) -> None:
         for _ in range(n):
@@ -201,6 +187,8 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             self._step(k)
             self._tick_left -= k
             n -= k
+        if self.peduncle is not None:
+            self.peduncle.update()
 
     def _arm_positions(self) -> np.ndarray:
         return np.array([self.pybullet_client.getJointState(self.dummy_robot, i)[0]
@@ -294,6 +282,8 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
     def set_object_pose(self, *args, **kwargs) -> None:
         with self.lock:  # también se llama desde el hilo ZMQ
             super().set_object_pose(*args, **kwargs)
+            if self.peduncle is not None:   # el único objeto es el tomate
+                self.peduncle.reset()
 
     def prep_image_rendering(self, data, cached_link_states=None):
         super().prep_image_rendering(data, cached_link_states=cached_link_states)
@@ -396,7 +386,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         return self.occluders.set_episode(entries)
 
     def measure_occlusion(self, camera_names=None) -> dict:
-        """Cuánto del tomate tapa la escena en cada cámara (splatsim/utils/occlusion.py), con el
+        """Cuánto del tomate tapa la escena en cada cámara (splatsim/utils/render/occlusion.py), con el
         brazo y los oclusores como estén ahora. Por defecto, las cámaras del servidor."""
         if getattr(self, "gaussians_backup", None) is None:
             return {}
@@ -449,6 +439,13 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
         obs["sim_clock"] = self.sim_clock
         obs["sim_joint_positions"] = np.array(
             [c.getJointState(self.dummy_robot, i)[0] for i in range(c.getNumJoints(self.dummy_robot))])
+        if self.peduncle is not None:
+            obs["peduncle_error"] = self.peduncle.error()
+            obs["peduncle_cut"] = self.peduncle.cut
+            obs["peduncle_held"] = self.peduncle.held
+
+    def active_camera_names(self) -> list[str]:
+        return self.recorder.cameras_to_capture(self.camera_names)
 
     def get_observations(self):
         with self.lock, self.render_lock:
@@ -495,9 +492,10 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             self._holding = True         # el próximo comando parte de esta pose
 
     def start_recording(self, max_seconds: float | None = None, metadata: dict | None = None,
-                        root: str | None = None) -> str | None:
+                        root: str | None = None, images_in_pkl: bool = True,
+                        cameras: list[str] | None = None) -> str | None:
         with self.lock:
-            return self.recorder.start(max_seconds, metadata, root)
+            return self.recorder.start(max_seconds, metadata, root, images_in_pkl, cameras)
 
     def stop_recording(self) -> None:
         with self.lock:
@@ -550,9 +548,6 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, PybulletRobotServerBase):
             c.resetJointState(self.dummy_robot, i,
                               self.initial_joint_state[i - 1] * self.joint_signs[i - 1])
         self.initial_link_states = get_curr_link_states(self.dummy_robot, self.use_link_centers)
-
-        _, ee_quat = self.get_current_ee_pose()
-        self.iniital_ee_quat = ee_quat  # (sic) nombre original, por si la base lo usa
 
         for i in range(1, self.num_dofs()):
             c.setJointMotorControl2(self.dummy_robot, i, c.VELOCITY_CONTROL,

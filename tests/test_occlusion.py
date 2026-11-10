@@ -9,7 +9,7 @@ from pathlib import Path
 
 import torch
 
-from splatsim.utils.occlusion import (
+from splatsim.utils.render.occlusion import (
     LEVELS,
     OUT_OF_VIEW,
     fit_lateral_offset,

@@ -38,7 +38,7 @@ from lerobot.transforms import (
 )
 from lerobot.utils.feature_utils import dataset_to_policy_features
 
-from splatsim.utils.camera_setup import arrangement_cameras
+from splatsim.utils.render.camera_setup import arrangement_cameras
 from splatsim.utils.paths import expand
 
 DEFAULT_CONFIG = "configs/train/diffusion.yaml"
@@ -67,6 +67,7 @@ class TrainConfig:
     num_workers: int = 12               # 16 causaba OOM con 56GB en WSL
     prefetch_factor: int = 3
     image_augmentation: bool = True
+    torch_compile: bool = False         # compila la U-Net y los encoders (no cambia el modelo guardado)
     # logging / guardado
     log_freq: int = 1
     save_freq: int = 10000
@@ -234,6 +235,14 @@ def main(cfg: TrainConfig):
     policy.to(device)
     print("Setting memory format to channels_last for CNN optimizations")
     policy.to(memory_format=torch.channels_last)  # Optimizado para CNNs con imágenes
+    if cfg.torch_compile:
+        # module.compile() en vez de torch.compile(module) o compile_model de DiffusionConfig: esos
+        # agregan _orig_mod. a las claves guardadas. Se compilan las submódulos porque aquí se
+        # llama a policy.forward directamente, sin pasar por el __call__ que compile() reemplaza.
+        encoders = policy.diffusion.rgb_encoder
+        encoders = encoders if isinstance(encoders, torch.nn.ModuleList) else [encoders]
+        for module in (policy.diffusion.unet, *encoders):
+            module.compile()
 
     # To perform action chunking, the policy expects a given number of actions as targets
     delta_timestamps = {

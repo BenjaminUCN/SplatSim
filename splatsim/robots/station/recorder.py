@@ -43,6 +43,8 @@ class TrajectoryRecorder:
         self.max_seconds = max_seconds   # duración máxima por defecto, en el tiempo de server.clock()
         self.state_only_max_seconds = state_only_max_seconds or max_seconds  # ídem solo estado
         self._state_only = False         # la grabación en curso guarda solo el estado
+        self._images_in_pkl = True       # la grabación en curso repite las imágenes en el .pkl
+        self._cameras = None             # cámaras de la grabación en curso (None -> las del servidor)
         self._max_seconds = max_seconds  # duración máxima de la grabación en curso
         self.every = every
 
@@ -74,9 +76,12 @@ class TrajectoryRecorder:
         return os.path.join(self._root, str(self._count).zfill(3))
 
     def start(self, max_seconds: float | None = None, metadata: dict | None = None,
-              root: str | None = None) -> str | None:
+              root: str | None = None, images_in_pkl: bool = True,
+              cameras: list[str] | None = None) -> str | None:
         """Empieza una grabación; devuelve su carpeta (None si ya había una activa).
-        `root` reemplaza la carpeta base (por defecto la elegida en el panel, o server.path)."""
+        `root` reemplaza la carpeta base (por defecto la elegida en el panel, o server.path).
+        images_in_pkl=False deja las imágenes solo en los .png (ensayos de la política).
+        `cameras` limita las cámaras mientras dure esta grabación (ver cameras_to_capture)."""
         if self.active:
             print("[Recording] Ya se está grabando. Pulsa 's' primero.")
             return None
@@ -90,6 +95,8 @@ class TrajectoryRecorder:
             with open(os.path.join(self._folder, "meta.json"), "w") as f:
                 json.dump(metadata, f, indent=2)
         self._state_only = self.s.record_state_only
+        self._images_in_pkl = images_in_pkl
+        self._cameras = cameras
         self._max_seconds = max_seconds or (self.state_only_max_seconds if self._state_only
                                             else self.max_seconds)
         self._length = 0
@@ -100,6 +107,10 @@ class TrajectoryRecorder:
         kind = "solo estado; render después con scripts/xarm5/render_recordings.py" if self._state_only else "con imágenes"
         print(f"[Recording] ▶ Grabando en {self._folder} (un frame cada {self.every} comandos, {kind})")
         return self._folder
+
+    def cameras_to_capture(self, default: list[str]) -> list[str]:
+        """Las cámaras pedidas para la grabación en curso; sin grabación activa, `default`."""
+        return self._cameras if self.active and self._cameras is not None else default
 
     def stop(self) -> None:
         if not self.active:
@@ -146,7 +157,7 @@ class TrajectoryRecorder:
     # ── guardado ─────────────────────────────────────────────────────────────
     def _save_frame(self, obs) -> None:
         self._length += 1
-        save_frame(self._folder, self._length, obs)
+        save_frame(self._folder, self._length, obs, images_in_pkl=self._images_in_pkl)
 
 
 def to_uint8_image(img) -> np.ndarray:

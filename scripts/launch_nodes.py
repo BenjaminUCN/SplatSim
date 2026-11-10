@@ -1,6 +1,7 @@
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import tyro
 import types
@@ -10,32 +11,48 @@ from splatsim.utils.paths import load_yaml
 from gello.zmq_core.robot_node import ZMQServerRobot
 
 
+Robot = Literal[
+    # UR5 (SplatSim original)
+    "sim_ur", "sim_ur_splat",
+    "sim_ur_pybullet_push", "sim_ur_pybullet_cup",
+    "sim_ur_pybullet_orange", "sim_ur_pybullet_orange_interactive",
+    "sim_ur_pybullet_apple", "sim_ur_pybullet_apple_interactive",
+    "sim_ur_pybullet_apple_interactive-nosplat",
+    "sim_ur_pybullet_banana", "sim_ur_pybullet_banana_interactive",
+    "ur", "bimanual_ur", "ur_pybullet",
+    # otros
+    "sim_panda", "panda", "sim_xarm", "xarm", "none", "print",
+    # xArm5 Lite
+    "sim_xarm5", "xarm5",
+]
+
+
 @dataclass
 class Args:
-    robot: str = "xarm"
+    robot: Robot = "sim_xarm5"
     robot_port: int = 6001
     hostname: str = "127.0.0.1"
     robot_ip: str = "192.168.1.10"
     gaussian_path : str = "/home/jennyw2/data/output/robot_iphone/point_cloud/iteration_30000/point_cloud.ply"
-    robot_name: str = "robot_iphone"
+    robot_name: str = "xarm5_lite_plant_v3"  # escena de configs/object_configs/objects.yaml
     move_apple: bool = False
     hz: int = 30  # frecuencia de control del cliente; debe coincidir con run_env_sim --hz
     # cámaras renderizadas en cada observación (xArm5); se graban todas.
     # arrangement (p.ej. 2cam, ver configs/camera_poses.yaml) reemplaza a cameras
     cameras: tuple[str, ...] = ("base_rgb", "base_left_rgb", "base_right_rgb", "wrist_rgb")
     arrangement: str | None = None
-    # controles del xArm5: "viser" (panel web) o "pybullet" (sliders de PyBullet, solo sim);
-    # en el real: "viser" o "none"
-    gui: str = "viser"
-    # xArm5 real (--robot xarm5_lite): IP, home, cámaras y carpeta de grabaciones; --robot_ip
+    # controles del xArm5: "viser" (panel web), "pybullet" (sliders de PyBullet, solo sim) o
+    # "none" (sin controles; se maneja solo por ZMQ)
+    gui: Literal["viser", "pybullet", "none"] = "viser"
+    # xArm5 real (--robot xarm5): IP, home, cámaras y carpeta de grabaciones; --robot_ip
     # explícito reemplaza a la IP del archivo
     real_config: str = "configs/xarm5_real.yaml"
     panel_port: int = 8080
     # xArm5 (sim y real): cómo se siguen los objetivos articulares: position / interp / velocity
-    control_mode: str = "position"
+    control_mode: Literal["position", "interp", "velocity"] = "position"
     # sim xArm5: tiempo simulado por comando. fixed = 1/hz (políticas, ensayos; dt fijo por frame),
     # realtime = el tiempo real entre comandos (teleop con GELLO, aunque el lazo no alcance hz)
-    sim_clock: str = "fixed"
+    sim_clock: Literal["fixed", "realtime"] = "fixed"
     # sim xArm5: hojas recortadas del splat en la escena (configs/occluders.yaml; si no existe, el
     # panel lo crea). Sin este flag no se carga ninguna.
     occluders: str | None = None
@@ -140,22 +157,6 @@ def launch_robot_server(args: Args):
            camera_names=[], robot_name=args.robot_name, cam_i=3, use_gripper=use_gripper
         )
 
-    elif args.robot == "sim_ur_pybullet_apple_search":
-        from splatsim.robots.sim_robot_pybullet_apple_search import AppleSearchPybulletRobotServer
-
-        server = AppleSearchPybulletRobotServer(
-           port=port, host=args.hostname, serve_mode=AppleSearchPybulletRobotServer.SERVE_MODES.GENERATE_DEMOS,
-           camera_names=[], robot_name=args.robot_name, cam_i=3, use_gripper=use_gripper
-        )
-
-    elif args.robot == "sim_ur_pybullet_apple_search_interactive":
-        from splatsim.robots.sim_robot_pybullet_apple_search import AppleSearchPybulletRobotServer
-
-        server = AppleSearchPybulletRobotServer(
-           port=port, host=args.hostname, serve_mode=AppleSearchPybulletRobotServer.SERVE_MODES.INTERACTIVE,
-           camera_names=camera_names, robot_name=args.robot_name, cam_i=3, use_gripper=use_gripper
-        )
-
     elif args.robot == "sim_ur_pybullet_banana":
         from splatsim.robots.sim_robot_pybullet_object_on_plate import BananaOnPlatePybulletRobotServer
 
@@ -211,9 +212,9 @@ def launch_robot_server(args: Args):
             xml_path=xml, gripper_xml_path=gripper_xml, port=port, host=args.hostname
         )
     
-    elif args.robot in ("sim_xarm5_splat_camera", "sim_xarm5_splat_camera_2"):
+    elif args.robot == "sim_xarm5":
         from splatsim.robots.xarm.server import XArm5PybulletRobotServerCamera
-        from splatsim.utils.camera_setup import arrangement_cameras
+        from splatsim.utils.render.camera_setup import arrangement_cameras
 
         server = XArm5PybulletRobotServerCamera(
             port=port,
@@ -221,7 +222,6 @@ def launch_robot_server(args: Args):
             camera_names=(arrangement_cameras(args.arrangement) if args.arrangement
                           else list(args.cameras)),
             robot_name=args.robot_name,
-            cam_i=347,
             use_gripper=use_gripper,
             move_apple=args.move_apple,
             control_hz=args.hz,
@@ -233,7 +233,7 @@ def launch_robot_server(args: Args):
             trail=args.trail,
         )
 
-    elif args.robot == "xarm5_lite":
+    elif args.robot == "xarm5":
         # xArm5 real: driver + cámaras RealSense detrás del mismo protocolo, recorder y panel
         # que el sim (configs/xarm5_real.yaml)
         from splatsim.robots.xarm5_lite_robot_plant import XArmRobot
@@ -246,7 +246,15 @@ def launch_robot_server(args: Args):
         ip = args.robot_ip if explicit_ip else cfg["ip"]
         cameras = {name: ZMQCamera(cam["port"], host=args.hostname)
                    for name, cam in (cfg.get("cameras") or {}).items()}
-        robot = XArmRobot(ip=ip, control_mode=args.control_mode, command_hz=args.hz)
+        gripper_cfg = cfg.get("gripper") or {}
+        external_gripper = None
+        if gripper_cfg.get("type", "xarm") == "xl330":
+            from splatsim.robots.xl330_gripper import XL330Gripper
+
+            external_gripper = XL330Gripper.from_config(gripper_cfg)
+            external_gripper.start()
+        robot = XArmRobot(ip=ip, control_mode=args.control_mode, command_hz=args.hz,
+                          external_gripper=external_gripper)
         server = XArm5RealServer(
             robot, cameras, port=port, host=args.hostname, control_hz=args.hz,
             panel_port=None if args.gui == "none" else args.panel_port,

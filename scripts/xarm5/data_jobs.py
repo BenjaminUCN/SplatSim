@@ -17,7 +17,7 @@ SCRIPTS = {"train": "scripts/xarm5/train_diffusion.py",
            "plan": "scripts/xarm5/plan_trajectories.py",
            "render": "scripts/xarm5/render_recordings.py",
            "mirror": "scripts/xarm5/mirror_recordings.py",
-           "convert": "splatsim/utils/lerobot_conversion.py"}
+           "convert": "splatsim/utils/data/lerobot_conversion.py"}
 LANES = {"train": "gpu", "plan": "cpu", "render": "gpu", "mirror": "gpu", "convert": "cpu"}
 ROBOT_TYPE = "xarm5_lite"      # --robot_type por defecto del convertidor, va en el nombre del dataset
 
@@ -50,6 +50,10 @@ def command(job: dict) -> list[str]:
             cmd += ["--arrangement", a["arrangement"]]
         if a.get("workers", 1) > 1:
             cmd += ["--workers", str(a["workers"])]
+        if a.get("leaf_dir"):
+            cmd += ["--leaf_dir", a["leaf_dir"], "--seed", str(a.get("seed", 0))]
+            if a.get("occlusion_targets"):
+                cmd += ["--occlusion_targets", *(str(t) for t in a["occlusion_targets"])]
     elif k == "mirror":
         cmd += [a["input"], "--out", job["output"]]
         if not a.get("with_original", True):
@@ -77,14 +81,18 @@ def plan_pipeline(source: str, render: dict | None, mirror: dict | None, convert
     """Trabajos encadenados (sin id; depends_on = índice del anterior en la lista).
 
     plan: {episodes, positions, seed, perturb}: genera las demos en source primero;
-    render: {fps, arrangement, workers}; mirror: {with_original, arrangement, workers};
+    render: {fps, arrangement, workers y, opcional, leaf_dir, occlusion_targets, seed};
+    mirror: {with_original, arrangement, workers};
     convert: {output_dir, fps, cameras, suffix, ignore_selection, push}. Los None se omiten."""
+    if render and render.get("leaf_dir") and mirror:
+        # mirror_recordings.py renderiza sin hojas pero copia el meta.json que dice que las tienen
+        raise ValueError("El espejo no conserva las hojas: desactiva Mirror o las oclusiones")
     jobs, current = [], str(Path(source).expanduser())
     if plan:
         jobs.append({"kind": "plan", "name": f"plan {Path(current).name}", "args": dict(plan),
                      "output": current})
     if render:
-        out = f"{current}_{render['fps']}hz"
+        out = f"{current}_{render['fps']}hz{'_leaves' if render.get('leaf_dir') else ''}"
         jobs.append({"kind": "render", "name": f"render {Path(current).name}",
                      "args": {"input": current, **render}, "output": out})
         current = out

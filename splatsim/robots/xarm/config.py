@@ -1,8 +1,10 @@
-"""Constantes compartidas del servidor xArm5. Todo lo "ajustable" vive aquí."""
-from splatsim.robots.sim_robot_pybullet_base import PybulletRobotServerBase
+"""Constantes compartidas del servidor xArm5. Todo lo "ajustable" vive aquí.
+
+Sin dependencias pesadas (ni PyBullet ni torch): los scripts lo importan para leer nombres y claves.
+"""
 
 # ── Simulación / control ─────────────────────────────────────────────────────
-SIM_DT = 1 / 240          # paso de PyBullet (lo fija la base con setTimeStep)
+SIM_DT = 1 / 240          # paso de PyBullet (setTimeStep en sim_base.py)
 CONTROL_HZ = 30           # frecuencia de comandos por defecto; launch_nodes --hz la sobrescribe
 LOOP_HZ = 240             # frecuencia del serve_loop (UI y física en reposo)
 SIM_CLOCKS = ("fixed", "realtime")  # física: 1/hz por comando, o continua al ritmo del reloj
@@ -26,7 +28,7 @@ IMAGE_W = 640
 IMAGE_H = 480
 
 # Las cámaras base (poses) y los arreglos de cámaras viven en configs/camera_poses.yaml
-# (ver splatsim/utils/camera_setup.py)
+# (ver splatsim/utils/render/camera_setup.py)
 BASE_CAM_RANGE_XYZ = 1.5  # ± metros alrededor del valor inicial
 BASE_CAM_RANGE_RPY = 3.15 # ± radianes
 
@@ -37,6 +39,7 @@ APPLE_CAM_OFFSET_RPY = (-1.562, 0.0, -1.562)
 # ── Escena ───────────────────────────────────────────────────────────────────
 FLOOR_Z = -0.7
 APPLE_NAME = "plastic_apple"
+APPLE_KEY = f"{APPLE_NAME}_position"   # clave de la posición del tomate en las observaciones
 APPLE_RANGE = {"x": (-0.9, -0.3), "y": (-0.8, 0.8), "z": (-0.5, 0.6)}
 # alternativa a la caja: media cáscara alrededor del hombro (joint2, 0.267 m sobre la base), hacia la
 # planta (-x). Con el punto de agarre (0.17 m del efector) el brazo llega a ~0.93 m del hombro
@@ -45,17 +48,10 @@ APPLE_HEMISPHERE = {"center": (0.0, 0.0, 0.267), "radius": (0.5, 0.95), "facing"
 # Valor inicial de los sliders. Antes x=0.3 (fuera de rango); ahora dentro.
 APPLE_INIT = (-0.3, 0.2, 0.1)
 # grilla de posiciones para scripts/xarm5/run_policy_trials.py (se llena con el botón de guardar)
-from splatsim.utils.apple_grid import APPLE_GRID_PATH  # noqa: E402,F401  (antes vivía aquí)
+from splatsim.utils.scene.apple_grid import APPLE_GRID_PATH  # noqa: E402,F401  (antes vivía aquí)
 
-ENV_CONFIG = {
-    "objects": [
-        {
-            "object_name": APPLE_NAME,
-            "splat_object_name": APPLE_NAME,
-            "grasp_config": [PybulletRobotServerBase.GRASP_CONFIGS["apple"]],
-        }
-    ]
-}
+# objetos de la escena: su URDF en urdf_models (object_name) y su splat en objects.yaml
+SCENE_OBJECTS = [{"object_name": APPLE_NAME, "splat_object_name": APPLE_NAME}]
 
 # ── Gripper ──────────────────────────────────────────────────────────────────
 GRIPPER_RANGE = [0, 0.085]       # apertura en metros

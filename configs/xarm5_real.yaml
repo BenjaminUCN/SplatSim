@@ -1,4 +1,4 @@
-# Real xArm5 station (scripts/launch_nodes.py --robot xarm5_lite, scripts/launch_camera_nodes.py).
+# Real xArm5 station (scripts/launch_nodes.py --robot xarm5, scripts/launch_camera_nodes.py).
 ip: 192.168.123.52
 # Joint pose (rad, 5 joints) that Reset Robot moves to, slowly. null = Reset Robot does nothing.
 home_joints: null
@@ -12,3 +12,17 @@ recordings: ~/data/bc_data/real   # default folder for recordings (r/s + Enter, 
 max_record_seconds: 120
 # URDF shown in the control panel's 3D view (null = the one of --robot_name in objects.yaml)
 urdf: null
+# Gripper. type: xl330 = Dynamixel XL330 + OpenRB-150 by USB (hand_held_XL330); xarm = the xArm
+# gripper, through the arm's controller.
+gripper:
+  type: xl330
+  port: auto                # auto = finds the OpenRB-150 by its USB identity
+  dxl_id: 1
+  baudrate: 57600
+  # Pulses, written by: python scripts/xarm5/xl330_gripper.py calibrate. null = it does not move.
+  open_position: null
+  closed_position: null
+  current_limit_ma: 1200    # limit while moving or cutting (XL330 maximum 1750)
+  profile_velocity: 40      # 0.229 rpm units: 40 = 9 rpm; 0 = maximum speed
+  profile_acceleration: 30
+  stall_seconds: 2.0        # pushing without advancing for this long: stops pushing

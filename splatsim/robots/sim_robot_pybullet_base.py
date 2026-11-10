@@ -187,12 +187,16 @@ class PybulletRobotServerBase:
         self.pybullet_client = p
         self.object_config_path = object_config_path
         self.grasp_poses = {}
-        self.pybullet_client.connect(p.GUI)
+        # sin pantalla (pods): la cinemática es la misma, las imágenes vienen de los splats
+        self.pybullet_client.connect(p.DIRECT if os.environ.get("SPLATSIM_HEADLESS") else p.GUI)
         self.pybullet_client.setAdditionalSearchPath(
             "./submodules/pybullet-playground-wrapper/pybullet_playground/urdf/pybullet_ur5_gripper/urdf"
         )
 
         self.object_config = load_yaml(self.object_config_path)
+        # la escena puede usar otra versión de un objeto (el tomate con pedúnculo) con su mismo nombre
+        for name, replacement in self.object_config[self.robot_name].get("object_overrides", {}).items():
+            self.object_config[name] = self.object_config[replacement]
 
         urdf_path = self.object_config[self.robot_name]["urdf_path"][0]
         if not os.path.exists(urdf_path):
@@ -856,6 +860,10 @@ class PybulletRobotServerBase:
         pos, quat = self.pybullet_client.getBasePositionAndOrientation(body_id)
         return pos, quat
 
+    def active_camera_names(self) -> List[str]:
+        """Cámaras que renderiza get_observations."""
+        return self.camera_names
+
     def get_observations(self, render: bool = True) -> Dict[str, np.ndarray]:
         """render=False: solo el estado, sin renderizar las cámaras."""
         joint_positions = self.get_joint_state()
@@ -910,12 +918,13 @@ class PybulletRobotServerBase:
             observations[self.splat_object_name_list[i] + "_position"] = object_pos
             observations[self.splat_object_name_list[i] + "_orientation"] = object_quat
 
-        if render and len(self.camera_names) > 0:
+        cameras = self.active_camera_names()
+        if render and len(cameras) > 0:
             cached_link_states = get_curr_link_states(
                 self.dummy_robot, self.use_link_centers
             )
             self.prep_image_rendering(data=observations, cached_link_states=cached_link_states)
-            for camera_name in self.camera_names:
+            for camera_name in cameras:
                 observations[camera_name] = self.render_image(
                     camera_name=camera_name, cached_link_states=cached_link_states
                 )

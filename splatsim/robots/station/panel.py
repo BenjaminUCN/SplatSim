@@ -34,9 +34,9 @@ import viser
 import yaml
 
 from splatsim.robots.joint_controller import MODES
-from splatsim.utils.apple_grid import load_grid
-from splatsim.utils.camera_setup import load_camera_setup
-from splatsim.utils.registry import (
+from splatsim.utils.scene.apple_grid import load_grid
+from splatsim.utils.render.camera_setup import load_camera_setup
+from splatsim.utils.data.registry import (
     dataset_source_for_checkpoint,
     describe_dataset,
     describe_model,
@@ -62,7 +62,7 @@ STOP_TIMEOUT = 5.0     # s que se espera a que la política termine tras Ctrl+C 
 TOOLS_PERIOD = 1.0     # s entre revisiones del estado de las herramientas
 GELLO_CONFIG_PATH = "configs/gello.yaml"
 # WSL: dispositivos USB que hay que pasar de Windows a WSL con usbipd (como el .bat de Windows)
-USB_DEVICES = (("GELLO", "CH343"), ("RealSense cameras", "RealSense"))
+USB_DEVICES = (("GELLO", "CH343"), ("RealSense cameras", "RealSense"), ("Gripper", "OpenRB"))
 IS_WSL = "microsoft" in open("/proc/version").read().lower() if os.path.exists("/proc/version") else False
 REPO_ROOT = Path(__file__).resolve().parents[3]
 TOOLS_LOG_DIR = Path("~/.cache/splatsim/tools").expanduser()
@@ -118,6 +118,7 @@ class StationPanel:
         tabs = self.v.gui.add_tab_group()
         with tabs.add_tab("Run", viser.Icon.PLAYER_PLAY):
             self._build_robot_gui()
+            self._build_gripper_gui()
             self._build_policy_gui()
             self._build_gello_gui()
             self._build_recording_gui()
@@ -187,7 +188,11 @@ class StationPanel:
     def _refresh_gello_ports(self):
         """Puertos con calibración en PORT_CONFIG_MAP que existen (GelloAgent exige ese nombre)."""
         from splatsim.agents.gello_agent import PORT_CONFIG_MAP
-        ports = [p for p in PORT_CONFIG_MAP if os.path.exists(p)]
+        gripper = getattr(self.s, "external_gripper", None)   # la OpenRB-150 también es ttyACM*
+        taken = set()
+        if gripper is not None and gripper._port_handler is not None:
+            taken.add(os.path.realpath(gripper._port_handler.getPortName()))
+        ports = [p for p in PORT_CONFIG_MAP if os.path.exists(p) and os.path.realpath(p) not in taken]
         self._gello_port.options = ports or ["-"]
         if ports:
             self._gello_port.value = ports[0]
@@ -527,6 +532,24 @@ class StationPanel:
 
     def _build_robot_extra(self):
         """Controles del robot propios de cada backend (dentro de la carpeta Robot)."""
+
+    def _build_gripper_gui(self):
+        """Gripper que no va por el brazo (XL330 + OpenRB-150), si el backend tiene uno."""
+        self._gripper_status = None
+        gripper = getattr(self.s, "external_gripper", None)
+        if gripper is None:
+            return
+        with self.v.gui.add_folder("Gripper"):
+            self._gripper_status = self.v.gui.add_markdown("")
+            buttons = self.v.gui.add_button_group("Move", ["Open", "Close"])
+            torque_off = self.v.gui.add_button(
+                "Torque off", hint="Releases the servo, e.g. to free it by hand. Recover enables it again")
+            recover = self.v.gui.add_button(
+                "Recover", color="yellow",
+                hint="Reconnects, reboots the servo if it has an error, and holds where it is")
+        buttons.on_click(lambda e: gripper.command(0.0 if e.target.value == "Open" else 1.0))
+        self._on_click(torque_off, gripper.torque_off)
+        self._on_click(recover, gripper.recover)
 
     # ── política ─────────────────────────────────────────────────────────────
     def _build_policy_gui(self):
@@ -1068,6 +1091,8 @@ class StationPanel:
             self._arm_status.content = (
                 f"**⚠ Arm stopped** ({problem}): commands are paused. Release the emergency stop, "
                 "then Enable arm" if problem else "Arm ready")
+        if self._gripper_status is not None:
+            self._gripper_status.content = self.s.external_gripper.status_text()
         self._poll_policy()
         self._update_gello_status()
         self._update_replay_status()

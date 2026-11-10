@@ -10,7 +10,7 @@ primera pose del episodio, y manda la trayectoria a --hz (remuestreada a instant
 tiempos grabados), grabándola como un episodio normal. Así todas las repeticiones parten del mismo
 lugar, sea cual sea el modo o el episodio anterior.
 
-Antes de empezar se revisa con la URDF (splatsim/utils/self_collision.py) que ni la trayectoria ni
+Antes de empezar se revisa con la URDF (splatsim/utils/geometry/self_collision.py) que ni la trayectoria ni
 el acercamiento desde el reset choquen el brazo consigo mismo; los episodios que chocan se saltan
 (--no-collision-check para no revisar). Con --order rotate (por defecto) el orden de los modos rota
 de un episodio al siguiente (position→interp→velocity, interp→velocity→position, ...): cada modo
@@ -42,7 +42,7 @@ import tyro
 from gello.zmq_core.robot_node import ZMQClientRobot
 
 from splatsim.robots.joint_controller import MODES
-from splatsim.utils.paths import expand, load_yaml
+from splatsim.utils.paths import OBJECTS_CONFIG, expand, load_yaml
 from splatsim.utils.remote_call import ask_operator, call
 
 ARM = slice(0, 5)        # articulaciones del brazo (la 6ª es el gripper)
@@ -196,8 +196,8 @@ def approach_path(start, target, step: float = 0.05) -> np.ndarray:
 def screen_episodes(episodes, home, hz, args) -> tuple[list, dict]:
     """Episodios que no chocan consigo mismos (trayectoria y acercamiento desde home) y la menor
     distancia entre links de cada uno."""
-    from splatsim.utils.self_collision import SelfCollisionChecker
-    urdf = expand(load_yaml("configs/object_configs/objects.yaml")[args.robot_name]["urdf_path"][0])
+    from splatsim.utils.geometry.self_collision import SelfCollisionChecker
+    urdf = expand(load_yaml(OBJECTS_CONFIG)[args.robot_name]["urdf_path"][0])
     checker = SelfCollisionChecker(urdf, home)
     ok, min_dist = [], {}
     for episode in episodes:

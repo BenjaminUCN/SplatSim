@@ -10,10 +10,10 @@ Los .pkl traen las imágenes (≈7 MB cada uno), así que leer un episodio toma 
 trayectorias se guardan en caché (~/.cache/splatsim/trails/) y un hilo carga el resto de la
 carpeta en segundo plano para poder mostrar todas a la vez.
 
-La selección se guarda en <carpeta>/selection.yaml (splatsim/utils/episode_selection.py);
+La selección se guarda en <carpeta>/selection.yaml (splatsim/utils/data/episode_selection.py);
 lerobot_conversion.py omite los episodios descartados.
 
-Etiquetas de parada para el clasificador visual (splatsim/utils/stop_labels.py): en sim se
+Etiquetas de parada para el clasificador visual (splatsim/utils/data/stop_labels.py): en sim se
 proponen solas con el error de agarre (configs/grasp_point.yaml); en la carpeta Stop labels se
 aceptan, se corrigen ("válido desde este frame") o se excluyen, y quedan en
 <carpeta>/stop_labels.yaml. Las grabaciones reales (sin posición del tomate) se etiquetan a mano.
@@ -47,11 +47,11 @@ from scipy.spatial.transform import Rotation
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 from splatsim.robots.station.urdf_view import xarm5_urdf_joints  # noqa: E402
-from splatsim.utils.camera_setup import load_camera_setup  # noqa: E402
+from splatsim.utils.render.camera_setup import load_camera_setup  # noqa: E402
 from splatsim.utils.paths import load_yaml  # noqa: E402
-from splatsim.utils.episode_selection import load_discarded, save_discarded  # noqa: E402
+from splatsim.utils.data.episode_selection import load_discarded, save_discarded  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
-from splatsim.utils.grasp_point import (  # noqa: E402
+from splatsim.utils.trials.grasp_point import (  # noqa: E402
     GRASP_POINT_PATH,
     SUCCESS_RADIUS,
     grasp_error,
@@ -62,7 +62,7 @@ from splatsim.utils.grasp_point import (  # noqa: E402
     save_grasp_point,
     tomato_in_ee,
 )
-from splatsim.utils.stop_labels import (  # noqa: E402
+from splatsim.utils.data.stop_labels import (  # noqa: E402
     VALID_RADIUS,
     auto_valid_from,
     episode_labels,
@@ -71,17 +71,16 @@ from splatsim.utils.stop_labels import (  # noqa: E402
 )
 
 CACHE_DIR = Path("~/.cache/splatsim/trails").expanduser()
-APPLE_KEY = "plastic_apple_position"
+from splatsim.robots.xarm.config import APPLE_KEY  # noqa: E402
 COLORMAP = "viridis"         # inicio (violeta) -> fin (amarillo)
 PLAYBACK_FPS = 10
 _IMG = re.compile(r"^(.+_rgb)_(\d+)\.png$")
 # colores de la trayectoria por etiqueta de parada (paleta de referencia)
 LABEL_COLORS = {1: (0, 131, 0), 0: (42, 120, 214), -1: (175, 175, 170)}
-OBJECTS_CONFIG = "configs/object_configs/objects.yaml"   # urdf_path de cada robot
+from splatsim.utils.paths import DATASETS_DIR, OBJECTS_CONFIG  # noqa: E402
 ROBOT_COLOR = (0.82, 0.82, 0.8)   # "Show robot (URDF)": un color, para poder hacerlo translúcido
 ROBOT_OPACITY = 0.5
-RENDER_INFO_FILE = "render_info.yaml"   # lo escribe scripts/xarm5/render_recordings.py
-DEFAULT_DATASETS_DIR = "~/lerobot/splatsim_test_data"   # donde build_registry.py busca datasets
+from splatsim.utils.data.dataset_sources import RENDER_INFO_FILE  # noqa: E402
 # comparación original / remuestreada (paleta de referencia: serie 1 azul, serie 2 naranja)
 RESAMPLED_HEX, SOURCE_HEX = "#2a78d6", "#eb6834"
 RESAMPLED_RGB, SOURCE_RGB = (42, 120, 214), (235, 104, 52)
@@ -422,7 +421,7 @@ class Reviewer:
                 render = gui.add_button("Render", color="blue")
             self.convert_folder = gui.add_folder("Convert")
             with self.convert_folder:
-                self.conv_out = gui.add_text("Output folder", DEFAULT_DATASETS_DIR)
+                self.conv_out = gui.add_text("Output folder", DATASETS_DIR)
                 self.conv_fps = gui.add_number("fps", 10, min=1, max=60, step=1,
                                                hint="Must be the recordings' rate (and the policy's --hz)")
                 self.conv_cams = gui.add_text("Cameras", "", hint="Space-separated; empty = all")
@@ -484,8 +483,8 @@ class Reviewer:
         if not re.fullmatch(r"[\w.-]+", suffix):
             self.job_status.content = "**Name suffix**: letters, digits, `_`, `-` or `.`"
             return
-        cmd = ["splatsim/utils/lerobot_conversion.py", "--input_dir", str(self.folder.path),
-               "--output_dir", os.path.expanduser(self.conv_out.value.strip() or DEFAULT_DATASETS_DIR),
+        cmd = ["splatsim/utils/data/lerobot_conversion.py", "--input_dir", str(self.folder.path),
+               "--output_dir", os.path.expanduser(self.conv_out.value.strip() or DATASETS_DIR),
                "--fps", str(int(self.conv_fps.value)), "--repo_suffix", suffix]
         if self.conv_cams.value.split():
             cmd += ["--cameras", *self.conv_cams.value.split()]

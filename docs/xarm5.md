@@ -6,9 +6,11 @@ How this fork uses SplatSim with a **uFactory xArm5 Lite** for robotic tomato ha
 - [Run the simulation server](#run-the-simulation-server)
 - [Control modes](#control-modes)
 - [Real xArm5 station](#real-xarm5-station)
+- [hand_held_XL330 gripper](#hand_held_xl330-gripper)
 - [Replay recordings in each control mode](#replay-recordings-in-each-control-mode)
 - [Teleoperate and record with GELLO](#teleoperate-and-record-with-gello)
 - [Record demonstrations](#record-demonstrations)
+- [Perception episodes (starting arm pose × tomato category)](#perception-episodes-starting-arm-pose--tomato-category)
 - [Train the diffusion policy](#train-the-diffusion-policy)
 - [Training queue](#training-queue)
 - [Training queue panel](#training-queue-panel)
@@ -39,10 +41,13 @@ Each scene also needs `data/labels_path/<robot_name>_labels.npy` and `data/pcds_
 ## Run the simulation server
 
 ```bash
-python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --hz 10
+python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3 --hz 10
 ```
 
-- `--robot_name`: the scene from `objects.yaml` (`xarm5_lite_plant_v3` is the latest).
+- `--robot`: `sim_xarm5` (default) for the simulation, `xarm5` for the real robot.
+- `--robot_name`: the scene from `objects.yaml` (default `xarm5_lite_plant_v3`, the latest).
+
+Both defaults point at this setup, so `python scripts/launch_nodes.py --hz 10` is the same command.
 - `--gui`: `viser` (default) opens a web control panel at http://localhost:8080 (`--panel_port`); `pybullet` keeps the old PyBullet sliders and buttons instead.
 - `--control_mode`: how joint targets (from the policy or GELLO) are followed: `position` (default), `interp` or `velocity`; see [Control modes](#control-modes).
 - `--move_apple`: only with `--gui pybullet`, adds the tomato sliders and buttons (the viser panel always has them).
@@ -85,7 +90,7 @@ Record with all cameras (the default) so every arrangement is trained on the sam
 
 ## Control modes
 
-The policy and GELLO always send joint positions; `--control_mode` only changes how the low-level loop (30 Hz) follows them. The same law, in `splatsim/robots/joint_controller.py`, runs in the simulator and in the real xArm5 driver (`--robot xarm5_lite`), so both behave alike:
+The policy and GELLO always send joint positions; `--control_mode` only changes how the low-level loop (30 Hz) follows them. The same law, in `splatsim/robots/joint_controller.py`, runs in the simulator and in the real xArm5 driver (`--robot xarm5`), so both behave alike:
 
 | Mode | Real xArm | Behavior |
 |---|---|---|
@@ -100,7 +105,7 @@ Start the real robot with the same `--hz` the client uses (e.g. `--hz 10` for th
 The real arm runs behind the same ZMQ protocol, recorder and control panel as the simulator (`splatsim/robots/station/`), so `run_env_sim.py` (GELLO or the policy), `run_policy_trials.py` and the panel work against both. Settings are in `configs/xarm5_real.yaml`: IP, `urdf` (shown in the panel's 3D view; `null` = the one of `--robot_name` in `objects.yaml`), `home_joints` (the pose **Reset Robot** moves to, slowly; `null` = Reset Robot does nothing), `reset_speed`, the cameras and the recordings folder.
 ```bash
 python scripts/launch_camera_nodes.py --config configs/xarm5_real.yaml   # one ZMQ node per RealSense
-python scripts/launch_nodes.py --robot xarm5_lite --hz 10 [--control_mode interp] [--gui none]
+python scripts/launch_nodes.py --robot xarm5 --hz 10 [--control_mode interp] [--gui none]
 ```
 - Cameras: each entry of `cameras` maps the name the policy sees (`base_rgb`, `wrist_rgb`, as in the sim) to a RealSense serial and a port. With `serial: null` the nodes take the detected cameras in order, which is not stable across reboots; set the serials (`launch_camera_nodes.py` prints them) once the cameras are mounted. Images are 640×480 RGB uint8, the sim's size.
 - The panel (http://localhost:8080) has the *Run* tab: Reset Robot, control mode, Policy (Run / Stop), Recording and the camera views. There is no Scene tab: the tomato is placed by hand.
@@ -109,6 +114,78 @@ python scripts/launch_nodes.py --robot xarm5_lite --hz 10 [--control_mode interp
 - **Trials on the real arm** use the same panel buttons as in the sim (*Run Trials*, or *Run* with *Record as trial*). Since there is no tomato position, `run_policy_trials.py` asks the operator through an *Operator* box in the Policy folder: before each trial, after Reset Robot, "place the tomato at grid position #k" (**Start** / **Skip** / **Stop trials**; with *Record as trial*, wherever you want it), and after it "result?" (**Success** / **Fail** / **Discard**). The answer goes to the `manual_success` column of `trials.csv` (Discard writes no row, the recording stays), the trial is paced at the server's `--hz` on the wall clock, and `compare_trials.py` counts the operator's mark as the success of those trials. The grid positions are in sim world coordinates: mark where each one falls on the real plant before running trials.
 - `--robot_ip` overrides the IP in the file. Test new settings with low speeds and the emergency stop at hand.
 
+## hand_held_XL330 gripper
+
+The hand-held pruner replaces the xArm gripper. Its Dynamixel XL330 is driven from the PC by USB through an OpenRB-150, not through the arm's controller. The command keeps the same meaning in the sim and on the real arm: **0 = open, 1 = closed**.
+
+### Real gripper
+
+1. **Firmware:** upload *File → Examples → OpenRB-150 → usb_to_dynamixel* to the board. It only passes bytes between USB and the servo, and the PC talks to it with the DynamixelSDK.
+2. **Power:** over USB the board's fuse limits current to 500 mA, which is not enough to cut. Feed the board's terminal with a **5 V** supply and set the power jumper to match. Do not use 12 V: the XL330's voltage limit is 7 V.
+3. **Calibrate and test**, first without the blade:
+   ```bash
+   python scripts/xarm5/xl330_gripper.py status
+   python scripts/xarm5/xl330_gripper.py calibrate   # by hand: open, then closed; saved in configs/xarm5_real.yaml
+   python scripts/xarm5/xl330_gripper.py move 0.5
+   ```
+4. **Run** the station as usual. `gripper.type: xl330` in `configs/xarm5_real.yaml` selects this gripper (`xarm` selects the old one). GELLO, the policy and the recorder need no changes, and the panel gets a *Gripper* folder with its state, Open, Close, Torque off and Recover.
+
+Behavior:
+- Starting the server does not move the servo: it holds where it is until the first command.
+- Serial traffic runs in its own thread, so a slow or unplugged servo does not delay the arm's 30 Hz loop. If the gripper fails, the arm keeps working and the panel shows why.
+- If the servo pushes without advancing for `stall_seconds`, it stops pushing until the command changes by more than 10 %.
+- After a servo error or a lost USB connection, commands are ignored until **Recover**, so the blade does not move by itself when the connection returns.
+- While the arm is stopped, the gripper holds and ignores commands, and it does not resume the earlier command after Enable arm. **The arm's emergency stop does not cut the servo's power**: the software only notices through the arm's state. Give the servo its own power switch.
+
+Check these on the station:
+- `/dev/ttyACM0` is in `PORT_CONFIG_MAP`, and the OpenRB-150 may also get that name. The gripper finds its board by USB identity and the panel hides that port from the GELLO list, but the GELLO may then appear as `ttyACM1`. Add the GELLO's `/dev/serial/by-id/...` path to `PORT_CONFIG_MAP`.
+- Under WSL, *Tools → USB* looks for "OpenRB" in `usbipd list`. If Windows shows the board with another name, attach it by hand.
+- Set the tool's mass and center of gravity in uFactory Studio: they are not those of the old gripper.
+
+### Simulator
+
+```bash
+python scripts/xarm5/build_hand_held_urdf.py                 # xarm5_hand_held.urdf, next to xarm5.urdf
+python scripts/xarm5/hand_held_splat.py --scene xarm5_lite_plant_v3   # adds xarm5_lite_plant_v3_hand_held
+python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3_hand_held --hz 10
+python scripts/xarm5/estimate_grasp_point.py                 # the grasp point becomes the middle of the blade edge
+```
+Edit `urdf_path` in `configs/object_configs/objects.yaml` or pass `--urdf` if your URDF is elsewhere. For the real station's 3D view, set `urdf` in `configs/xarm5_real.yaml` to the new file.
+
+- **URDF:** removes `xarm_gripper_base_link` and everything below it, and attaches the tool at the same place. `wrist_camera_link` keeps its pose, so the wrist camera is unchanged; the `mount_xarm5` disc bolts directly to the bottom plate, and the tool has no GoPro. The default orientation puts the assembly's +z (the top cover's side) towards the link's +x; if your mount differs, use `--roll-deg`.
+- **Actuated joint:** `gripper_drive_joint` is the XL330 horn. Its travel is `HAND_HELD_TRAVEL_RAD` in `splatsim/robots/station/urdf_view.py` (107.6°, RoboHarvest's value); set it to the travel printed by `calibrate`.
+- **Pruner:** it is traced from photos on a 7 mm grid (about ±1-2 mm), not from the CAD. The fixed body is the steel handle with the anvil, and the moving body is the toothed jaw with its black plate. `hand_held_jaw_joint` turns the jaw about the pivot, in proportion to the horn: `JAW_TRAVEL_RAD` in `splatsim/utils/scene/hand_held.py` (35.3°) is measured between the open and closed photos, but the real rod is not simulated. `--moving-part` adds another mesh to the horn.
+- **Splat:** `hand_held_splat.py` needs no new scan. It removes the old gripper's Gaussians, adds flat-colored ones sampled on the CAD meshes, remaps the per-link labels and writes a new scene; the original is untouched. It looks like CAD, not like a photo. For a policy meant for the real robot, prefer a new scan ([Adding a new robot](../README.md#adding-a-new-robot)) with the same URDF and `gripper: hand_held_xl330`; if the jaw was not open in the scan, also set `splat_gripper_value` (fraction of the travel).
+- **Mirrored recordings:** the tool is not symmetric across its axis (the blade edge is about 10 mm off it), so `mirror_recordings.py` produces motions the real tool would not make with the same grasp.
+
+`python -m unittest tests/test_hand_held_xl330.py` tests the driver, the URDF and the splat merge without hardware, PyBullet or GPU. `scripts/xarm5/export_hand_held_meshes.py` regenerates the meshes when the CAD changes.
+
+### Tomato peduncle
+
+A placeholder until there is a scan of a tomato with its peduncle: a green cylinder of Gaussians on top of the tomato, to test approaching the peduncle and cutting it. This scene mounts the tool with the blue top cover down, 180° from `xarm5_lite_plant_v3_hand_held`.
+
+```bash
+python scripts/xarm5/build_hand_held_urdf.py --dst ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down.urdf
+python scripts/xarm5/hand_held_splat.py --new-scene xarm5_lite_plant_v3_hand_held_down --urdf ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down.urdf
+python scripts/xarm5/add_peduncle.py --scene xarm5_lite_plant_v3_hand_held_down [--length 0.05] [--radius 0.0025]
+python scripts/xarm5/plan_trajectories.py --episodes 6 --out ~/data/bc_data/planned_cut --robot_name xarm5_lite_plant_v3_hand_held_down --target peduncle
+python scripts/xarm5/render_recordings.py ~/data/bc_data/planned_cut --fps 10 --robot_name xarm5_lite_plant_v3_hand_held_down
+```
+
+`add_peduncle.py` writes a new splat next to the original tomato and adds `plastic_apple_peduncle` to `objects.yaml`, with the `bottom`, `top` and `cut` points of the stem in the tomato's frame. The scene's `object_overrides` makes it use that tomato under its usual name, so other scenes are unchanged. For a real scan, change `ply_path`, `aabb` and those points.
+
+With `--target peduncle` the planner puts the middle of the blade edge on the `cut` point, arrives open, closes at the start of the hold, and then backs away still closed. Episodes that don't end with the tomato held are discarded, and `meta.json` records `peduncle_cut` and `peduncle_held`. Frames record `peduncle_error` (m, blade to `cut` point), `peduncle_cut` and `peduncle_held`, and the panel's *Tomato* folder shows them.
+
+The pruner is cut-and-hold. A cut happens when the jaw finishes closing (gripper at 0.8) with the stem crossing the blade plane, within 15 mm of the middle of the edge and at most 45° from the pivot axis. Arriving already closed doesn't cut. The tomato then moves rigidly with the pruner until the gripper opens below 0.6, when it falls. Placing it again restores it.
+
+**Limits:**
+
+- The stem has no collisions and nothing pushes it. It stays whole and moves with the tomato, so no stub stays on the plant.
+- While held, the tomato is fixed to the blade: it doesn't swing or slip, and it doesn't collide.
+- The 15 mm, 45° and the 0.8 and 0.6 gripper values are chosen, not measured on the real pruner.
+- The stem is straight and vertical, and the tomato doesn't turn. With `joint5` at 0, the tool's pitch is the angle between the stem and the pivot axis, which is why the planner keeps it between -25° and 0°.
+- `run_policy_trials.py` still measures against the grasp point, not the cut point.
+
 ## Replay recordings in each control mode
 
 To compare `position`, `interp` and `velocity` on the same motion (e.g. on the real arm), record one GELLO demonstration and replay it in each mode:
@@ -116,7 +193,7 @@ To compare `position`, `interp` and `velocity` on the same motion (e.g. on the r
 python scripts/xarm5/replay_recordings.py ~/data/bc_data/<folder> --episodes 0 2 [--modes position velocity] [--hz 10]
 ```
 or from the panel's *Replay* folder (Run tab): *Source* (a recording folder), *Episodes* (`0,2,5-7`, empty = all), one checkbox per mode, *Record replays* and *Ask before each*, then **Replay**; Stop is shared with the policy and GELLO. For each episode and each mode it switches the server's control mode, runs Reset Robot and checks that the arm is at the saved reset pose (`reset_joint_command`: the sim's start pose, or `home_joints` in `configs/xarm5_real.yaml` on the real arm; within `--start_tolerance`, 0.03 rad, or that replay is skipped), moves slowly to the episode's first pose (`--approach_speed`, 0.3 rad/s), and sends the trajectory at the server's Control Hz, resampled from the recorded times. So every replay starts from the same place, whatever ran before it. Without a reset pose (`home_joints: null`) it refuses to start. Afterwards the server goes back to its previous mode.
-- Before starting it checks each episode for self-collisions with the robot's URDF (`splatsim/utils/self_collision.py`, `--robot_name`): the trajectory and the approach from the reset pose, every 50 ms. An episode where two arm links touch is skipped and the pair is printed (`--no-collision-check` to skip the check). Pairs of neighbouring links, which touch at the joint, and the gripper's own links are ignored. It caught the `gello_test_viser` episode that self-collided on the real arm (links 1 and 3 overlap by 26 mm), and none of the `gello_3plants` demos (whose closest links stay 17 mm apart).
+- Before starting it checks each episode for self-collisions with the robot's URDF (`splatsim/utils/geometry/self_collision.py`, `--robot_name`): the trajectory and the approach from the reset pose, every 50 ms. An episode where two arm links touch is skipped and the pair is printed (`--no-collision-check` to skip the check). Pairs of neighbouring links, which touch at the joint, and the gripper's own links are ignored. It caught the `gello_test_viser` episode that self-collided on the real arm (links 1 and 3 overlap by 26 mm), and none of the `gello_3plants` demos (whose closest links stay 17 mm apart).
 - `--order rotate` (default) rotates the order of the modes from one episode to the next (position → interp → velocity, then interp → velocity → position, ...), so each mode goes first, second and last equally often and drift over the session (the arm warming up, the operator) doesn't favour one; `--order fixed` keeps `--modes`' order. With a multiple of 3 episodes it is balanced exactly.
 - What is replayed is what the client commanded while recording (`joint_command`, saved in each frame since this feature). Older recordings only have the position the arm reached (`joint_positions`), which is replayed instead; the summary marks it with `commanded = False`.
 - On the real arm the *Operator* box (Policy folder) asks before each replay (**Start** / **Skip** / **Stop replays**), to put the tomato back and have the emergency stop at hand. In the sim it does not ask, unless *Ask before each* is ticked.
@@ -133,7 +210,7 @@ It joins every `summary.csv` of the folder (or the files given) and, since each 
 
 Rendering one observation takes ~0.25 s (mostly deforming the robot splat to the current pose), so a loop that renders every step can't follow a hand in real time, and recording a frame per rendered step gives an irregular, mislabeled time step. With `--sim_clock realtime` teleoperation and rendering are decoupled:
 ```bash
-python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --sim_clock realtime
+python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3 --sim_clock realtime
 python scripts/run_env_sim.py --agent gello --gello_port /dev/ttyACM0 --start_joints -3.1415 0.4712 -1.8151 0.4188 1.5708 0
 ```
 - The client sends commands at `--hz` (30) without asking for observations; the server's physics follows the clock and the arm follows the leader smoothly (in sim the joint step limit is `SIM_MAX_DELTA`, 0.15 rad per 30 Hz tick, looser than the real arm's 0.05).
@@ -175,13 +252,13 @@ python scripts/xarm5/review_recordings.py   # http://localhost:8081, folders of 
 ```
 It shows the end-effector trail of the selected episode with a color gradient from start (violet) to end (yellow), the tomato, the other trails of the folder (gray = kept, red = discarded), frame-by-frame playback with the recorded camera images, and the frames, duration and end-effector–tomato distance of each episode. Tick **Discard episode** to exclude it: the selection is saved in `<folder>/selection.yaml` and the converter skips those episodes (`--ignore_selection` to include them). *View → Show robot (URDF)* shows the robot at the playback frame, from the recorded `joint_positions` (the URDF of `--robot_name` in `objects.yaml`, default `xarm5_lite_plant_v3`, or `--urdf <file>`; needs `yourdfpy`), in a single translucent color so the trail stays visible; *Robot opacity* sets how much. To remove episodes for good, **Delete → This episode** or **All discarded** (the ones marked in this folder) asks for confirmation and then deletes their folders, with the images, from disk; their discard mark and stop label go too. It can't be undone, and the numbering keeps the gaps (new recordings continue after the highest number). The first time a folder is opened its trails are read in the background (the `.pkl` files include the images, ~1-2 s per episode); after that they come from a cache in `~/.cache/splatsim/trails/`.
 
-**Stop labels for the visual classifier.** The classifier decides when the arm is in grasp position, so the policy can stop. In the reviewer's *Stop labels* folder each episode gets a frame `valid_from`: from there to the end the arm is in position (positive), frames before it are negatives, and the few frames right before it are left out as ambiguous. For sim recordings it is proposed automatically from the grasp error (see [Grasp point](#grasp-point-and-success)): **Accept auto**, **Valid from this frame** (at the playback frame), **No valid frames**, **Exclude** or **Reset**. Real recordings have no tomato position and are labeled by hand. The plot shows the grasp error over the episode, *Trail color → stop label* paints the trail by label (green in position, blue not yet, gray unused), and *Show → stop: unlabeled* walks through the episodes still to review. Labels are saved in `<folder>/stop_labels.yaml` (`splatsim/utils/stop_labels.py`).
+**Stop labels for the visual classifier.** The classifier decides when the arm is in grasp position, so the policy can stop. In the reviewer's *Stop labels* folder each episode gets a frame `valid_from`: from there to the end the arm is in position (positive), frames before it are negatives, and the few frames right before it are left out as ambiguous. For sim recordings it is proposed automatically from the grasp error (see [Grasp point](#grasp-point-and-success)): **Accept auto**, **Valid from this frame** (at the playback frame), **No valid frames**, **Exclude** or **Reset**. Real recordings have no tomato position and are labeled by hand. The plot shows the grasp error over the episode, *Trail color → stop label* paints the trail by label (green in position, blue not yet, gray unused), and *Show → stop: unlabeled* walks through the episodes still to review. Labels are saved in `<folder>/stop_labels.yaml` (`splatsim/utils/data/stop_labels.py`).
 
 The reviewer's *LeRobot dataset* folder does the next steps for the open folder: for state-only recordings, **Render** runs `render_recordings.py` (fps and camera arrangement) and opens the rendered folder; for recordings with images, **Convert** runs the converter below with the output folder (`~/lerobot/splatsim_test_data` by default), fps (the rendered rate when known), cameras, a name suffix, whether to include discarded episodes and whether to push to the Hub (off by default), with a progress bar, and then runs `build_registry.py` so the dataset shows in the robot panel after *Reload Registry*.
 
 Or from a terminal: convert recordings to a LeRobot dataset (it detects the image numbering of each episode, both the current per-frame one and the interleaved one of older recordings; by default it pushes the dataset to the Hugging Face Hub at the end):
 ```bash
-python splatsim/utils/lerobot_conversion.py --input_dir <traj_folder> --output_dir <dataset_dir> --fps 10 [--cameras base_rgb base_left_rgb base_right_rgb wrist_rgb] [--no_push]
+python splatsim/utils/data/lerobot_conversion.py --input_dir <traj_folder> --output_dir <dataset_dir> --fps 10 [--cameras base_rgb base_left_rgb base_right_rgb wrist_rgb] [--no_push]
 ```
 `--input_dir` takes several folders to merge them into one dataset; `--no_push` keeps the dataset local instead of pushing it to the Hugging Face Hub.
 
@@ -212,7 +289,7 @@ Open http://localhost:8083: the scene's splat, seen from `base_rgb`. With *Pick*
 **Place it in the scene:**
 
 ```bash
-python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --occluders configs/occluders.yaml
+python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3 --occluders configs/occluders.yaml
 ```
 
 Without `--occluders` no leaf is loaded. With it, the panel's *Scene* tab has an *Occluders* folder: **Add to Scene** adds a saved leaf (the same one several times if you want; leaves saved after the server started need a restart to be listed), a gizmo moves and rotates it, and **Put Between Camera and Tomato** places it on the line from the tomato to the chosen base camera (*Tomato → camera*: 0 = at the tomato, 1 = at the camera). **Save Occluders** writes the file. The file holds each leaf's center position in the world and its rotation (`wxyz`; identity = as in the plant).
@@ -229,7 +306,7 @@ Without `--occluders` no leaf is loaded. With it, the panel's *Scene* tab has an
 
 ## Occlusion percentage
 
-How much of the tomato is covered in each camera. The scene is rendered twice, with the tomato painted black and white: the difference is exactly what the tomato contributes to each pixel after alpha blending, so translucent leaves count for what they cover, with no thresholds. Divided by the silhouette of the tomato alone, it gives the visible fraction (`splatsim/utils/occlusion.py`). It takes about 0.2 s per camera. Levels: `0-25`, `25-50`, `50-75`, `75-100` and `out_of_view`.
+How much of the tomato is covered in each camera. The scene is rendered twice, with the tomato painted black and white: the difference is exactly what the tomato contributes to each pixel after alpha blending, so translucent leaves count for what they cover, with no thresholds. Divided by the silhouette of the tomato alone, it gives the visible fraction (`splatsim/utils/render/occlusion.py`). It takes about 0.2 s per camera. Levels: `0-25`, `25-50`, `50-75`, `75-100` and `out_of_view`.
 
 The percentage counts everything in front of the tomato: plant, occluders, the arm, and the gripper in the wrist camera. It is relative to the part of the tomato inside the image: when the frame cuts the tomato, `cut_by_frame` says so, and a sliver can read as 100%.
 
@@ -262,6 +339,44 @@ Each episode's `meta.json` records `occluders` (the leaf, which `measure_occlusi
 - `no_camera`: no camera sees the whole tomato, so no leaf is added.
 
 The leaf has no collisions, so the fit looks for a distance that keeps its center at least 10 cm from where the arm passes during the episode, moving it toward the camera if needed. `arm_distance` records what was left. Only recordings with `sim_joint_positions` can be rendered this way (`gello_3plants` can't).
+
+## Perception episodes (starting arm pose × tomato category)
+
+Planner episodes for studying how the scene's appearance changes with where the arm starts and with whether the tomato can be seen, from the fixed base camera (eye-to-hand). They follow the structure of `gello_3plants`, where each tomato position has a group of 5 demonstrations that start from different poses: the reset pose, out of view to each side, and two with the arm in view. Each tomato position (a *set*) gives 4 tomato categories × 5 starting poses = 20 episodes. Each one starts at its pose and ends grasping the tomato with the [planner](#record-demonstrations) (same trajectory, same server, state only), and is rendered afterwards with `render_recordings.py`.
+
+```bash
+python scripts/xarm5/plan_perception_episodes.py --positions 10 [--out ~/data/bc_data/perception] [--seed 0]
+python scripts/xarm5/render_recordings.py ~/data/bc_data/perception --fps 10
+```
+
+| ID | Starting pose | How it is chosen | In `gello_3plants` (p10–p90) |
+|---|---|---|---|
+| A1 | `OUT_LEFT` | The arm low (joint2–4 = `--side-joints` ± `--side-jitter`), joint1 turned until no pixel of it is in the image, plus `--side-extra`. Which side is left is read from the image | joint1 +0.80 to +1.08 |
+| A2 | `OUT_RIGHT` | Same, to the other side | joint1 −1.30 to −0.92 |
+| A3 | `BASE` | The reset pose: centered, above the image | the reset pose |
+| A4 | `IN_VIEW_FAR` | Grasp point `--far-distance` (0.4–0.6 m) from the tomato, within ±`--start-cone-deg` (35°) of the tomato → base direction, with the arm in view | 0.34–0.61 m, arm 7–26 % of the image |
+| A5 | `IN_VIEW_NEAR` | Same, at `--near-distance` (0.2–0.3 m) | 0.22–0.42 m |
+
+| ID | Tomato | Where |
+|---|---|---|
+| B1 | visible, in place | A position sampled from the hemisphere in `configs/apple_grid.yaml`, in frame and not covered by the plant |
+| B2 | hidden, in place | The same position, covered by a leaf from `--leaf-dir` (default `~/data/occluders/<scene>`) fitted in the camera (`--hidden-target` 98 %) away from where the arm passes in its 5 episodes. The leaf goes in `meta.json` (`occluders`), and `render_recordings.py` and `measure_occlusion.py` put it back |
+| B3 | hidden, displaced | B4 moved sideways until no pixel of the tomato is in the image |
+| B4 | visible, displaced | B1 moved `--float-offset` (0.15 m) toward the camera: same pixel, larger |
+
+The tomato goes wherever the hemisphere allows, with or without the plant behind it, so "in place" means the set's position, not a check that it touches the plant. B1 positions are spread out (farthest-point sampling over `--candidates`) and are kept only if every condition can be met: there is a grasp, A4 and A5 have a pose with the arm in view, B1 and B4 are visible, and B3 is out of frame. They are saved in `<out>/positions.yaml`. A finished set is marked in `<out>/sets/<set>.json` and skipped when running again. A set cut off halfway is regenerated, and a higher `--positions` adds sets far from the existing ones.
+
+**Checks on the first instant of each episode** (`splatsim/utils/scene/perception_design.py`, limits in `--thresholds.*`, calibrated on `gello_3plants`):
+
+- Arm: a PyBullet mask of the robot seen from the camera (`splatsim/utils/render/camera_view.py`, same pose and FOV as the splat render). This is geometry only, so the plant does not cover the arm here. A1–A3 need 0 pixels, and in A3 the end effector must project above the image and centered. A4/A5 need the arm to cover 3–35 % of the image, with the grasp point ≥ 0.35 m (A4) or ≤ 0.33 m (A5) from the tomato.
+- Tomato: the splat occlusion ([Occlusion percentage](#occlusion-percentage)) with the arm in the reset pose (out of frame). B1/B4 need ≤ 50 % covered and not cut by the frame. B2 needs ≥ 90 % covered or out of frame. B3 needs to be out of frame.
+- The episode must end with the tomato within `--max-final-error` (3 cm) of the grasp point. Each episode gets up to `--plan-attempts` plans (tilt, speeds, pauses).
+
+An episode that fails is saved with `valid: false` and its reasons, or not saved with `--invalid skip`. `start.tomato_with_arm` records the occlusion with the arm at its starting pose: with the camera next to the arm's base, A4/A5 often hide the tomato.
+
+**Output:** episodes `000/`, `001/`, … like `plan_trajectories.py`, 20 in a row per set. Each `meta.json` has `set`, `tomato_category`, `arm_config`, `apple_position`, `valid`, `reasons`, `start` (pose, arm mask, end effector projection, grasp distance), `tomato_scene`, `occluders`, and the plan. There is also `perception_episodes.csv` (one row per condition, including those not saved), `positions.yaml`, `sets/<set>.json` and `perception_info.yaml` (camera pose, reset pose, arguments). A set takes about 30 s on an RTX 5080, plus choosing the positions (it needs the GPU for the splat occlusion). Rendering it takes about 4 minutes at 5 fps with one camera.
+
+Limits: the leaf in B2 has no collisions and sits between the camera and the tomato, so at the end of the approach the gripper is behind it (`leaf_fit.arm_distance` records how close the arm passes). The plant has no collisions either.
 
 ## Train the diffusion policy
 
@@ -297,6 +412,53 @@ Jobs use one of two lanes: trainings, renders and mirrors use the GPU and run on
 
 The queue is saved in `~/data/train_queues/live/jobs.yaml` with each job's config and log. Each job runs in its own session: closing the panel does not stop them, and reopening it picks them up again (each log ends with the job's exit code). A job that depends on another starts only when that one is done; if it fails, the next steps wait until it is retried or removed. After each finished training or conversion the registry is regenerated, so the model or dataset appears in the simulator panel.
 
+## Cloud queue
+
+`scripts/xarm5/cloud_server.py` (http://localhost:8083) runs data and training jobs on rented GPUs instead of this PC, each job in its own Vast pod, several at once. It doesn't replace the training queue.
+
+```bash
+python scripts/xarm5/cloud_server.py
+```
+
+It needs `~/.config/splatsim/cloud.env` (copy `configs/cloud.env.example`, `chmod 600`), `rclone` and the `vastai` CLI logged in. Data travels through a Cloudflare R2 bucket.
+
+- *Data*: chains **Render** → **Mirror** → **Convert** for a folder of `~/data/bc_data`. It shows each stage's frames, transfers and estimated cost before queuing. Intermediate images stay in the bucket: only the last stage comes down to this PC, and what was used is then deleted from the bucket. To review a render before converting it, queue Render alone.
+- *New job*: trains a model, on a dataset of this PC or on one still queued (`⏳ #<job> <name>`), and waits for it.
+- *Scene*: makes a scene from a video of the robot (see below).
+- *Queue*: progress, cost and log of each job, with Stop, Retry and Remove.
+- *Limits*: pods at once, the budget of the whole queue and a pause.
+
+Each pod stops itself when it finishes or reaches its *Max cost*, even if this PC is off, and a closed panel picks its pods up again when reopened (`~/data/cloud_queue/`). Speeds come from `history.yaml`, so a job with no comparable measurement has no estimate and you set its maximum yourself. The cost shown in the queue is an estimate: while a pod runs it already includes the whole predicted transfer, uploads too, and if the pod ends without finishing only its hours and download remain. The balance can drop less. An offer whose transfer alone exceeds the maximum isn't used, and in some machines 40 GB of renders cost more than the compute. Recordings travel as one `<episode>.tar` per episode instead of one object per file, so the bucket sees a few hundred operations instead of hundreds of thousands, and the folder is the same again once extracted. A cut upload repeats only the missing episodes, and an unchanged episode is not sent again; this hashes each package, which reads every file. The *Progress* column shows the phase, how long it has been there, its counters (episodes while moving recordings, frames or steps while running) and ⚠️ if they stop for 3 minutes. Pods report every 30 s. Folders that do not travel in packages, like a dataset or a model, only show which folder is moving. To change a maximum, select the job in *Queue* and use *Set max cost*; it can't be done while the job has a pod, and a failed job then needs *Retry*.
+
+### From another PC
+
+The queue is also kept in R2 (`queue/` in the bucket), so a panel on another PC sees the same jobs. Only one panel controls it at a time, because two would launch two pods per job and delete each other's pods as orphans. The panel in control renews a lease in R2 every cycle; the others show the queue read only, with *Take control* at the top of *Queue*. If nobody holds the lease, or it expired because its panel died (90 s), it is taken at once. Otherwise the panel in control finishes its uploads and downloads, uploads the queue and lets go. *Release control*, Ctrl+C or `docker stop` let go too, so close the panel on one PC before moving to the other. Paths travel with `~`, so each PC uses its own home. `--no-sync` keeps the queue on this PC only, and `--name` sets how the other panels see this one.
+
+The files don't move with the queue. Uploads come from the PC in control, and a job whose recordings or dataset aren't there waits with *falta en este PC* instead of failing. Outputs come down to the PC in control, unless *Leave output in R2* was checked when queuing: then the output stays in the bucket until *Download output* (in *Queue*) brings it to whichever PC has control. The first time a PC shares its queue, a queue with jobs wins over an empty one, and local changes that never reached R2 are kept as `jobs.yaml.bak<time>`.
+
+On a laptop, as a fallback to keep watching and launching jobs when the lab is offline, the panel runs in Docker without cloning the repo (`docker/panel.Dockerfile`: Python and `rclone`, no torch). Once, run `vastai set api-key <key>` (it stays in `~/.config/vastai`) and copy `~/.config/splatsim/cloud.env` from the lab. Then:
+
+```bash
+docker run -d --name splatsim-panel --restart unless-stopped --init --stop-timeout 30 \
+  --user "$(id -u):$(id -g)" -e HOME="$HOME" -e SPLATSIM_PANEL_NAME=laptop -p 127.0.0.1:8083:8083 \
+  -v "$HOME/data:$HOME/data" -v "$HOME/lerobot:$HOME/lerobot" \
+  -v "$HOME/.config/splatsim:$HOME/.config/splatsim:ro" -v "$HOME/.config/vastai:$HOME/.config/vastai" \
+  ghcr.io/benjaminucn/splatsim-panel:latest                 # http://localhost:8083
+docker stop splatsim-panel                                  # lets go of control
+```
+
+`docker/panel.compose.yml` does the same from a checkout. It runs as your user with your home, so downloads belong to you and paths match the ones outside. The port only listens on localhost, since the panel has no password and spends Vast credit. The configs (camera poses, `objects.yaml`, training bases) are the ones in the image, from the last push that rebuilt it, so scene alignment and config changes stay in the lab.
+
+A pod's start is mostly the image download: 18 s on a machine that already had it, 7–25 min otherwise. So the queue goes first to a machine where one of its pods ran in the last 14 days (`machines.yaml`, *cached* in the offers table), as long as it costs at most $0.15 more than the best offer (`PREFER_CACHED_USD`), and leaves for last a machine that failed in that time. An offer you choose by hand still comes first. The hosts can delete the image, so *cached* is likely, not certain; each job's detail shows how long its pod took to start.
+
+Pods render from the images `splatsim-train` and `splatsim-render`, built by `.github/workflows/images.yml`, which reuses the published layers: pushing code leaves the 4.5 GB dependency layer as it was, and changing `requirements-train.txt` or `scripts/runpod_setup.sh` makes every machine download it again. Render and mirror receive this PC's camera poses and scene config with each job, and upload only the scene files needed (about 1.1 GB: COLMAP `sparse`, the trained splat, two photos, the URDF, the tomato). With `SPLATSIM_HEADLESS=1`, PyBullet runs without a window; the images are identical to rendering with one. Use `--workers` on a GPU with about 8 GB per worker.
+
+*Random leaf occlusions* (*Data*, with Render) does the same as `--leaf_dir` in [A different leaf per episode](#occlusion-percentage): it uploads the leaf folder to `assets/occluders/` and leaves the output in `<folder>_<fps>hz_leaves`. Mirror is refused with it, because `mirror_recordings.py` renders without the leaves while keeping the `meta.json` that says they are there. The estimate adds an unmeasured 10 s per episode for the fit (`LEAF_FIT_S`), and these renders aren't added to the speed history.
+
+**A scene from a video.** *Scene* runs `scripts/xarm5/splat_from_video.py` on a pod: it takes the frames out of the video (*Frames per second*, 0 = all of them), runs COLMAP as `convert.py` does (one OPENCV camera, exhaustive matching, undistorted images in `images/` and `sparse/0`) and trains the splat with the submodule's `train.py` (*Iterations*, 30000 by default). Give it a video or a folder of photos. COLMAP comes from `pycolmap-cuda12`, in the render image, so feature extraction and matching run on the GPU; the lab's COLMAP from apt has no CUDA. If COLMAP places fewer than half of the photos the job fails before training, and under 80% it warns in the log. *sequential* matching is faster but only works with consecutive frames of a video. The scene comes down to `~/data/Colmaps/<name>/` without `input/` and `distorted/`, with the photos packed as one `.tar` per folder. There is no measured speed yet, so set the max cost yourself; `train.py` keeps the photos in RAM (`--data_device cpu`, about 20 GB for 1300 photos), hence the 48 GB minimum.
+
+The job then stays as `aligning`: the splat must be aligned with the URDF by hand ([Align the simulator and the splat](../README.md#align-the-simulator-and-the-splat)), and jobs that depend on it wait. Select it in *Queue* to see the steps for that scene. **Add entry to objects.yaml** appends an entry copied from another scene (*Copy entry from*, same URDF and gripper) with this scene's paths and the identity matrix; set `joint_states` yourself. Then run `articulated_robot_pipeline.py` for the URDF point cloud, align in CloudCompare, paste the matrix and run it again for the labels. **Approve scene** checks that the entry points to this scene, that the matrix is a real 4×4 transform and not the identity, and that `data/labels_path/<robot>_labels.npy` was made with the current matrix and box. To check that, it counts the splat points that fall in the box as the pipeline does, and the existing scenes `xarm5_lite_plant_v0`–`v3` pass.
+
 ## Registry of recordings, datasets and models
 
 `configs/registry.yaml` links each model to the dataset it was trained on, and each dataset to the GELLO recordings it was converted from. Regenerate it after recording, converting or training:
@@ -326,7 +488,7 @@ The policy needs `lerobot` (and with it `huggingface_hub`) in the same environme
 1. Define the tomato positions `(x, y, z)` to test in `configs/apple_grid.yaml`. The easiest way is to place the tomato from the control panel (*Tomato* folder) and press **Save Position to Grid** for each position you want; you can also edit the file by hand.
 2. Start the server:
    ```bash
-   python scripts/launch_nodes.py --robot sim_xarm5_splat_camera --robot_name xarm5_lite_plant_v3 --hz 10
+   python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3 --hz 10
    ```
 3. Run the trials:
    ```bash
@@ -342,7 +504,7 @@ Press Ctrl+C to stop early; the current recording is closed and the arm is reset
 
 ## Grasp point and success
 
-`obs["state"]` is the pose of the arm's last link (`link_eef`), not the gripper, so the raw end-effector–tomato distance never drops below ~13 cm, even in a perfect demo. Success is measured instead by where the tomato sits **in the end-effector frame**: the **grasp point** in `configs/grasp_point.yaml` is where its center should be, and the **grasp error** of a frame is the distance between the two (`splatsim/utils/grasp_point.py`). `run_policy_trials.py` records the final and minimum grasp error of each trial, and a trial succeeds when it gets within 4 cm; the reviewer's automatic stop labels and `plan_trajectories.py`'s target use the same point.
+`obs["state"]` is the pose of the arm's last link (`link_eef`), not the gripper, so the raw end-effector–tomato distance never drops below ~13 cm, even in a perfect demo. Success is measured instead by where the tomato sits **in the end-effector frame**: the **grasp point** in `configs/grasp_point.yaml` is where its center should be, and the **grasp error** of a frame is the distance between the two (`splatsim/utils/trials/grasp_point.py`). `run_policy_trials.py` records the final and minimum grasp error of each trial, and a trial succeeds when it gets within 4 cm; the reviewer's automatic stop labels and `plan_trajectories.py`'s target use the same point.
 ```bash
 python scripts/xarm5/estimate_grasp_point.py [--point gripper|demos]   # writes configs/grasp_point.yaml
 ```

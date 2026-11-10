@@ -36,9 +36,9 @@ ROOT = Path(__file__).resolve().parents[2]       # raíz del repo
 SCRIPTS = Path(__file__).resolve().parent      # scripts/xarm5
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(SCRIPTS))
-from splatsim.utils.camera_setup import load_camera_setup  # noqa: E402
-from splatsim.utils.registry import load_registry  # noqa: E402
-from splatsim.utils.episode_selection import load_discarded  # noqa: E402
+from splatsim.utils.render.camera_setup import load_camera_setup  # noqa: E402
+from splatsim.utils.data.registry import load_registry  # noqa: E402
+from splatsim.utils.data.episode_selection import load_discarded  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
 from data_jobs import DATA_KINDS, SCRIPTS as JOB_SCRIPTS, command, kind, lane, plan_pipeline  # noqa: E402
 from train_queue import _train_fields, build_runs  # noqa: E402
@@ -48,7 +48,7 @@ STOP_TIMEOUT = 20.0               # s de espera tras SIGTERM antes de SIGKILL
 ACTIVE = ("running",)
 RETRYABLE = ("failed", "stopped", "interrupted")
 FORM_FIELDS = ("n_obs_steps", "horizon", "n_action_steps", "training_steps", "batch_size", "save_freq")
-DEFAULT_DATASETS_DIR = "~/lerobot/splatsim_test_data"   # donde build_registry.py busca datasets
+from splatsim.utils.paths import DATASETS_DIR  # noqa: E402
 # corre el trabajo y deja su código de salida al final del log (sirve aunque el panel se cierre)
 WRAPPER = '"$@"; c=$?; echo "[exit $c]"; exit $c'
 
@@ -677,7 +677,7 @@ class TrainPanel:
                                                    hint="Parallel processes, ~8 GB of GPU each: keep 1 on a 16 GB GPU")
         with gui.add_folder("Convert to LeRobot"):
             self.d_convert = gui.add_checkbox("Convert", True)
-            self.d_out = gui.add_text("Output folder", DEFAULT_DATASETS_DIR)
+            self.d_out = gui.add_text("Output folder", DATASETS_DIR)
             self.d_fps = gui.add_number("fps", 10, min=1, max=60, step=1,
                                         hint="The recordings' rate (the render fps when rendering)")
             self.d_cams = gui.add_text("Cameras", "", hint="Space-separated; empty = all")
@@ -777,7 +777,7 @@ class TrainPanel:
             suffix = self.d_suffix.value.strip() or datetime.now().strftime("%y%m%d_%H%M")
             if not re.fullmatch(r"[\w.-]+", suffix):
                 raise ValueError("name suffix: letters, digits, `_`, `-` or `.`")
-            convert = {"output_dir": self.d_out.value.strip() or DEFAULT_DATASETS_DIR,
+            convert = {"output_dir": self.d_out.value.strip() or DATASETS_DIR,
                        "fps": int(self.d_render_fps.value) if render else int(self.d_fps.value),
                        "cameras": self.d_cams.value.split() or None, "suffix": suffix,
                        "ignore_selection": bool(self.d_discarded.value), "push": bool(self.d_push.value)}

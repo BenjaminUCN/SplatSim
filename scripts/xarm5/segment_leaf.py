@@ -18,8 +18,8 @@ import viser
 from scipy.spatial.transform import Rotation
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
-from splatsim.utils.camera_setup import base_camera_poses  # noqa: E402
-from splatsim.utils.leaf_segmentation import (  # noqa: E402
+from splatsim.utils.render.camera_setup import base_camera_poses  # noqa: E402
+from splatsim.utils.scene.leaf_segmentation import (  # noqa: E402
     GrowParams,
     LeafSelection,
     SplatCloud,
@@ -30,7 +30,7 @@ from splatsim.utils.leaf_segmentation import (  # noqa: E402
     pick_surface,
     save_leaf,
 )
-from splatsim.utils.paths import load_yaml  # noqa: E402
+from splatsim.utils.paths import OBJECTS_CONFIG, load_yaml  # noqa: E402
 
 SELECTION_RGB = (255, 40, 40)
 TOO_FEW = 100  # en un brillo casi blanco no hay color de referencia y casi no crece
@@ -57,7 +57,7 @@ def latest_ply(model_path: str) -> Path:
 
 class LeafApp:
     def __init__(self, args: Args):
-        config = load_yaml("configs/object_configs/objects.yaml")[args.robot_name]
+        config = load_yaml(OBJECTS_CONFIG)[args.robot_name]
         ply = latest_ply(config["model_path"])
         print(f"Cargando {ply}")
         whole = SplatCloud.from_ply(ply, config["transformation"]["matrix"])
