@@ -5,6 +5,8 @@
 !data/labels_path/**
 !splatsim/__init__.py
 !splatsim/cloud/**
+!splatsim/robots/xarm/__init__.py
+!splatsim/robots/xarm/config.py
 !splatsim/utils/**
 !scripts/xarm5/cloud_server.py
 !scripts/xarm5/data_jobs.py
