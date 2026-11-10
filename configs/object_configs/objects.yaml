@@ -347,7 +347,7 @@ plastic_apple_peduncle:
     cut: [0.0016, -0.0013, 0.0903]
     radius: 0.0025
 xarm5_lite_plant_v3_hand_held_down:
-  urdf_path: [/home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down.urdf]
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down.urdf]
   base_position:
   - [0, 0, 0]
   wrist_camera_link_name: wrist_camera_link
