@@ -105,6 +105,10 @@ class DynamixelRobot(Robot):
         assert len(pos) == self.num_dofs()
 
         if self.gripper_open_close is not None:
+            # the servo can read a whole turn away from the calibration (e.g. 361° instead of
+            # 1°, depending on where it powered up): wrap to the turn closest to open/closed
+            mid = (self.gripper_open_close[0] + self.gripper_open_close[1]) / 2
+            pos[-1] = mid + (pos[-1] - mid + np.pi) % (2 * np.pi) - np.pi
             # map pos to [0, 1]
             g_pos = (pos[-1] - self.gripper_open_close[0]) / (
                 self.gripper_open_close[1] - self.gripper_open_close[0]
