@@ -2,8 +2,8 @@
 
 Primero lanzar el servidor (con el mismo --hz con que se entrenó la política):
     python scripts/launch_nodes.py --robot sim_xarm5 --robot_name xarm5_lite_plant_v3 --hz 10
-Luego:
-    python scripts/xarm5/run_policy_trials.py --trials-per-position 3 --trial-seconds 15
+Luego, con un modelo de configs/registry.yaml (--list-models muestra los disponibles):
+    python scripts/xarm5/run_policy_trials.py --model "gello benjamin 200 2cam" --trials-per-position 3 --trial-seconds 15
 
 Las posiciones del tomate se leen de configs/apple_grid.yaml (se agregan con el botón
 "Save Apple Position to Grid" del servidor con --move_apple, o editando el archivo).
@@ -50,8 +50,11 @@ class Args:
     output_dir: str = "~/data/policy_trials"
     robot_port: int = 6001
     hostname: str = "127.0.0.1"
-    # modelo a evaluar, carpeta o repo del Hub (None -> el por defecto del agente);
-    # dataset: carpeta o repo del Hub, None -> de configs/registry.yaml
+    # modelo a evaluar por su nombre en configs/registry.yaml (name, carpeta o parte única de
+    # ellos; --list-models los muestra), o por su carpeta / repo del Hub con --checkpoint
+    # (ninguno -> el por defecto del agente); dataset: carpeta o repo del Hub, None -> del registro
+    model: str | None = None
+    list_models: bool = False     # muestra los modelos del registro y termina
     checkpoint: str | None = None
     dataset_root: str | None = None
     # subcarpeta de output_dir; None -> nombre del modelo en el registro (o su carpeta)
@@ -136,6 +139,19 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
 
 
 def main(args: Args) -> None:
+    from splatsim.utils.data.registry import find_model, models_table, model_label
+    if args.list_models:
+        print(models_table())
+        return
+    if args.model:
+        if args.checkpoint:
+            raise SystemExit("Usa --model o --checkpoint, no ambos")
+        try:
+            key, model = find_model(args.model)
+        except ValueError as e:
+            raise SystemExit(str(e)) from None
+        args.checkpoint = model["path"]
+        print(f"[Trials] Modelo {model_label(key, model)}: {args.checkpoint}")
     with open(args.grid_path) as f:
         apple_grid = [tuple(p) for p in (yaml.safe_load(f) or {}).get("positions") or []]
     if not apple_grid and not args.here:

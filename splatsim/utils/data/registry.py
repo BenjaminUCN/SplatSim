@@ -28,6 +28,45 @@ def loadable_models(registry: dict) -> dict:
             if m.get("finished") and os.path.isdir(m["path"])}
 
 
+def _normalized(text: str) -> str:
+    """Para comparar nombres: minúsculas, y espacios, _ y - da lo mismo."""
+    return re.sub(r"[\s_-]+", " ", text.lower()).strip()
+
+
+def find_model(query: str, registry: dict | None = None) -> tuple[str, dict]:
+    """(clave, entrada) del modelo cargable cuyo nombre (name o suggested_name), clave o carpeta es
+    `query`; si ninguno coincide entero, el único que lo contiene. ValueError si no hay uno solo."""
+    registry = registry if registry is not None else load_registry()
+    models = loadable_models(registry)
+    q = _normalized(query)
+
+    def names(key, model):
+        return {_normalized(model_label(key, model)), _normalized(key), _normalized(key.rsplit("/", 1)[-1])}
+
+    exact = [(k, m) for k, m in models.items() if q in names(k, m)]
+    found = exact or [(k, m) for k, m in models.items() if any(q in n for n in names(k, m))]
+    if len(found) == 1:
+        return found[0]
+    options = found or list(models.items())
+    listing = "\n".join(f"  {model_label(k, m)}  ({k})" for k, m in options)
+    if found:
+        raise ValueError(f"'{query}' coincide con {len(found)} modelos, sé más específico:\n{listing}")
+    raise ValueError(f"No hay un modelo '{query}' en {REGISTRY_PATH}. Modelos disponibles:\n{listing}")
+
+
+def models_table(registry: dict | None = None) -> str:
+    """Los modelos cargables, del más nuevo al más viejo: nombre, cámaras, dataset y fecha."""
+    registry = registry if registry is not None else load_registry()
+    models = sorted(loadable_models(registry).items(), key=lambda km: str(km[1].get("saved") or ""), reverse=True)
+    if not models:
+        return f"No hay modelos con pesos finales en {REGISTRY_PATH} (regenéralo con build_registry.py)"
+    rows = [("name", "cameras", "dataset", "saved")]
+    rows += [(model_label(k, m), ",".join(m.get("cameras") or []), m.get("dataset") or "?", str(m.get("saved") or ""))
+             for k, m in models]
+    widths = [max(len(r[i]) for r in rows) for i in range(len(rows[0]))]
+    return "\n".join("  ".join(c.ljust(w) for c, w in zip(r, widths)).rstrip() for r in rows)
+
+
 # ── modelos y datasets en el Hugging Face Hub ────────────────────────────────
 # train_diffusion.py sube cada modelo a <hub_user>/<clave del registro con _ en vez de />
 # (p.ej. robot_learning_tutorial/diffusion_1021_1640 -> robot_learning_tutorial_diffusion_1021_1640)
