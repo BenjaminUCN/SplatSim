@@ -2,8 +2,9 @@
 # added with "Save Position to Grid" in the control panel (or by hand), and random_range: the box
 # (min, max per axis, m) or random_hemisphere: where "Random Position" puts it, chosen by random_shape
 # (panel: Tomato > Random range). The hemisphere: center (m), radius [min, max] (m), facing (deg, the
-# horizontal direction of its axis, 180 = -x), z [min, max] (m, cuts it at those heights) and
-# x [min, max] (m, cuts it along x, e.g. to keep the tomato away from the robot or the wall).
+# horizontal direction of its axis, 180 = -x), z [min, max] (m, cuts it at those heights),
+# x [min, max] (m, cuts it along x, e.g. to keep the tomato away from the robot or the wall) and
+# y [min, max] (m, cuts it sideways, e.g. to keep the tomato in front of the plant).
 positions:
 - [-0.8716, 0.0337, 0.3395]
 - [-0.8716, 0.0253, 0.1137]
@@ -22,7 +23,8 @@ random_range:
 random_shape: hemisphere
 random_hemisphere:
   center: [0.0, 0.0, 0.267]
-  radius: [0.5, 0.9]
+  radius: [0.6, 0.9]
   facing: 180.0
   z: [-0.4, 0.6]
   x: [-0.9, -0.3]
+  y: [-0.4, 0.4]

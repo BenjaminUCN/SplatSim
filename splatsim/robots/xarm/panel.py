@@ -7,8 +7,10 @@ import viser
 from splatsim.robots.station.panel import StationPanel, wxyz_to_xyzw, xyzw_to_wxyz
 from splatsim.utils.scene.apple_grid import (
     APPLE_GRID_PATH,
+    EVAL_GRID_PATH,
     RANGE_SHAPES,
     NO_X_LIMIT,
+    NO_Y_LIMIT,
     hemisphere_lines,
     in_hemisphere,
     load_grid,
@@ -47,6 +49,11 @@ def z_to(axis) -> tuple:
         return (0.0, 1.0, 0.0, 0.0)              # 180° en torno a x
     w = np.r_[1.0 + c, np.cross(z, axis)]
     return tuple(w / np.linalg.norm(w))
+
+
+# grillas que el panel puede mostrar: (archivo, color de las esferas). Solo la propia se edita con
+# Save / Remove; la de evaluación es fija para que todas las evaluaciones usen las mismas posiciones
+GRIDS = {"custom": (APPLE_GRID_PATH, RANGE_COLOR), "eval 4x4": (EVAL_GRID_PATH, (40, 120, 215))}
 from .debug_ui import save_camera_poses
 
 
@@ -274,12 +281,16 @@ class SimPanel(StationPanel):
                 self._peduncle_text = self.v.gui.add_markdown("")
             self._apple_xyz = self.v.gui.add_vector3("xyz (m)", pos, step=0.001)
             rand = self.v.gui.add_button("Random Position")
-            save = self.v.gui.add_button("Save Position to Grid")
+            self._grid_which = self.v.gui.add_dropdown(
+                "Grid", list(GRIDS), initial_value="custom",
+                hint=f"custom: {APPLE_GRID_PATH} (editable). eval 4x4: {EVAL_GRID_PATH}, the positions "
+                     "run_policy_trials.py evaluates (numbers = pos_idx; read-only)")
+            self._grid_save = self.v.gui.add_button("Save Position to Grid")
             self._grid_info = self.v.gui.add_markdown("")
             # cargar una posición guardada (también se puede hacer clic en su esfera)
             self._grid_select = self.v.gui.add_dropdown("Grid position", ["-"])
             load = self.v.gui.add_button("Load Grid Position")
-            remove = self.v.gui.add_button(
+            self._grid_remove = remove = self.v.gui.add_button(
                 "Remove Grid Position", color="red",
                 hint="Removes the selected position from the grid file; the later ones move down one "
                      "number (trials already run keep their old numbers)")
@@ -304,7 +315,8 @@ class SimPanel(StationPanel):
         self._apple_gizmo.on_update(
             lambda _: self._do(self._move_apple, tuple(float(v) for v in self._apple_gizmo.position)))
         self._on_click(rand, self._random_apple)
-        self._on_click(save, self._save_apple)
+        self._on_click(self._grid_save, self._save_apple)
+        self._on_user(self._grid_which, lambda _: self._switch_grid())
         self._on_user(self._grid_select, lambda _: self._load_grid_position())
         self._on_click(load, self._load_grid_position)
         self._on_click(remove, self._ask_remove_grid)
@@ -341,6 +353,9 @@ class SimPanel(StationPanel):
                 "X min/max (m)", h["x"], step=0.01,
                 hint="Cuts the hemisphere along x (e.g. keep the tomato away from the robot or the wall); "
                      "±1.5 = no cut")
+            self._hemi_y = self.v.gui.add_vector2(
+                "Y min/max (m)", h["y"], step=0.01,
+                hint="Cuts the hemisphere sideways (e.g. keep the tomato in front of the plant); ±1.5 = no cut")
             self._range_show = self.v.gui.add_checkbox("Show range", False, hint="The range in the 3D view")
             self._range_edit = self.v.gui.add_checkbox(
                 "Gizmos", False, hint="Drag the box corners or the hemisphere center in the 3D view (with Show range)")
@@ -357,7 +372,8 @@ class SimPanel(StationPanel):
         self._on_user(self._range_max, lambda _: self._set_range(self._range_min.value, self._range_max.value))
         for gizmo in self._range_gizmos:
             gizmo.on_update(lambda _: self._do(self._set_range, *(g.position for g in self._range_gizmos)))
-        for handle in (self._hemi_center, self._hemi_radius, self._hemi_facing, self._hemi_z, self._hemi_x):
+        for handle in (self._hemi_center, self._hemi_radius, self._hemi_facing, self._hemi_z, self._hemi_x,
+                       self._hemi_y):
             self._on_user(handle, lambda _: self._set_hemisphere())
         self._hemi_gizmo.on_update(
             lambda _: self._do(self._set_hemisphere, tuple(float(v) for v in self._hemi_gizmo.position)))
@@ -387,10 +403,12 @@ class SimPanel(StationPanel):
     def _set_hemisphere(self, center=None):
         apple = self.s.apple
         apple.set_hemisphere(center or self._hemi_center.value, self._hemi_radius.value,
-                             self._hemi_facing.value, self._hemi_z.value, self._hemi_x.value)
+                             self._hemi_facing.value, self._hemi_z.value, self._hemi_x.value,
+                             self._hemi_y.value)
         h = apple.hemisphere                         # ordenado y válido
         self._hemi_center.value, self._hemi_radius.value = h["center"], h["radius"]
-        self._hemi_facing.value, self._hemi_z.value, self._hemi_x.value = h["facing"], h["z"], h["x"]
+        self._hemi_facing.value, self._hemi_z.value = h["facing"], h["z"]
+        self._hemi_x.value, self._hemi_y.value = h["x"], h["y"]
         if np.abs(np.subtract(self._hemi_gizmo.position, h["center"])).max() > 1e-4:
             self._hemi_gizmo.position = h["center"]
         self._draw_range()
@@ -406,7 +424,8 @@ class SimPanel(StationPanel):
         show = self._range_show.value
         for handle in (self._range_min, self._range_max):
             handle.visible = box
-        for handle in (self._hemi_center, self._hemi_radius, self._hemi_facing, self._hemi_z, self._hemi_x):
+        for handle in (self._hemi_center, self._hemi_radius, self._hemi_facing, self._hemi_z, self._hemi_x,
+                       self._hemi_y):
             handle.visible = not box
         lo, hi = (np.array(c) for c in apple.range_corners())
         center, size = tuple((lo + hi) / 2), tuple(hi - lo)
@@ -431,6 +450,7 @@ class SimPanel(StationPanel):
             text = (f"r ∈ [{h['radius'][0]:.2f}, {h['radius'][1]:.2f}] m facing {h['facing']:.0f}°, "
                     f"z ∈ [{h['z'][0]:.2f}, {h['z'][1]:.2f}] m"
                     + (f", x ∈ [{h['x'][0]:.2f}, {h['x'][1]:.2f}] m" if tuple(h["x"]) != NO_X_LIMIT else "")
+                    + (f", y ∈ [{h['y'][0]:.2f}, {h['y'][1]:.2f}] m" if tuple(h["y"]) != NO_Y_LIMIT else "")
                     + f"; {inside}/{len(self._grid_positions)} "
                     "grid positions inside")
         saved = self._range_state() == self._range_saved
@@ -486,21 +506,32 @@ class SimPanel(StationPanel):
         self._show_grid()
         self._draw_range()
 
+    def _switch_grid(self):
+        """Cambia la grilla mostrada; Save / Remove solo valen para la propia (custom)."""
+        self._grid_note = ""
+        self._grid_confirm.visible = False
+        editable = self._grid_which.value == "custom"
+        self._grid_save.disabled = self._grid_remove.disabled = not editable
+        self._show_grid()
+        self._grid_select.value = self._grid_select.options[0]
+        self._draw_range()                          # el conteo de posiciones dentro del hemisferio
+
     def _show_grid(self):
-        """Dibuja las posiciones guardadas en APPLE_GRID_PATH como esferas numeradas."""
-        positions = load_grid()
+        """Dibuja las posiciones de la grilla elegida (GRIDS) como esferas numeradas."""
+        path, color = GRIDS[self._grid_which.value]
+        positions = load_grid(path)
         self._grid_positions = [tuple(p) for p in positions]
-        for handle in self._grid_handles:          # las que sobran tras quitar una
+        for handle in self._grid_handles:          # las de la grilla anterior, o las que sobran tras quitar una
             handle.remove()
         self._grid_handles = []
         for i, p in enumerate(self._grid_positions):
-            sphere = self.v.scene.add_icosphere(f"/grid/{i}", radius=0.012, color=(255, 170, 0),
+            sphere = self.v.scene.add_icosphere(f"/grid/{i}", radius=0.012, color=color,
                                                 opacity=0.6, position=p)
             self.v.scene.add_label(f"/grid/{i}/label", str(i))
             sphere.on_click(lambda _, i=i: self._do(self._load_grid_position, i))
             self._grid_handles.append(sphere)
         self._grid_info.content = "  \n".join(
-            t for t in (f"{len(positions)} positions in `{APPLE_GRID_PATH}`", self._grid_note) if t)
+            t for t in (f"{len(positions)} positions in `{path}`", self._grid_note) if t)
         self._grid_select.options = [f"#{i} {p}" for i, p in enumerate(self._grid_positions)] or ["-"]
 
     def _selected_grid_index(self):
