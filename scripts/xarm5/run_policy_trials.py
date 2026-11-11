@@ -62,6 +62,14 @@ class Args:
     # ensayos en la posición actual del tomate, sin moverlo (en vez de recorrer la grilla): lo usa
     # "Record as trial" del panel; pos_idx es el índice de la grilla si coincide (a 1 cm), si no -1
     here: bool = False
+    # oclusión con hojas: por cada posición y cada objetivo (%), una hoja de leaf_dir ajustada a ese
+    # objetivo en las cámaras base (0 = sin hoja). La hoja depende solo de leaf_seed y la posición,
+    # así todos los modelos ven la misma. None -> sin hojas (como antes)
+    occlusion_targets: tuple[float, ...] | None = None
+    leaf_dir: str = "~/data/occluders/xarm5_lite_plant_v3"
+    leaf_seed: int = 0
+    # IK del agente: off (solo posición, lo de siempre) o hybrid (con la orientación si alcanza)
+    ik_orientation: str = "off"
 
 
 def run_name_for(checkpoint: str) -> str:
@@ -77,8 +85,15 @@ def policy_cameras(agent) -> list[str]:
 
 
 def reset_policy(agent) -> None:
-    agent.policy.reset()             # vacía las colas de observaciones y acciones
-    agent.make_new_prediction = True
+    agent.reset()                    # vacía las colas de observaciones y acciones
+
+
+def leaf_columns(fit: dict | None, target: float | None) -> dict:
+    """Columnas de trials.csv para la hoja del ensayo (vacías sin --occlusion-targets)."""
+    if fit is None:
+        return {}
+    return {"occlusion_target": target, "leaf_status": fit.get("status"), "leaf": fit.get("leaf"),
+            "leaf_camera": fit.get("camera"), "occlusion_fit": fit.get("occlusion")}
 
 
 def grid_index(apple_grid, pos, tol: float = 0.01) -> int:
@@ -95,19 +110,23 @@ def occlusion_columns(measured: dict) -> dict:
 
 
 def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_point,
-              reset: bool = True, measure_occlusion: bool = False) -> dict:
+              reset: bool = True, measure_occlusion: bool = False, leaf: dict | None = None) -> dict:
     """apple_pos None: el tomate se deja donde está. Sin su posición en la observación (robot
-    real) solo se cuentan los frames."""
+    real) solo se cuentan los frames. leaf: {leaf_dir, target, key, seed} para place_trial_leaf."""
     call(robot, "stop_recording")
     if reset:
         call(robot, "reset_robot")
     if apple_pos is not None:
         robot.set_object_pose(APPLE_NAME, np.array(apple_pos), np.array(APPLE_QUAT), use_gravity=False)
     reset_policy(agent)
+    leaf_fit = call(robot, "place_trial_leaf", **leaf) if leaf is not None else None
+    leaf_info = leaf_columns(leaf_fit, leaf["target"] if leaf else None)
+    ik_before = dict(agent.ik_counts)
 
     # antes de que el brazo se mueva: cuánto tapa la planta (y las hojas) con el brazo en reposo
     occlusion = occlusion_columns(call(robot, "measure_occlusion")) if measure_occlusion else {}
-    metadata = {**metadata, **occlusion}
+    metadata = {**metadata, **occlusion, **leaf_info, "leaf_fit": leaf_fit,
+                "ik_orientation": agent.ik_orientation, "relative_actions": agent.relative_actions}
     obs = robot.get_observations()
     folder = call(robot, "start_recording", max_seconds=trial_seconds,
                   metadata=metadata, root=root, images_in_pkl=False, cameras=policy_cameras(agent))
@@ -131,7 +150,9 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
         if not obs["recording"]:   # el servidor cortó al llegar a trial_seconds
             break
 
-    result = {"folder": folder, "frames": frames, **occlusion}
+    result = {"folder": folder, "frames": frames, **occlusion, **leaf_info}
+    if agent.ik_orientation != "off":
+        result["ik_fallbacks"] = agent.ik_counts["fallback"] - ik_before["fallback"]
     if distances:
         result.update(final_dist=distances[-1], min_dist=min(distances),
                       final_grasp_err=grasp_errors[-1], min_grasp_err=min(grasp_errors))
@@ -175,7 +196,7 @@ def main(args: Args) -> None:
 
     robot = ZMQClientRobot(port=args.robot_port, host=args.hostname)
     agent = LeRobotDiffusionAgent(checkpoint=args.checkpoint, dataset_root=args.dataset_root,
-                                  device="cuda")
+                                  device="cuda", ik_orientation=args.ik_orientation)
 
     first_obs = robot.get_observations()
     missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
@@ -194,9 +215,17 @@ def main(args: Args) -> None:
         positions = [grid_index(apple_grid, here) if here else -1]
     else:
         positions = args.positions if args.positions is not None else range(len(apple_grid))
-    total = len(positions) * args.trials_per_position
+    targets = list(args.occlusion_targets) if args.occlusion_targets and not manual else [None]
+    total = len(positions) * len(targets) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
               "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point", "trial_seconds"]
+    if targets != [None]:
+        fields += ["occlusion_target", "leaf_status", "leaf", "leaf_camera", "occlusion_fit"]
+    elif not manual:
+        # la hoja de una corrida anterior con --occlusion_targets sigue en el servidor: se quita
+        call(robot, "place_trial_leaf", leaf_dir=args.leaf_dir, target=0.0, key=0, seed=args.leaf_seed)
+    if args.ik_orientation != "off":
+        fields += ["ik_fallbacks"]
     if not manual:
         fields += list(occlusion_columns(call(robot, "measure_occlusion")))
     grasp_point = load_grasp_point()
@@ -209,12 +238,16 @@ def main(args: Args) -> None:
         n = 0
         stop = False
         try:
-            for pos_idx in positions:
+            for pos_idx, target in ((p, t) for p in positions for t in targets):
                 apple_pos = here if args.here else apple_grid[pos_idx]
+                # la misma hoja (sorteada por posición) en todos los niveles: solo cambia cuánto tapa
+                leaf = None if target is None else {"leaf_dir": args.leaf_dir, "target": target,
+                                                    "key": pos_idx, "seed": args.leaf_seed}
                 for trial in range(args.trials_per_position):
                     n += 1
                     where = "actual" if args.here else ""
-                    print(f"\n[Trials] {n}/{total} — posición {where} {pos_idx} {apple_pos}, ensayo {trial}")
+                    level = "" if target is None else f", oclusión {target:g}%"
+                    print(f"\n[Trials] {n}/{total} — posición {where} {pos_idx} {apple_pos}{level}, ensayo {trial}")
                     if manual:
                         call(robot, "stop_recording")
                         call(robot, "reset_robot")
@@ -233,7 +266,7 @@ def main(args: Args) -> None:
                                 "checkpoint": checkpoint, "run_name": run_name}
                     result = run_trial(robot, agent, None if (args.here or manual) else apple_pos,
                                        args.trial_seconds, metadata, root, grasp_point,
-                                       reset=not manual, measure_occlusion=not manual)
+                                       reset=not manual, measure_occlusion=not manual, leaf=leaf)
                     if manual:
                         call(robot, "stop_recording")
                         answer = ask_operator(robot, f"Trial {n}/{total} finished: result?",

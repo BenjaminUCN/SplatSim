@@ -56,6 +56,7 @@ BLUE_RAMP = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "
 class Args:
     runs: tyro.conf.Positional[tuple[str, ...]]   # carpetas de modelo o de corrida (etiqueta=ruta)
     success_dist: float = SUCCESS_RADIUS          # m: umbral de éxito
+    near_dist: float = 0.10                       # m: "cerca" (útil cuando casi no hay éxitos)
     metric: str = "min_grasp_err"                 # min_grasp_err, final_grasp_err, min_dist o final_dist
     out: str | None = None
 
@@ -166,10 +167,48 @@ def summarize(df: pd.DataFrame, models: list[str]) -> pd.DataFrame:
         d = df[df.model == m]
         k, n = int(d.success.sum()), len(d)
         lo, hi = wilson(k, n)
+        near = int(d.near.sum())
+        near_lo, near_hi = wilson(near, n)
         rows.append({"model": m, "trials": n, "successes": k, "success_rate": k / n,
                      "ci_low": lo, "ci_high": hi, "positions": d.pos_idx.nunique(),
+                     "near": near, "near_rate": near / n, "near_ci_low": near_lo, "near_ci_high": near_hi,
                      "median_min_grasp_err": d.min_grasp_err.median(),
                      "median_final_grasp_err": d.final_grasp_err.median()})
+    return pd.DataFrame(rows)
+
+
+def error_tests(df: pd.DataFrame, models: list[str], metric: str) -> list[str]:
+    """Sobre el error continuo (más poder que Fisher cuando casi no hay éxitos): Kruskal–Wallis entre
+    todos y Mann–Whitney por pares (bilateral, Holm)."""
+    values = {m: df[df.model == m][metric].dropna().to_numpy() for m in models}
+    values = {m: v for m, v in values.items() if len(v)}
+    if len(values) < 2:
+        return []
+    names = list(values)
+    lines = []
+    if len(names) > 2:
+        h, p = stats.kruskal(*values.values())
+        lines.append(f"Kruskal–Wallis ({metric}): H = {h:.2f}, p = {p:.4f}")
+    pairs = list(combinations(names, 2))
+    raw = [stats.mannwhitneyu(values[a], values[b], alternative="two-sided").pvalue for a, b in pairs]
+    for (a, b), p_raw, p_adj in zip(pairs, raw, holm(raw)):
+        lines.append(f"  {a} vs {b}: Mann–Whitney ({metric}) p = {p_raw:.4f}, Holm p = {p_adj:.4f} "
+                     f"(medianas {np.median(values[a]):.3f} vs {np.median(values[b]):.3f} m)")
+    return lines
+
+
+def by_occlusion(df: pd.DataFrame, models: list[str]) -> pd.DataFrame:
+    """Éxito por modelo y nivel de oclusión (run_policy_trials.py --occlusion_targets)."""
+    rows = []
+    for m in models:
+        for level, d in df[df.model == m].groupby("occlusion_target"):
+            k, n = int(d.success.sum()), len(d)
+            lo, hi = wilson(k, n)
+            fit = pd.to_numeric(d.get("occlusion_fit"), errors="coerce") if "occlusion_fit" in d else pd.Series(dtype=float)
+            rows.append({"model": m, "occlusion_target": level, "trials": n, "successes": k,
+                         "success_rate": k / n, "ci_low": lo, "ci_high": hi,
+                         "near_rate": d.near.mean(), "median_min_grasp_err": d.min_grasp_err.median(),
+                         "median_occlusion_fit": fit.median() if fit.notna().any() else np.nan})
     return pd.DataFrame(rows)
 
 
@@ -228,13 +267,15 @@ def plot_success(summary: pd.DataFrame, out: Path, threshold_text: str):
     plt.close(fig)
 
 
-def plot_by_position(df: pd.DataFrame, models: list[str], out: Path):
-    positions = sorted(df.pos_idx.unique())
+def plot_by_position(df: pd.DataFrame, models: list[str], out: Path, column: str = "pos_idx",
+                     xlabel: str = "Tomato grid position",
+                     title: str = "Success by tomato position (successes / trials)"):
+    positions = sorted(df[column].unique())
     rate = np.full((len(models), len(positions)), np.nan)
     text = [["" for _ in positions] for _ in models]
     for i, m in enumerate(models):
         for j, p in enumerate(positions):
-            d = df[(df.model == m) & (df.pos_idx == p)]
+            d = df[(df.model == m) & (df[column] == p)]
             if len(d):
                 rate[i, j] = d.success.mean()
                 text[i][j] = f"{int(d.success.sum())}/{len(d)}"
@@ -248,9 +289,9 @@ def plot_by_position(df: pd.DataFrame, models: list[str], out: Path):
             if text[i][j]:
                 ax.text(j, i, text[i][j], ha="center", va="center", fontsize=8,
                         color="white" if rate[i, j] > 0.55 else TEXT)
-    ax.set_xticks(range(len(positions)), [str(p) for p in positions])
+    ax.set_xticks(range(len(positions)), [f"{p:g}" if isinstance(p, float) else str(p) for p in positions])
     ax.set_yticks(range(len(models)), models)
-    ax.set_xlabel("Tomato grid position")
+    ax.set_xlabel(xlabel)
     ax.tick_params(which="both", colors=TEXT_2, labelsize=9, length=0)
     for s in ax.spines.values():
         s.set_visible(False)
@@ -261,7 +302,7 @@ def plot_by_position(df: pd.DataFrame, models: list[str], out: Path):
     cbar.set_ticks([0, 0.5, 1], labels=["0%", "50%", "100%"])
     cbar.ax.tick_params(colors=TEXT_2, labelsize=8)
     cbar.outline.set_visible(False)
-    ax.set_title("Success by tomato position (successes / trials)", fontsize=10, color=TEXT, loc="left")
+    ax.set_title(title, fontsize=10, color=TEXT, loc="left")
     fig.tight_layout()
     fig.savefig(out, dpi=200)
     plt.close(fig)
@@ -307,6 +348,7 @@ def main(args: Args):
     df = load_runs(args.runs)
     models = list(dict.fromkeys(df.model))
     df["success"] = df[args.metric] <= args.success_dist
+    df["near"] = df[args.metric] <= args.near_dist
     # robot real: el resultado lo marca el operador (no hay posición del tomate)
     manual = df["manual_success"].notna() if "manual_success" in df else pd.Series(False, df.index)
     if manual.any():
@@ -316,12 +358,16 @@ def main(args: Args):
     out.mkdir(parents=True, exist_ok=True)
 
     summary = summarize(df, models)
-    test_lines = tests(summary)
+    test_lines = tests(summary) + error_tests(df, models, args.metric)
     per_pos = (df.groupby(["model", "pos_idx"]).agg(trials=("success", "size"), successes=("success", "sum"),
                                                     median_min_grasp_err=("min_grasp_err", "median"))
                .reset_index())
     summary.to_csv(out / "summary.csv", index=False)
     per_pos.to_csv(out / "per_position.csv", index=False)
+    by_level = None
+    if "occlusion_target" in df and df.occlusion_target.notna().any():
+        by_level = by_occlusion(df[df.occlusion_target.notna()], models)
+        by_level.to_csv(out / "per_occlusion.csv", index=False)
 
     threshold_text = f"{METRICS[args.metric]} ≤ {args.success_dist:.2f} m"
     if manual.any():
@@ -329,21 +375,38 @@ def main(args: Args):
     plot_success(summary, out / "success_rate.png", threshold_text)
     plot_by_position(df, models, out / "success_by_position.png")
     plot_distances(df, models, args.metric, args.success_dist, out / "distances.png")
+    if by_level is not None:
+        plot_by_position(df[df.occlusion_target.notna()], models, out / "success_by_occlusion.png",
+                         column="occlusion_target", xlabel="Occlusion target (%)",
+                         title="Success by occlusion level (successes / trials)")
 
     table = summary.assign(success_rate=lambda s: s.success_rate.map("{:.0%}".format),
-                           ci=lambda s: [f"{a:.0%}–{b:.0%}" for a, b in zip(s.ci_low, s.ci_high)])
+                           ci=lambda s: [f"{a:.0%}–{b:.0%}" for a, b in zip(s.ci_low, s.ci_high)],
+                           near_pct=lambda s: s.near_rate.map("{:.0%}".format),
+                           near_ci=lambda s: [f"{a:.0%}–{b:.0%}" for a, b in zip(s.near_ci_low, s.near_ci_high)])
     md = [f"# Trial comparison ({datetime.now():%Y-%m-%d %H:%M})", "",
           f"Success: {threshold_text}.", "",
-          _markdown_table(table[["model", "trials", "successes", "success_rate", "ci", "positions",
-                                 "median_min_grasp_err", "median_final_grasp_err"]]),
+          _markdown_table(table[["model", "trials", "successes", "success_rate", "ci", "near_pct", "near_ci",
+                                 "positions", "median_min_grasp_err", "median_final_grasp_err"]]),
+          "", f"near = {METRICS[args.metric]} ≤ {args.near_dist:.2f} m.",
           "", "## Tests", "", *[f"- {line.strip()}" for line in test_lines],
+          *(["", "## By occlusion level", "", _markdown_table(by_level.assign(
+              success_rate=lambda s: s.success_rate.map("{:.0%}".format),
+              ci=lambda s: [f"{a:.0%}–{b:.0%}" for a, b in zip(s.ci_low, s.ci_high)])[
+              ["model", "occlusion_target", "trials", "successes", "success_rate", "ci", "near_rate",
+               "median_min_grasp_err", "median_occlusion_fit"]]),
+              "", "![by occlusion](success_by_occlusion.png)"] if by_level is not None else []),
           "", "## Sources", "", *[f"- `{e}`" for e in args.runs],
           "", "![success](success_rate.png)", "![by position](success_by_position.png)",
           "![distances](distances.png)"]
     (out / "summary.md").write_text("\n".join(md) + "\n")
 
     print()
-    print(table[["model", "trials", "successes", "success_rate", "ci"]].to_string(index=False))
+    print(table[["model", "trials", "successes", "success_rate", "ci", "near_pct", "near_ci",
+                 "median_min_grasp_err"]].to_string(index=False))
+    if by_level is not None:
+        print(by_level[["model", "occlusion_target", "trials", "successes", "success_rate", "near_rate",
+                        "median_min_grasp_err"]].to_string(index=False))
     print(*test_lines, sep="\n")
     print(f"\nResultados en {out}")
 

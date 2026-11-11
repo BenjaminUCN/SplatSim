@@ -1,0 +1,23 @@
+# Evaluation grid for scripts/xarm5/run_policy_trials.py --grid_path configs/eval_grid_4x4.yaml.
+# 4 columns in y x 4 rows in z at x = -0.80, row by row from the bottom (z) and left to right (y):
+# pos_idx = 4 * row + column. Every point is in frame with a 40 px margin in base_rgb, base_left_rgb
+# and base_right_rgb (u 162-483, v 76-385 in base_rgb) and 0.81-0.89 m from the center of the
+# reachable hemisphere in apple_grid.yaml (radius 0.5-0.9).
+# Use with --occlusion_targets 0 25 50 75 (one leaf per position, the same at every level).
+positions:
+- [-0.8, -0.25, -0.02]
+- [-0.8, -0.083, -0.02]
+- [-0.8, 0.083, -0.02]
+- [-0.8, 0.25, -0.02]
+- [-0.8, -0.25, 0.1]
+- [-0.8, -0.083, 0.1]
+- [-0.8, 0.083, 0.1]
+- [-0.8, 0.25, 0.1]
+- [-0.8, -0.25, 0.22]
+- [-0.8, -0.083, 0.22]
+- [-0.8, 0.083, 0.22]
+- [-0.8, 0.25, 0.22]
+- [-0.8, -0.25, 0.34]
+- [-0.8, -0.083, 0.34]
+- [-0.8, 0.083, 0.34]
+- [-0.8, 0.25, 0.34]
