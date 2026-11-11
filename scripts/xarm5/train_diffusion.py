@@ -62,6 +62,10 @@ class TrainConfig:
     n_obs_steps: int = 2
     horizon: int = 64
     n_action_steps: int = 32
+    # (alto, ancho) al que el modelo reescala las imágenes antes de la ResNet; None -> tamaño del dataset.
+    # Entrena más rápido, y el agente le sigue pasando las del sim tal cual. Con un dataset ya reescalado
+    # (scripts/xarm5/resize_dataset.py) se pone el mismo tamaño, para que el modelo reescale las del sim
+    resize_shape: tuple[int, int] | None = None
     # optimización
     training_steps: int = 50000
     batch_size: int = 32
@@ -230,6 +234,7 @@ def main(cfg: TrainConfig):
         n_obs_steps=cfg.n_obs_steps,
         horizon=cfg.horizon,
         n_action_steps=cfg.n_action_steps,
+        resize_shape=tuple(cfg.resize_shape) if cfg.resize_shape else None,
     )
     print(f"Cameras: {list(policy_cfg.image_features)}")
     policy = DiffusionPolicy(policy_cfg)
