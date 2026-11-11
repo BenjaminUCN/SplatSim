@@ -38,6 +38,7 @@ from lerobot.transforms import (
 )
 from lerobot.utils.feature_utils import dataset_to_policy_features
 
+from splatsim.utils.data.relative_actions import to_relative
 from splatsim.utils.render.camera_setup import arrangement_cameras
 from splatsim.utils.paths import expand
 
@@ -67,6 +68,9 @@ class TrainConfig:
     num_workers: int = 12               # 16 causaba OOM con 56GB en WSL
     prefetch_factor: int = 3
     image_augmentation: bool = True
+    # acciones relativas a la pose del estado en el último paso observado (pos y euler; el gripper
+    # queda absoluto). Ver splatsim/utils/data/relative_actions.py
+    relative_actions: bool = False
     torch_compile: bool = False         # compila la U-Net y los encoders (no cambia el modelo guardado)
     # logging / guardado
     log_freq: int = 1
@@ -229,7 +233,17 @@ def main(cfg: TrainConfig):
     )
     print(f"Cameras: {list(policy_cfg.image_features)}")
     policy = DiffusionPolicy(policy_cfg)
-    preprocessor, postprocessor = make_pre_post_processors(policy_cfg, dataset_stats=dataset_metadata.stats)
+    stats = dataset_metadata.stats
+    if cfg.relative_actions:
+        from splatsim.utils.data.relative_actions import relative_action_stats, save_stats
+        ref = policy_cfg.n_obs_steps - 1     # índice del frame de referencia en observation.state
+        offsets = [i - (ref + policy_cfg.observation_delta_indices[0]) for i in policy_cfg.action_delta_indices]
+        action_stats = relative_action_stats(cfg.dataset_root, offsets, stats["action"])
+        save_stats(action_stats, output_directory)
+        stats = {**stats, "action": action_stats}
+        print(f"Acciones relativas: offsets {offsets[0]}..{offsets[-1]}, "
+              f"min {action_stats['min'][:6].round(3)}, max {action_stats['max'][:6].round(3)}")
+    preprocessor, postprocessor = make_pre_post_processors(policy_cfg, dataset_stats=stats)
 
     policy.train()
     policy.to(device)
@@ -297,6 +311,8 @@ def main(cfg: TrainConfig):
     last_log = (time.monotonic(), 0)    # para la velocidad entre registros de W&B
     while not done:
         for batch in dataloader:
+            if cfg.relative_actions:
+                batch["action"] = to_relative(batch["action"], batch["observation.state"], policy_cfg.n_obs_steps - 1)
             batch = preprocessor(batch)
 
             # Mixed precision con bfloat16 (óptimo para RTX 50xx)

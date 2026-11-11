@@ -21,6 +21,25 @@ _N_ACT_STEPS = 32  # action chunk size
 
 DEFAULT_CHECKPOINT = "~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/diffusion_1021_1640"
 DEFAULT_DATASET_ROOT = "~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010"
+IK_ORIENTATION_MODES = ("off", "hybrid")
+IK_HYBRID_MAX_POS_ERR = 0.01   # m
+EE_LINK_INDEX = 6
+
+
+def wrap_angles(a):
+    """Ángulos a [-pi, pi)."""
+    return (np.asarray(a) + np.pi) % (2 * np.pi) - np.pi
+
+
+def checkpoint_relative_actions(checkpoint: str) -> bool:
+    """train_config.yaml del modelo dice si se entrenó con acciones relativas al estado
+    (train_diffusion.py --relative_actions); sin el archivo, absolutas."""
+    import yaml
+    path = os.path.join(checkpoint, "train_config.yaml")
+    if not os.path.isfile(path):
+        return False
+    with open(path) as f:
+        return bool((yaml.safe_load(f) or {}).get("relative_actions", False))
 
 
 class LeRobotDiffusionAgent:
@@ -36,6 +55,11 @@ class LeRobotDiffusionAgent:
             repo id / URL (only meta/ is downloaded).
         device: "cuda" or "cpu".
         n_action_steps: overrides the default chunk size of 32.
+        ik_orientation: "off" solves IK for the predicted position only (what every trial did
+            before 2026-11-10: the Euler angles passed to PyBullet were silently ignored);
+            "hybrid" also asks for the predicted orientation and falls back to position-only
+            when that moves the end effector more than IK_HYBRID_MAX_POS_ERR from the target
+            (the xArm5 has 5 DOF, so not every pose is reachable).
     """
 
     def __init__(
@@ -44,11 +68,16 @@ class LeRobotDiffusionAgent:
         dataset_root: str | None = None,
         device: str = "cuda",
         n_action_steps: int | None = None,
+        ik_orientation: str = "off",
     ):
         """checkpoint: carpeta del modelo o repo del Hub (None -> DEFAULT_CHECKPOINT).
         dataset_root: dataset con que se entrenó, carpeta o repo del Hub; None -> se busca en
         configs/registry.yaml (scripts/xarm5/build_registry.py): su carpeta si existe en esta
         máquina, si no (modelo del Hub) su repo; si el modelo no está, DEFAULT_DATASET_ROOT."""
+        if ik_orientation not in IK_ORIENTATION_MODES:
+            raise ValueError(f"ik_orientation debe ser uno de {IK_ORIENTATION_MODES}")
+        self.ik_orientation = ik_orientation
+        self.ik_counts = {"orientation": 0, "fallback": 0}   # hybrid: con orientación / sin ella
         self.device = device
         self._n_act_steps = n_action_steps or _N_ACT_STEPS
         self._obs_buffer: deque[dict[str, torch.Tensor]] = deque(maxlen=_N_OBS_STEPS)
@@ -70,7 +99,12 @@ class LeRobotDiffusionAgent:
 
         self._load_ik_dummy_robot()
         self._load_diffusion_policy_model(checkpoint, dataset_id, dataset_root)
-        
+        # acciones = pose del efector - pose del estado con que se predijo el chunk (pos y euler)
+        self.relative_actions = checkpoint_relative_actions(checkpoint)
+        self._chunk_reference: np.ndarray | None = None
+        print(f"[LeRobotDiffusionAgent] Acciones {'relativas' if self.relative_actions else 'absolutas'}, "
+              f"IK {self.ik_orientation}")
+
         self.make_new_prediction = True
     
     def _load_diffusion_policy_model(self, checkpoint: str, dataset_id: str, dataset_root: str | None): 
@@ -104,11 +138,17 @@ class LeRobotDiffusionAgent:
         print(f"[LeRobotDiffusionAgent] Cámaras: {list(self.policy.config.image_features)}")
 
         print("[LeRobotDiffusionAgent] Making pre-post processors.")
+        stats = self.dataset_metadata.stats
+        # modelo con acciones relativas: la acción se normalizó con las estadísticas de los deltas
+        from splatsim.utils.data.relative_actions import load_stats
+        relative_stats = load_stats(checkpoint) if os.path.isdir(checkpoint) else None
+        if relative_stats is not None:
+            stats = {**stats, "action": relative_stats}
         self.preprocess, self.postprocess = make_pre_post_processors(
             self.policy.config,
             checkpoint,
-            dataset_stats=self.dataset_metadata.stats,
-        )  
+            dataset_stats=stats,
+        )
 
     def _load_ik_dummy_robot(self):
         p.connect(p.DIRECT)
@@ -265,6 +305,41 @@ class LeRobotDiffusionAgent:
         p.addUserDebugLine(position, z_end, [0, 0, 1], 2, lifeTime=life_time)
 
 
+    def reset(self) -> None:
+        """Al empezar un ensayo: vacía las colas de la política."""
+        self.policy.reset()
+        self._chunk_reference = None
+        self.make_new_prediction = True
+
+    def _new_chunk_next(self) -> bool:
+        """select_action va a predecir un chunk nuevo (su cola de acciones está vacía)."""
+        queues = getattr(self.policy, "_queues", None)
+        return not queues or len(queues.get("action", ())) == 0
+
+    def _ik(self, position, rest, quaternion=None):
+        kwargs = {"targetOrientation": quaternion} if quaternion is not None else {}
+        return p.calculateInverseKinematics(
+            self.dummy_robot, endEffectorLinkIndex=EE_LINK_INDEX, targetPosition=position,
+            residualThreshold=0.00001, maxNumIterations=10000, restPoses=rest, **kwargs)
+
+    def _solve_ik(self, position, quaternion, rest):
+        """off: solo posición. hybrid: con orientación si el efector queda a menos de
+        IK_HYBRID_MAX_POS_ERR del objetivo; si no, solo posición."""
+        if self.ik_orientation == "off":
+            return self._ik(position, rest)
+        solution = self._ik(position, rest, quaternion)
+        current = [p.getJointState(self.dummy_robot, i)[0] for i in range(1, 6)]
+        for i in range(1, 6):
+            p.resetJointState(self.dummy_robot, i, solution[i - 1])
+        reached = np.array(p.getLinkState(self.dummy_robot, EE_LINK_INDEX, computeForwardKinematics=True)[4])
+        for i in range(1, 6):
+            p.resetJointState(self.dummy_robot, i, current[i - 1])
+        if np.linalg.norm(reached - np.asarray(position)) <= IK_HYBRID_MAX_POS_ERR:
+            self.ik_counts["orientation"] += 1
+            return solution
+        self.ik_counts["fallback"] += 1
+        return self._ik(position, rest)
+
     def act(self, obs: Dict[str, np.ndarray]) -> np.ndarray:
         """
         obs["base_rgb"]        -> (H, W, 3)
@@ -281,10 +356,17 @@ class LeRobotDiffusionAgent:
         if self.make_new_prediction:
             obs_frame = self._build_obs(obs)  # ya normalizado por self.preprocess
 
+            if self.relative_actions and self._new_chunk_next():
+                # el chunk que viene se entrenó relativo al estado del último paso observado
+                self._chunk_reference = self.safe_to_numpy(obs["state"]).astype(np.float64).flatten()[:6]
             action = self.policy.select_action(obs_frame)
             action = self.postprocess(action)
-            
+
             action_np = action.squeeze().cpu().numpy()
+            if self.relative_actions:
+                action_np = action_np.astype(np.float64)
+                action_np[:3] += self._chunk_reference[:3]
+                action_np[3:6] = wrap_angles(action_np[3:6] + self._chunk_reference[3:6])
             self.action_prediction = action_np
             print(f"New action prediction: {self.action_prediction}")
             
@@ -302,24 +384,12 @@ class LeRobotDiffusionAgent:
         print(f"ee_rot: ({ee_rot[0]:.3f}, {ee_rot[1]:.3f}, {ee_rot[2]:.3f})")
         
         joints_n = 5
-        ee_link_index = 6
-        
+
         self.draw_pose(ee_pose, ee_quat, life_time=1)
-        
-        dummy_joint_pos = p.calculateInverseKinematics(
-            self.dummy_robot,
-            endEffectorLinkIndex=ee_link_index,
-            targetPosition=ee_pose,
-            targetOrientation=ee_rot,
-            residualThreshold=0.00001,
-            maxNumIterations=10000,
-             
-            # lowerLimits=lower_limits,
-            # upperLimits=upper_limits,
-            # jointRanges=joint_ranges,
-            restPoses = obs_dict["joint_positions"][:len(self.joint_indices)]
-        )
-        
+
+        rest = obs_dict["joint_positions"][:len(self.joint_indices)]
+        dummy_joint_pos = self._solve_ik(ee_pose, ee_quat, rest)
+
         # calculate difference between current and target joint angles
         joint_diff = np.array(dummy_joint_pos)[:joints_n] - np.array(obs_dict['joint_positions'])[:joints_n]
         if np.linalg.norm(joint_diff) < 2.0:
