@@ -17,6 +17,11 @@ on:
       - requirements-panel.txt
       - scripts/xarm5/cloud_server.py
       - scripts/xarm5/data_jobs.py
+      - scripts/xarm5/cloud_trials.py
+      - scripts/xarm5/run_policy_trials.py
+      - scripts/launch_nodes.py
+      - splatsim/agents/**
+      - configs/eval_grid_4x4.yaml
       - splatsim/robots/**
       - submodules/**
       - splatsim/cloud/**
