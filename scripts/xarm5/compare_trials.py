@@ -47,6 +47,9 @@ SURFACE = "#fcfcfb"
 TEXT = "#0b0b0b"
 TEXT_2 = "#52514e"
 GRID = "#e4e3df"
+# una línea por modelo en success_over_time.png (los mismos de docs/experiments)
+CATEGORICAL = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300", "#6250d6", "#e34948"]
+MIN_TIMED = 5    # éxitos mínimos por modelo para comparar tiempos con Mann–Whitney
 METRICS = {"min_grasp_err": "min grasp error", "final_grasp_err": "final grasp error",
            "min_dist": "min EE–tomato distance", "final_dist": "final EE–tomato distance"}
 BLUE_RAMP = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
@@ -73,7 +76,7 @@ def load_runs(entries) -> pd.DataFrame:
             raise SystemExit(f"No hay trials.csv en {path}")
         label = label or (path.name if not (path / "trials.csv").exists() or not path.name[:6].isdigit()
                           else f"{path.parent.name}/{path.name}")
-        df = pd.concat([pd.read_csv(c) for c in csvs], ignore_index=True)
+        df = pd.concat([_local_folders(pd.read_csv(c), c) for c in csvs], ignore_index=True)
         if df.empty:
             raise SystemExit(f"{path}: trials.csv sin ensayos")
         manual = df["manual_success"].notna() if "manual_success" in df else pd.Series(False, df.index)
@@ -115,6 +118,16 @@ def _point_text() -> str:
     return " ".join(f"{v:.4f}" for v in load_grasp_point())
 
 
+def _local_folders(df: pd.DataFrame, csv_path: Path) -> pd.DataFrame:
+    """Corridas hechas en otra máquina (la etapa trials de la nube): la columna folder trae la ruta del
+    pod; el ensayo está junto al trials.csv."""
+    if "folder" not in df:
+        return df
+    fixed = [f if not isinstance(f, str) or Path(f).is_dir() else str(csv_path.parent / Path(f).name)
+             for f in df.folder]
+    return df.assign(folder=fixed)
+
+
 def _backfill_grasp(df: pd.DataFrame, skip: pd.Series) -> pd.DataFrame:
     """Calcula el error de agarre de ensayos antiguos desde los .pkl de cada carpeta de ensayo
     (salvo los marcados a mano en el robot real, que no tienen posición del tomate)."""
@@ -138,6 +151,38 @@ def _backfill_grasp(df: pd.DataFrame, skip: pd.Series) -> pd.DataFrame:
     print(f"  error de agarre calculado desde los .pkl de {int((~skip).sum())} ensayos "
           f"(punto de agarre {_point_text()})")
     return df.assign(final_grasp_err=finals, min_grasp_err=mins, grasp_point=_point_text())
+
+
+def _time_to_success(folder: str, threshold: float, point) -> float:
+    """Segundos simulados hasta el primer frame con error de agarre <= threshold, desde los .pkl (corridas
+    anteriores a la columna time_to_success). El primer .pkl se graba tras el primer comando."""
+    times = []
+    for p in sorted(Path(folder).glob("*.pkl"), key=lambda p: (len(p.stem), p.stem)):
+        try:
+            with open(p, "rb") as f:
+                obs = pickle.load(f)
+        except Exception:  # noqa: BLE001  .pkl ilegible: se omite ese frame
+            continue
+        if "sim_time" not in obs:
+            return np.nan
+        times.append(obs["sim_time"])
+        if grasp_error(obs["state"], obs[APPLE_KEY], point) <= threshold:
+            dt = times[1] - times[0] if len(times) > 1 else 0.0
+            return round(obs["sim_time"] - times[0] + dt, 3)
+    return np.nan
+
+
+def add_time_to_success(df: pd.DataFrame, threshold: float, manual: pd.Series) -> pd.DataFrame:
+    """time_to_success de los éxitos: la columna del CSV si se midió con este umbral, si no desde los .pkl."""
+    given = df["time_to_success"] if "time_to_success" in df else pd.Series(np.nan, df.index)
+    redo = df.success & ~manual & (given.isna() | (abs(threshold - SUCCESS_RADIUS) > 1e-9))
+    point = load_grasp_point()
+    times = given.where(df.success & ~redo).astype(float)
+    for i in df.index[redo]:
+        times[i] = _time_to_success(df.folder[i], threshold, point)
+    if redo.any():
+        print(f"  tiempo hasta el éxito calculado desde los .pkl de {int(redo.sum())} ensayos")
+    return df.assign(time_to_success=times)
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
@@ -173,7 +218,9 @@ def summarize(df: pd.DataFrame, models: list[str]) -> pd.DataFrame:
                      "ci_low": lo, "ci_high": hi, "positions": d.pos_idx.nunique(),
                      "near": near, "near_rate": near / n, "near_ci_low": near_lo, "near_ci_high": near_hi,
                      "median_min_grasp_err": d.min_grasp_err.median(),
-                     "median_final_grasp_err": d.final_grasp_err.median()})
+                     "median_final_grasp_err": d.final_grasp_err.median(),
+                     "median_time_to_success": d.time_to_success.median(),
+                     "time_p25": d.time_to_success.quantile(0.25), "time_p75": d.time_to_success.quantile(0.75)})
     return pd.DataFrame(rows)
 
 
@@ -195,6 +242,45 @@ def error_tests(df: pd.DataFrame, models: list[str], metric: str) -> list[str]:
         lines.append(f"  {a} vs {b}: Mann–Whitney ({metric}) p = {p_raw:.4f}, Holm p = {p_adj:.4f} "
                      f"(medianas {np.median(values[a]):.3f} vs {np.median(values[b]):.3f} m)")
     return lines
+
+
+def time_tests(df: pd.DataFrame, models: list[str]) -> list[str]:
+    """Tiempo hasta el éxito, solo entre los ensayos exitosos (Mann–Whitney por pares, Holm) de los
+    modelos con al menos MIN_TIMED éxitos. Con pocos éxitos, mejor mirar success_over_time.png."""
+    values = {m: df[(df.model == m) & df.success].time_to_success.dropna().to_numpy() for m in models}
+    values = {m: v for m, v in values.items() if len(v) >= MIN_TIMED}
+    pairs = list(combinations(values, 2))
+    if not pairs:
+        return []
+    raw = [stats.mannwhitneyu(values[a], values[b], alternative="two-sided").pvalue for a, b in pairs]
+    return [f"  {a} vs {b}: Mann–Whitney (time_to_success, solo éxitos) p = {p_raw:.4f}, Holm p = {p_adj:.4f} "
+            f"(medianas {np.median(values[a]):.1f} vs {np.median(values[b]):.1f} s)"
+            for (a, b), p_raw, p_adj in zip(pairs, raw, holm(raw))]
+
+
+def plot_over_time(df: pd.DataFrame, models: list[str], out: Path):
+    """Fracción de los ensayos que ya tuvieron éxito a cada segundo: mezcla cuántos llegan y cuán rápido."""
+    fig, ax = plt.subplots(figsize=(6.4, 3.8), facecolor=SURFACE)
+    _style(ax)
+    horizon = float(df.trial_seconds.max()) if df.trial_seconds.notna().any() else 15.0
+    t = np.linspace(0, horizon, 301)
+    for i, m in enumerate(models):
+        d = df[df.model == m]
+        times = d.time_to_success[d.success].dropna().to_numpy()
+        ax.step(t, [(times <= s).sum() / len(d) for s in t], where="post",
+                color=CATEGORICAL[i % len(CATEGORICAL)], linewidth=2, label=m)
+    ax.set_xlim(0, horizon)
+    ax.set_ylim(0, None)
+    ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:.0%}"))
+    ax.yaxis.grid(True, color=GRID, linewidth=0.8, zorder=0)
+    ax.set_xlabel("Simulated time since the first command (s)")
+    ax.set_ylabel("Trials with success so far")
+    ax.legend(frameon=False, fontsize=8, labelcolor=TEXT_2, loc="upper left", bbox_to_anchor=(1.01, 1.0))
+    ax.set_title("Success over time (a curve that rises earlier = shorter cycle time)",
+                 fontsize=10, color=TEXT, loc="left")
+    fig.tight_layout()
+    fig.savefig(out, dpi=200)
+    plt.close(fig)
 
 
 def by_occlusion(df: pd.DataFrame, models: list[str]) -> pd.DataFrame:
@@ -353,12 +439,13 @@ def main(args: Args):
     manual = df["manual_success"].notna() if "manual_success" in df else pd.Series(False, df.index)
     if manual.any():
         df.loc[manual, "success"] = df.loc[manual, "manual_success"] == 1
+    df = add_time_to_success(df, args.success_dist, manual)
     out = Path(os.path.expanduser(args.out or
                f"~/data/policy_trials/comparisons/{datetime.now().strftime('%y%m%d_%H%M%S')}"))
     out.mkdir(parents=True, exist_ok=True)
 
     summary = summarize(df, models)
-    test_lines = tests(summary) + error_tests(df, models, args.metric)
+    test_lines = tests(summary) + error_tests(df, models, args.metric) + time_tests(df, models)
     per_pos = (df.groupby(["model", "pos_idx"]).agg(trials=("success", "size"), successes=("success", "sum"),
                                                     median_min_grasp_err=("min_grasp_err", "median"))
                .reset_index())
@@ -375,6 +462,7 @@ def main(args: Args):
     plot_success(summary, out / "success_rate.png", threshold_text)
     plot_by_position(df, models, out / "success_by_position.png")
     plot_distances(df, models, args.metric, args.success_dist, out / "distances.png")
+    plot_over_time(df, models, out / "success_over_time.png")
     if by_level is not None:
         plot_by_position(df[df.occlusion_target.notna()], models, out / "success_by_occlusion.png",
                          column="occlusion_target", xlabel="Occlusion target (%)",
@@ -387,8 +475,10 @@ def main(args: Args):
     md = [f"# Trial comparison ({datetime.now():%Y-%m-%d %H:%M})", "",
           f"Success: {threshold_text}.", "",
           _markdown_table(table[["model", "trials", "successes", "success_rate", "ci", "near_pct", "near_ci",
-                                 "positions", "median_min_grasp_err", "median_final_grasp_err"]]),
-          "", f"near = {METRICS[args.metric]} ≤ {args.near_dist:.2f} m.",
+                                 "positions", "median_min_grasp_err", "median_final_grasp_err",
+                                 "median_time_to_success"]]),
+          "", f"near = {METRICS[args.metric]} ≤ {args.near_dist:.2f} m. median_time_to_success: simulated "
+          "seconds until the first success, over successful trials only.",
           "", "## Tests", "", *[f"- {line.strip()}" for line in test_lines],
           *(["", "## By occlusion level", "", _markdown_table(by_level.assign(
               success_rate=lambda s: s.success_rate.map("{:.0%}".format),
@@ -398,7 +488,7 @@ def main(args: Args):
               "", "![by occlusion](success_by_occlusion.png)"] if by_level is not None else []),
           "", "## Sources", "", *[f"- `{e}`" for e in args.runs],
           "", "![success](success_rate.png)", "![by position](success_by_position.png)",
-          "![distances](distances.png)"]
+          "![distances](distances.png)", "![success over time](success_over_time.png)"]
     (out / "summary.md").write_text("\n".join(md) + "\n")
 
     print()

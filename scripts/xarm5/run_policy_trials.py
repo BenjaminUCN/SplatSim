@@ -32,7 +32,7 @@ import tyro
 import yaml
 from gello.zmq_core.robot_node import ZMQClientRobot
 
-from splatsim.utils.trials.grasp_point import grasp_error, load_grasp_point
+from splatsim.utils.trials.grasp_point import SUCCESS_RADIUS, grasp_error, load_grasp_point
 from splatsim.utils.remote_call import ask_operator, call
 from splatsim.utils.trials.durations import other_durations
 
@@ -70,6 +70,10 @@ class Args:
     leaf_seed: int = 0
     # IK del agente: off (solo posición, lo de siempre) o hybrid (con la orientación si alcanza)
     ik_orientation: str = "off"
+    # termina el ensayo apenas el error de agarre baja de SUCCESS_RADIUS (4 cm): ahorra tiempo y no
+    # cambia la tasa de éxito, pero el error mínimo de esos ensayos queda en ~4 cm en vez del que
+    # habría alcanzado después. time_to_success se anota igual con o sin esta opción
+    stop_on_success: bool = True
 
 
 def run_name_for(checkpoint: str) -> str:
@@ -110,9 +114,12 @@ def occlusion_columns(measured: dict) -> dict:
 
 
 def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_point,
-              reset: bool = True, measure_occlusion: bool = False, leaf: dict | None = None) -> dict:
+              reset: bool = True, measure_occlusion: bool = False, leaf: dict | None = None,
+              stop_on_success: bool = False) -> dict:
     """apple_pos None: el tomate se deja donde está. Sin su posición en la observación (robot
-    real) solo se cuentan los frames. leaf: {leaf_dir, target, key, seed} para place_trial_leaf."""
+    real) solo se cuentan los frames. leaf: {leaf_dir, target, key, seed} para place_trial_leaf.
+    time_to_success: segundos desde el primer comando hasta que el error de agarre baja de
+    SUCCESS_RADIUS (tiempo simulado en el sim, de reloj en el robot real); vacío si no llega."""
     call(robot, "stop_recording")
     if reset:
         call(robot, "reset_robot")
@@ -135,6 +142,8 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     # vale 1/hz de tiempo simulado y no hace falta esperar
     period = 1 / obs["control_hz"] if "control_hz" in obs else 0.0
     frames, distances, grasp_errors = 0, [], []
+    clock = (lambda o: o["sim_time"]) if "sim_time" in obs else (lambda o: time.monotonic())
+    start, time_to_success = clock(obs), None
     while True:
         t0 = time.monotonic()
         robot.command_joint_state(agent.act(obs))
@@ -147,10 +156,17 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
             distances.append(float(np.linalg.norm(ee - apple)))
             # distancia del tomate al punto de agarre, en el marco del efector (configs/grasp_point.yaml)
             grasp_errors.append(float(grasp_error(obs["state"], apple, grasp_point)))
+            if time_to_success is None and grasp_errors[-1] <= SUCCESS_RADIUS:
+                time_to_success = round(clock(obs) - start, 3)
+                if stop_on_success:
+                    call(robot, "stop_recording")
+                    break
         if not obs["recording"]:   # el servidor cortó al llegar a trial_seconds
             break
 
-    result = {"folder": folder, "frames": frames, **occlusion, **leaf_info}
+    result = {"folder": folder, "frames": frames, "time_to_success": time_to_success,
+              "stopped_on_success": int(stop_on_success and time_to_success is not None),
+              **occlusion, **leaf_info}
     if agent.ik_orientation != "off":
         result["ik_fallbacks"] = agent.ik_counts["fallback"] - ik_before["fallback"]
     if distances:
@@ -218,7 +234,8 @@ def main(args: Args) -> None:
     targets = list(args.occlusion_targets) if args.occlusion_targets and not manual else [None]
     total = len(positions) * len(targets) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
-              "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point", "trial_seconds"]
+              "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point", "trial_seconds",
+              "time_to_success", "stopped_on_success"]
     if targets != [None]:
         fields += ["occlusion_target", "leaf_status", "leaf", "leaf_camera", "occlusion_fit"]
     elif not manual:
@@ -266,7 +283,8 @@ def main(args: Args) -> None:
                                 "checkpoint": checkpoint, "run_name": run_name}
                     result = run_trial(robot, agent, None if (args.here or manual) else apple_pos,
                                        args.trial_seconds, metadata, root, grasp_point,
-                                       reset=not manual, measure_occlusion=not manual, leaf=leaf)
+                                       reset=not manual, measure_occlusion=not manual, leaf=leaf,
+                                       stop_on_success=args.stop_on_success and not manual)
                     if manual:
                         call(robot, "stop_recording")
                         answer = ask_operator(robot, f"Trial {n}/{total} finished: result?",
@@ -284,8 +302,10 @@ def main(args: Args) -> None:
                     if manual:
                         print(f"[Trials] {result['frames']} frames, resultado: {answer.lower()}")
                     else:
+                        reached = ("" if result["time_to_success"] is None
+                                   else f", éxito a los {result['time_to_success']:.1f} s")
                         print(f"[Trials] {result['frames']} frames, error de agarre final "
-                              f"{result['final_grasp_err']:.3f} m, mín {result['min_grasp_err']:.3f} m")
+                              f"{result['final_grasp_err']:.3f} m, mín {result['min_grasp_err']:.3f} m{reached}")
                 if stop:
                     print("[Trials] Detenido por el operador")
                     break
