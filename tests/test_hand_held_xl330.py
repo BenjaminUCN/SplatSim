@@ -387,6 +387,16 @@ class TestUrdf(unittest.TestCase):
         self.build()
         np.testing.assert_allclose(fk(self.dst, "camera_optical"), before, atol=1e-7)
 
+    def test_camera_down_mirrors_the_camera_and_keeps_the_image_upright(self):
+        def in_eef(link):
+            return np.linalg.inv(fk(self.dst, "link_eef")) @ fk(self.dst, link)
+        self.build()
+        up = in_eef("wrist_camera_link")
+        self.build(camera_down=True)
+        down = in_eef("wrist_camera_link")
+        np.testing.assert_allclose(down[:3, :3], up[:3, :3], atol=1e-7)   # mismos ejes: la imagen no se da vuelta
+        np.testing.assert_allclose(down[:3, 3], up[:3, 3] * (-1, -1, 1), atol=1e-7)   # al otro lado de la brida
+
     def test_tool_geometry(self):
         self.build(roll_deg=0)
         # con el marco viejo girado 0.3 rad alrededor de z, se compara en ese marco

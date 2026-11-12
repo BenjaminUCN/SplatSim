@@ -52,12 +52,29 @@ D435I_CENTER_EEF_M = (0.0675, 0.0, STAND_THICKNESS_M + D435I_DEPTH_M / 2)
 R_EEF_D435I = np.array([[0.0, -1, 0], [1, 0, 0], [0, 0, 1]])
 
 
-def physical_wrist_camera_pose() -> np.ndarray:
+# camera_down: el soporte girado 180° en la brida (pestaña hacia -x de link_eef, el lado de la tapa azul en
+# xarm5_hand_held_down) y la cámara vuelta a atornillar girada 180° sobre su eje, para que la imagen no
+# quede de cabeza: el centro de la cámara pasa al otro lado y sus ejes no cambian
+R_FLIP = np.diag([-1.0, -1.0, 1.0, 1.0])
+
+
+def physical_wrist_camera_pose(camera_down: bool = False) -> np.ndarray:
     """Marco óptico de la RGB de la D435i montada en el soporte, en link_eef (4x4). wrist_camera_link
-    (el marco que renderiza el sim) está en (0.08, 0, 0): esta es la pose donde queda la lente real."""
+    (el marco que renderiza el sim) está en (0.08, 0, 0), o (-0.08, 0, 0) con camera_down: esta es la pose
+    donde queda la lente real."""
+    center = np.array(D435I_CENTER_EEF_M)
+    if camera_down:
+        center = R_FLIP[:3, :3] @ center
     T = np.eye(4)
     T[:3, :3] = R_EEF_D435I
-    T[:3, 3] = np.array(D435I_CENTER_EEF_M) - R_EEF_D435I @ np.array(D435I_CENTER_IN_RGB_M)
+    T[:3, 3] = center - R_EEF_D435I @ np.array(D435I_CENTER_IN_RGB_M)
+    return T
+
+
+def flip_camera_frame(T_eef_camera: np.ndarray) -> np.ndarray:
+    """El marco de wrist_camera_link al otro lado de la brida, con la imagen derecha (ver R_FLIP)."""
+    T = R_FLIP @ T_eef_camera
+    T[:3, :3] = T_eef_camera[:3, :3]
     return T
 
 
@@ -144,7 +161,8 @@ def _mesh_visual(link, name: str, T: np.ndarray, filename: str, scale: str, rgba
     ET.SubElement(ET.SubElement(visual, "material", name="wrist_camera_" + name), "color", rgba=rgba)
 
 
-def add_wrist_camera_model(root, camera_parent: str, T_parent_camera: np.ndarray, mesh_prefix: str) -> None:
+def add_wrist_camera_model(root, camera_parent: str, T_parent_camera: np.ndarray, mesh_prefix: str,
+                           camera_down: bool = False) -> None:
     """Cambia el prisma de wrist_camera_link por el soporte y una D435i, como visuales del mismo link: ni el
     marco de la cámara ni los índices de los links de PyBullet cambian. Las piezas se ubican en link_eef."""
     link = next(l for l in root.findall("link") if l.get("name") == CAMERA_LINK)
@@ -154,9 +172,10 @@ def add_wrist_camera_model(root, camera_parent: str, T_parent_camera: np.ndarray
         link.remove(element)
     T_camera_eef = np.linalg.inv(T_parent_camera)
 
-    _mesh_visual(link, "camera_stand", T_camera_eef @ T_EEF_STAND, f"{mesh_prefix}/{STAND_MESH}",
+    T_eef_stand = R_FLIP @ T_EEF_STAND if camera_down else T_EEF_STAND
+    _mesh_visual(link, "camera_stand", T_camera_eef @ T_eef_stand, f"{mesh_prefix}/{STAND_MESH}",
                  "0.001 0.001 0.001", "0.15 0.15 0.17 1")
-    T_d435i = T_camera_eef @ physical_wrist_camera_pose()
+    T_d435i = T_camera_eef @ physical_wrist_camera_pose(camera_down)
     for filename, rgba in D435I_MESHES:
         _mesh_visual(link, filename.removesuffix(".stl"), T_d435i, f"{mesh_prefix}/{filename}", "1 1 1", rgba)
 
@@ -166,7 +185,7 @@ def _part_mass(part: dict) -> float:
 
 
 def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, roll_deg: float = 0.0,
-               extra_horn_mesh: str | None = None, keep_links=KEEP_LINKS) -> dict:
+               extra_horn_mesh: str | None = None, keep_links=KEEP_LINKS, camera_down: bool = False) -> dict:
     """Escribe dst: src sin el gripper del xArm y con el hand_held_XL330, y copia las mallas al lado.
     Los links de keep_links (y lo que cuelga de ellos) siguen en la misma pose. extra_horn_mesh: STL
     (mm, marco del ensamble) de lo que gira con el horn, p.ej. la hoja móvil."""
@@ -293,8 +312,12 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
         for filename in (STAND_MESH, *(f for f, _ in D435I_MESHES)):
             shutil.copy2(os.path.join(CAMERA_MESH_DIR, filename), camera_dir)
         camera_joint = joints[CAMERA_LINK]
-        add_wrist_camera_model(root, camera_joint.find("parent").get("link"),
-                               origin_matrix(camera_joint.find("origin")), camera_prefix)
+        T_parent_camera = origin_matrix(camera_joint.find("origin"))
+        if camera_down:
+            T_parent_camera = flip_camera_frame(T_parent_camera)
+            _set_origin(camera_joint, T_parent_camera)
+        add_wrist_camera_model(root, camera_joint.find("parent").get("link"), T_parent_camera, camera_prefix,
+                               camera_down)
 
     ET.indent(tree)
     tree.write(dst, encoding="utf-8", xml_declaration=True)

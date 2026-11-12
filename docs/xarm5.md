@@ -173,6 +173,13 @@ python scripts/xarm5/plan_trajectories.py --episodes 6 --out ~/data/bc_data/plan
 python scripts/xarm5/render_recordings.py ~/data/bc_data/planned_cut --fps 10 --robot_name xarm5_lite_plant_v3_hand_held_down
 ```
 
+`xarm5_lite_plant_v3_hand_held_down_cam_down` is the same scene with the camera stand turned 180° on the flange, so the D435i sits below the tool (on the blue cover's side). The camera is remounted turned 180° on the stand, so its image stays upright; the tool now shows at the top of the wrist image instead of the bottom. It shares the splat of `_hand_held_down` (the camera is not in the splat):
+
+```bash
+python scripts/xarm5/build_hand_held_urdf.py --camera-down --dst ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down.urdf
+cp data/labels_path/xarm5_lite_plant_v3_hand_held_down_labels.npy data/labels_path/xarm5_lite_plant_v3_hand_held_down_cam_down_labels.npy
+```
+
 `add_peduncle.py` writes a new splat next to the original tomato and adds `plastic_apple_peduncle` to `objects.yaml`, with the `bottom`, `top` and `cut` points of the stem in the tomato's frame. The scene's `object_overrides` makes it use that tomato under its usual name, so other scenes are unchanged. For a real scan, change `ply_path`, `aabb` and those points.
 
 With `--target peduncle` the planner puts the middle of the blade edge on the `cut` point, arrives open, closes at the start of the hold, and then backs away still closed. Episodes that don't end with the tomato held are discarded, and `meta.json` records `peduncle_cut` and `peduncle_held`. Frames record `peduncle_error` (m, blade to `cut` point), `peduncle_cut` and `peduncle_held`, and the panel's *Tomato* folder shows them.

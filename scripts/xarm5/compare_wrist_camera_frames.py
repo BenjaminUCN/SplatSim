@@ -39,9 +39,12 @@ class PhysicalWristCamera:
         c = server.pybullet_client
         names = [c.getJointInfo(server.dummy_robot, i)[12].decode() for i in range(c.getNumJoints(server.dummy_robot))]
         self.eef = names.index("link_eef")
+        # con --camera-down (build_hand_held_urdf.py) el soporte está girado y wrist_camera_link en -x de link_eef
+        camera = np.linalg.inv(link_pose(server, self.eef)) @ link_pose(server, names.index("wrist_camera_link"))
+        self.camera_down = bool(camera[0, 3] < 0)
 
     def pose(self) -> np.ndarray:
-        return link_pose(self.s, self.eef) @ physical_wrist_camera_pose()
+        return link_pose(self.s, self.eef) @ physical_wrist_camera_pose(self.camera_down)
 
     def get(self):
         return self._build(self.s, self.pose(), self.name, 1, self._fov)
