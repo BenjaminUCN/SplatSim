@@ -10,13 +10,15 @@ import numpy as np
 import yaml
 
 APPLE_GRID_PATH = "configs/apple_grid.yaml"
+EVAL_GRID_PATH = "configs/eval_grid_4x4.yaml"   # grilla de evaluación (run_policy_trials.py --grid_path)
 _HEADER = """\
 # Tomato positions (x, y, z) in PyBullet world coordinates used by scripts/xarm5/run_policy_trials.py,
 # added with "Save Position to Grid" in the control panel (or by hand), and random_range: the box
 # (min, max per axis, m) or random_hemisphere: where "Random Position" puts it, chosen by random_shape
 # (panel: Tomato > Random range). The hemisphere: center (m), radius [min, max] (m), facing (deg, the
-# horizontal direction of its axis, 180 = -x), z [min, max] (m, cuts it at those heights) and
-# x [min, max] (m, cuts it along x, e.g. to keep the tomato away from the robot or the wall).
+# horizontal direction of its axis, 180 = -x), z [min, max] (m, cuts it at those heights),
+# x [min, max] (m, cuts it along x, e.g. to keep the tomato away from the robot or the wall) and
+# y [min, max] (m, cuts it sideways, e.g. to keep the tomato in front of the plant).
 """
 RANGE_SHAPES = ("box", "hemisphere")
 
@@ -74,19 +76,22 @@ def save_grid_file(path: str = APPLE_GRID_PATH, positions: list | None = None,
 # ── hemisferio ───────────────────────────────────────────────────────────────
 MIN_SHELL = 0.01   # m: grosor y alto mínimos del hemisferio
 NO_X_LIMIT = (-1.5, 1.5)   # m: más allá del alcance del brazo (sin recorte en x)
+NO_Y_LIMIT = (-1.5, 1.5)   # m: ídem en y
 
 
-def normalize_hemisphere(center, radius, facing, z, x=NO_X_LIMIT) -> dict:
-    """Valores ordenados y válidos: 0 <= r_min < r_max, z_min < z_max, x_min < x_max, facing en
+def _limits(v) -> tuple[float, float]:
+    lo, hi = sorted(float(a) for a in v)
+    return lo, max(hi, lo + MIN_SHELL)
+
+
+def normalize_hemisphere(center, radius, facing, z, x=NO_X_LIMIT, y=NO_Y_LIMIT) -> dict:
+    """Valores ordenados y válidos: 0 <= r_min < r_max, min < max en z, x e y, facing en
     (-180, 180]."""
     r_lo, r_hi = sorted(max(float(r), 0.0) for r in radius)
-    z_lo, z_hi = sorted(float(v) for v in z)
-    x_lo, x_hi = sorted(float(v) for v in x)
     return {"center": tuple(float(v) for v in center),
             "radius": (r_lo, max(r_hi, r_lo + MIN_SHELL)),
             "facing": 180.0 - (180.0 - float(facing)) % 360.0,
-            "z": (z_lo, max(z_hi, z_lo + MIN_SHELL)),
-            "x": (x_lo, max(x_hi, x_lo + MIN_SHELL))}
+            "z": _limits(z), "x": _limits(x), "y": _limits(y)}
 
 
 def hemisphere_axes(h: dict):
@@ -95,38 +100,41 @@ def hemisphere_axes(h: dict):
     return np.array([np.cos(f), np.sin(f), 0.0]), np.array([-np.sin(f), np.cos(f), 0.0]), np.array([0.0, 0.0, 1.0])
 
 
-def in_hemisphere(points, h: dict) -> np.ndarray:
+def in_hemisphere(points, hemisphere: dict) -> np.ndarray:
     """Qué puntos (N x 3) están dentro: entre los radios, del lado de `facing` y entre los
-    límites en z y en x."""
+    límites en z, x e y."""
     pts = np.atleast_2d(points)
-    d = pts - np.array(h["center"])
+    d = pts - np.array(hemisphere["center"])
     r = np.linalg.norm(d, axis=1)
-    axis = hemisphere_axes(h)[0]
-    x_lo, x_hi = h.get("x", NO_X_LIMIT)
-    return ((r >= h["radius"][0]) & (r <= h["radius"][1]) & (d @ axis >= 0)
-            & (pts[:, 2] >= h["z"][0]) & (pts[:, 2] <= h["z"][1])
-            & (pts[:, 0] >= x_lo) & (pts[:, 0] <= x_hi))
+    axis = hemisphere_axes(hemisphere)[0]
+    x_lo, x_hi = hemisphere.get("x", NO_X_LIMIT)
+    y_lo, y_hi = hemisphere.get("y", NO_Y_LIMIT)
+    return ((r >= hemisphere["radius"][0]) & (r <= hemisphere["radius"][1]) & (d @ axis >= 0)
+            & (pts[:, 2] >= hemisphere["z"][0]) & (pts[:, 2] <= hemisphere["z"][1])
+            & (pts[:, 0] >= x_lo) & (pts[:, 0] <= x_hi)
+            & (pts[:, 1] >= y_lo) & (pts[:, 1] <= y_hi))
 
 
 def sample_hemisphere(h: dict, rng=np.random, batch: int = 2000, tries: int = 50) -> list[float]:
     """Un punto uniforme en el volumen (muestreo por rechazo en la caja que lo contiene)."""
     c, r = np.array(h["center"]), h["radius"][1]
     x_lo, x_hi = h.get("x", NO_X_LIMIT)
-    lo = np.array([max(c[0] - r, x_lo), c[1] - r, max(c[2] - r, h["z"][0])])
-    hi = np.array([min(c[0] + r, x_hi), c[1] + r, min(c[2] + r, h["z"][1])])
+    y_lo, y_hi = h.get("y", NO_Y_LIMIT)
+    lo = np.array([max(c[0] - r, x_lo), max(c[1] - r, y_lo), max(c[2] - r, h["z"][0])])
+    hi = np.array([min(c[0] + r, x_hi), min(c[1] + r, y_hi), min(c[2] + r, h["z"][1])])
     if (hi <= lo).any():
-        raise ValueError("the hemisphere is empty: the x or z limits leave it out")
+        raise ValueError("the hemisphere is empty: the x, y or z limits leave it out")
     for _ in range(tries):
         pts = rng.uniform(lo, hi, size=(batch, 3))
         inside = pts[in_hemisphere(pts, h)]
         if len(inside):
             return [float(v) for v in inside[0]]
-    raise ValueError("the hemisphere is empty: check the radius and the x and z limits")
+    raise ValueError("the hemisphere is empty: check the radius and the x, y and z limits")
 
 
 def hemisphere_lines(h: dict, step_deg: float = 10.0) -> np.ndarray:
     """Segmentos (N x 2 x 3) para dibujarlo: meridianos y paralelos de las dos cáscaras, recortados
-    a los límites en z y en x."""
+    a los límites en z, x e y."""
     axis, side, up = hemisphere_axes(h)
     c = np.array(h["center"])
     segs = []
@@ -142,6 +150,8 @@ def hemisphere_lines(h: dict, step_deg: float = 10.0) -> np.ndarray:
                                                            + np.sin(phi)[:, None] * up))
             segs.append(np.stack([pts[:-1], pts[1:]], axis=1))
     segs = np.concatenate(segs)
-    z, x = segs[:, :, 2], segs[:, :, 0]
+    x, y, z = segs[:, :, 0], segs[:, :, 1], segs[:, :, 2]
     x_lo, x_hi = h.get("x", NO_X_LIMIT)
-    return segs[((z >= h["z"][0]) & (z <= h["z"][1]) & (x >= x_lo) & (x <= x_hi)).all(axis=1)]
+    y_lo, y_hi = h.get("y", NO_Y_LIMIT)
+    keep = (z >= h["z"][0]) & (z <= h["z"][1]) & (x >= x_lo) & (x <= x_hi) & (y >= y_lo) & (y <= y_hi)
+    return segs[keep.all(axis=1)]

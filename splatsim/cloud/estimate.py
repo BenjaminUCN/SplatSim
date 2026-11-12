@@ -22,6 +22,8 @@ DATASET_GB_PER_FRAME_CAMERA = 14.6e-6   # 13.0-14.6 kB en los datasets de 640x48
 SCENE_GB_PER_FRAME = 2.8e-3   # images/ y sparse/ de 260729_2003: 3.3 GB para 1189 fotos 4K sin distorsión
 SPLAT_GB = 0.4                # output/ de 260729_2003: 363 MB
 SPLAT_STARTUP_S = 60          # extraer las fotos del video
+TRIALS_STARTUP_S = 240        # sin medir en un pod: cargar la escena, el robot y el modelo
+TRIAL_KEPT_GB = 0.125         # imágenes de un ensayo que se conserva (las demás se borran en el pod)
 CONFIDENCE_ORDER = {"alta": 0, "baja": 1, "sin datos": 2}
 # Con la imagen ya en la máquina, el pod arrancó en 18 s en vez de 7-25 min. La espera no se cobra, así
 # que esto es lo que vale ahorrarla: un trabajo largo no acaba en una máquina mucho más lenta por esto.
@@ -120,6 +122,13 @@ def splat_workload(frames: int, matcher: str, iterations: int, video_gb: float) 
     return Workload("splat", f"splat-{matcher}-it{iterations}", frames, RENDER_IMAGE_GB + video_gb,
                     frames * SCENE_GB_PER_FRAME + SPLAT_GB, SPLAT_STARTUP_S, image_gb=RENDER_IMAGE_GB,
                     image_disk_gb=RENDER_IMAGE_DISK_GB)
+
+
+def trials_workload(trials: int, cameras: int, model_gb: float, kept_trials: int) -> Workload:
+    """work = ensayos. Sale poco: los .pkl y meta.json de cada ensayo y las imágenes de los que se conservan."""
+    return Workload("trials", f"trials-cam{cameras}", trials, RENDER_IMAGE_GB + ASSETS_GB + model_gb,
+                    kept_trials * TRIAL_KEPT_GB + trials * 0.002, TRIALS_STARTUP_S,
+                    image_gb=RENDER_IMAGE_GB, image_disk_gb=RENDER_IMAGE_DISK_GB)
 
 
 def predicted_dataset_gb(frames: int, cameras: int) -> float:

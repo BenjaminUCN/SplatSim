@@ -11,7 +11,7 @@ import yaml
 
 from scripts.xarm5.data_jobs import SCRIPTS, command, dataset_path
 from splatsim.cloud.estimate import (PNG_GB, Workload, convert_workload, render_workload, splat_workload,
-                                     train_workload)
+                                     train_workload, trials_workload)
 from splatsim.utils.data.episode_selection import load_discarded
 from splatsim.robots.xarm.config import APPLE_NAME as APPLE
 from splatsim.utils.paths import OBJECTS_CONFIG
@@ -478,5 +478,94 @@ class Splat:
         return round(job["frames"] / seconds, 4) if seconds else None
 
 
-STAGES = {stage.kind: stage for stage in (Train(), Convert(), Render(), Mirror(), Splat())}
+class Trials:
+    """scripts/xarm5/cloud_trials.py: evalúa una política en el sim del pod, como run_policy_trials.py en
+    el lab. Sube el modelo (sin los checkpoints intermedios, salvo args.step), el meta/ de su dataset,
+    la escena y las hojas; baja la carpeta de la corrida a ~/data/policy_trials/<run_name>/."""
+    kind = "trials"
+    needs_gpu = True
+    image = "render"             # el rasterizador, PyBullet y LeRobot
+    output_feeds_children = False
+    script = "scripts/xarm5/cloud_trials.py"
+
+    def workload(self, job: dict) -> Workload:
+        return trials_workload(job["trials"], job["cameras"], job["model_gb"], job["kept_trials"])
+
+    def refresh(self, job: dict, folder_gb) -> None:
+        pass
+
+    @staticmethod
+    def _model_key(job: dict) -> str:
+        return f"models/{Path(job['args']['model']).name}"
+
+    @staticmethod
+    def _meta_key(job: dict) -> str:
+        return f"datasets_meta/{Path(job['args']['dataset']).name}/meta"
+
+    @staticmethod
+    def _leaves_key(job: dict) -> str:
+        return f"assets/occluders/{Path(job['args']['leaf_dir']).name}"
+
+    def uploads(self, job: dict) -> list[dict]:
+        a = job["args"]
+        model = Path(a["model"]).expanduser()
+        items = [{"local": a["model"], "key": self._model_key(job), "exclude": ["/checkpoints/**", "/wandb/**"]},
+                 {"local": str(Path(a["dataset"]).expanduser() / "meta"), "key": self._meta_key(job)}]
+        if a.get("step"):
+            items.append({"local": str(model / "checkpoints" / a["step"]),
+                          "key": f"{self._model_key(job)}/checkpoints/{a['step']}"})
+        if a.get("occlusion_targets"):
+            items.append({"local": a["leaf_dir"], "key": self._leaves_key(job)})
+        return [*items, *scene_assets()[0]]
+
+    def pod(self, job: dict, run_key: str, pod_root: str) -> dict:
+        a = job["args"]
+        model = f"{pod_root}/models/{Path(a['model']).name}"
+        dataset = f"{pod_root}/datasets/{Path(a['dataset']).name}"
+        out = f"{pod_root}/trials_out"
+        inputs = [{"key": self._model_key(job), "path": model}, {"key": self._meta_key(job), "path": f"{dataset}/meta"}]
+        if a.get("step"):
+            inputs.append({"key": f"{self._model_key(job)}/checkpoints/{a['step']}",
+                           "path": f"{model}/checkpoints/{a['step']}"})
+        leaf_dir = f"~/data/occluders/{Path(a['leaf_dir']).name}"
+        if a.get("occlusion_targets"):
+            inputs.append({"key": self._leaves_key(job), "path": leaf_dir})
+        args = ["--model", model, "--dataset_root", dataset, "--run_name", a["run_name"], "--out", out,
+                "--robot_name", a.get("robot_name", ROBOT), "--arrangement", a["arrangement"], "--hz", str(a["hz"]),
+                "--grid_path", a["grid_path"], "--leaf_dir", leaf_dir, "--leaf_seed", str(a.get("leaf_seed", 0)),
+                "--trials_per_position", str(a["trials_per_position"]), "--trial_seconds", str(a["trial_seconds"]),
+                "--ik_orientation", a.get("ik_orientation", "off"),
+                "--stop-on-success" if a.get("stop_on_success", True) else "--no-stop-on-success",
+                "--keep_images_pos", *(str(p) for p in a.get("keep_images_pos", [5]))]
+        if a.get("step"):
+            args += ["--step", a["step"]]
+        if a.get("occlusion_targets"):
+            args += ["--occlusion_targets", *(f"{t:g}" for t in a["occlusion_targets"])]
+        if a.get("positions"):
+            args += ["--positions", *(str(p) for p in a["positions"])]
+        # la grilla va con las configs: el pod evalúa en las posiciones de este PC, no en las de la imagen
+        files = {**pod_files(), a["grid_path"]: Path(a["grid_path"]).read_text()}
+        return {"args": args, "files": files, "clean": [out],
+                "inputs": [*inputs, *scene_assets()[1]],
+                "outputs": [{"key": self.output_key(job), "path": f"{out}/{a['run_name']}", "packed": True}]}
+
+    def output_key(self, job: dict) -> str:
+        return f"{job['run_key']}/outputs/trials"
+
+    def target(self, job: dict) -> Path:
+        return Path(job["output"]).expanduser()
+
+    def publish_key(self, job: dict) -> str | None:
+        return None
+
+    def temporary_inputs(self, job: dict) -> list[str]:
+        return []                # el modelo y la escena se vuelven a usar en otras evaluaciones
+
+    def rate(self, job: dict) -> float | None:
+        """Ensayos por segundo de toda la ejecución, incluida la carga de la escena."""
+        seconds = (job["result"].get("seconds") or {}).get("run")
+        return round(job["trials"] / seconds, 5) if seconds else None
+
+
+STAGES = {stage.kind: stage for stage in (Train(), Convert(), Render(), Mirror(), Splat(), Trials())}
 DEFAULT_SCRIPTS = {kind: getattr(stage, "script", None) or SCRIPTS[kind] for kind, stage in STAGES.items()}

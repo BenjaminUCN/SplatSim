@@ -20,6 +20,11 @@ from splatsim.cloud.providers import Requirements  # noqa: E402
 from splatsim.cloud.sync import CONTROL, LEASE_KEY, STATE_KEY, VIEW, QueueSync  # noqa: E402
 
 
+def settled(orch, job) -> bool:
+    """Terminado y sin el hilo de descarga: el estado pasa a done antes de que el hilo suelte orch.busy."""
+    return job["status"] == "done" and job["id"] not in orch.busy
+
+
 class SyncBase(Base):
     def setUp(self):
         super().setUp()
@@ -62,14 +67,15 @@ class TestControl(SyncBase):
         a = self.panel(self.orch, "lab")
         b = self.panel(self.orch_b, "laptop")
         job = self.submit()
-        self.cycle_until(a, lambda: job["status"] == "done")
+        self.cycle_until(a, lambda: settled(self.orch, job))
+        a.cycle()                                  # sube el estado final
         b.cycle()
         self.assertEqual(self.orch_b.get(job["id"])["status"], "done")
 
     def test_handover_waits_for_the_holder_and_moves_the_queue(self):
         a = self.panel(self.orch, "lab")
         job = self.submit()
-        self.cycle_until(a, lambda: job["status"] == "done")
+        self.cycle_until(a, lambda: settled(self.orch, job))
         b = self.panel(self.orch_b, "laptop")
         b.request_control()
         self.assertEqual(b.role, VIEW, "con el permiso vigente, solo lo pide")
@@ -144,7 +150,8 @@ class TestState(SyncBase):
     def test_done_jobs_travel_without_their_hashes(self):
         a = self.panel(self.orch, "lab")
         job = self.submit()
-        self.cycle_until(a, lambda: job["status"] == "done")
+        self.cycle_until(a, lambda: settled(self.orch, job))
+        a.cycle()                                  # sube el estado final
         self.assertIn("outputs", job["result"], "en este PC se conservan")
         remote = yaml.safe_load(self.storage.read(STATE_KEY))["jobs"][0]
         self.assertNotIn("outputs", remote["result"])
@@ -197,7 +204,7 @@ class TestState(SyncBase):
 class TestKeepOutput(Base):
     def test_output_stays_in_the_bucket_until_downloaded(self):
         job = self.orch.submit("m", self.cfg("m"), str(self.dataset), Requirements(), 1.0, keep_output=True)
-        self.run_until(lambda: job["status"] == "done")
+        self.run_until(lambda: settled(self.orch, job))
         target = self.tmp / "models" / "m"
         self.assertNotIn("output_dir", job, "no baja")
         self.assertTrue((self.storage.root / job["remote_output"]).is_dir(), "no se borra del bucket")

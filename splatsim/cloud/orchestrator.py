@@ -56,6 +56,7 @@ DEFAULT_RENDER_IMAGE = "ghcr.io/benjaminucn/splatsim-render:latest"
 POD_ROOT = "/workspace"
 DATASETS_ROOT = DATASETS_DIR   # nombre con que lo usa cloud_server.py
 SCENES_ROOT = "~/data/Colmaps"
+POLICY_TRIALS_ROOT = "~/data/policy_trials"   # donde run_policy_trials.py deja las corridas
 ALIGNING = "aligning"
 
 
@@ -287,6 +288,34 @@ class Orchestrator:
         return self._add({"name": name, "description": description, "kind": "train", "config": cfg,
                           "dataset": str(dataset), "dataset_gb": gb, "depends_on": depends_on,
                           **_last_stage(keep_output)}, req, max_cost, offer_id)
+
+    def submit_trials(self, name: str, args: dict, req: Requirements, max_cost: float,
+                      offer_id: int | None = None, description: str = "") -> dict:
+        """Evaluación en el sim de un pod (scripts/xarm5/cloud_trials.py). args: model (carpeta), dataset
+        (con que se entrenó; se sube solo su meta/), run_name, arrangement, hz, grid_path y, como en
+        run_policy_trials.py, occlusion_targets, trials_per_position, trial_seconds, positions,
+        ik_orientation, stop_on_success, leaf_dir, keep_images_pos y step (checkpoint intermedio)."""
+        a = {"arrangement": "2cam", "hz": 10, "grid_path": "configs/eval_grid_4x4.yaml", "trials_per_position": 1,
+             "trial_seconds": 15.0, "ik_orientation": "off", "stop_on_success": True, "keep_images_pos": [5],
+             "leaf_dir": "~/data/occluders/xarm5_lite_plant_v3", "leaf_seed": 0, **args}
+        model = Path(a["model"]).expanduser()
+        if not (model / "config.json").is_file():
+            raise ValueError(f"{model} no tiene config.json: ¿es la carpeta del modelo?")
+        if not (Path(a["dataset"]).expanduser() / "meta" / "info.json").is_file():
+            raise ValueError(f"{a['dataset']} no tiene meta/info.json")
+        grid = yaml.safe_load(Path(a["grid_path"]).read_text())["positions"]
+        positions = list(a.get("positions") or range(len(grid)))
+        per_position = len(a.get("occlusion_targets") or [None]) * int(a["trials_per_position"])
+        files = [f for f in model.iterdir() if f.is_file()]
+        if a.get("step"):
+            files += [f for f in (model / "checkpoints" / a["step"]).rglob("*") if f.is_file()]
+        digits = "".join(c for c in str(a["arrangement"]) if c.isdigit())
+        return self._add({"name": name, "description": description, "kind": "trials", "args": a,
+                          "output": str(Path(POLICY_TRIALS_ROOT) / a["run_name"]),
+                          "trials": len(positions) * per_position,
+                          "kept_trials": sum(p in a["keep_images_pos"] for p in positions) * per_position,
+                          "cameras": int(digits or 2), "model_gb": round(sum(f.stat().st_size for f in files) / 1e9, 2),
+                          "depends_on": None, "download": True, "keep_output": False}, req, max_cost, offer_id)
 
     def submit_convert(self, name: str, args: dict, req: Requirements, max_cost: float,
                        offer_id: int | None = None, output_dir: str = DATASETS_ROOT) -> dict:

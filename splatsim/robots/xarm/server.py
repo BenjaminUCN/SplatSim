@@ -52,7 +52,8 @@ from .trail import EETrail
 class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
     # métodos que el cliente puede llamar por ZMQ además de los de ZMQRobotServer
     REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording", "get_preview",
-                      "set_control_mode", "operator_prompt", "operator_answer", "measure_occlusion")
+                      "set_control_mode", "operator_prompt", "operator_answer", "measure_occlusion",
+                      "place_trial_leaf")
 
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
@@ -384,6 +385,24 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
                 return []
             self.occluders = OccluderSet(self)
         return self.occluders.set_episode(entries)
+
+    def place_trial_leaf(self, leaf_dir: str, target: float, key: int, seed: int = 0,
+                         cameras: list[str] | None = None) -> dict:
+        """Ensayos con oclusión (run_policy_trials.py --occlusion-targets): con el brazo y el tomate
+        ya en su lugar, pone una hoja de leaf_dir que tape target % del tomate, ajustada como en
+        render_recordings.py --leaf_dir (splatsim/utils/scene/leaf_variation.py). El sorteo (hoja,
+        cámara, dirección, giro) depende solo de seed y key, así todos los modelos ven la misma hoja.
+        target 0 quita las hojas del ensayo anterior. Devuelve el ajuste (leaf_fit)."""
+        from pathlib import Path
+        from splatsim.utils.scene.leaf_variation import draw_episode, place_episode_leaf
+        leaves = sorted(Path(leaf_dir).expanduser().glob("*.ply"))
+        if not leaves:
+            raise ValueError(f"No hay hojas en {leaf_dir}")
+        cameras = list(cameras) if cameras else [c for c in self.camera_names if "wrist" not in c]
+        draw = draw_episode(str(int(key)), leaves, (float(target),), seed)
+        with self.lock:
+            _, fit = place_episode_leaf(self, draw, cameras)
+        return fit
 
     def measure_occlusion(self, camera_names=None) -> dict:
         """Cuánto del tomate tapa la escena en cada cámara (splatsim/utils/render/occlusion.py), con el
