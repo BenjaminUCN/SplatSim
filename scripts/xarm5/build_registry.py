@@ -336,9 +336,16 @@ def match_dataset(model: dict, datasets: dict) -> tuple[str | None, str | None, 
             if same:
                 exact.append(key)
     if exact:
-        # copias idénticas: la creada más cerca antes del entrenamiento
-        exact.sort(key=lambda k: _distance_before(datasets[k]["_created"], model["_started"]))
-        return exact[0], "stats", exact[1:]
+        # mismas estadísticas de estado = mismas demos, pero pueden ser renders con otras cámaras
+        # (p. ej. 2cam y 3cam de las mismas grabaciones): solo los que tienen las cámaras del modelo
+        pool = [k for k in exact if set(model["cameras"]) <= set(datasets[k]["cameras"] or [])] or exact
+        # el dataset_root del entrenamiento (en la nube es /root/..., así que se compara la carpeta);
+        # si no está, la copia creada más cerca antes del entrenamiento
+        root = os.path.basename(((model.get("train_config") or {}).get("dataset_root") or "").rstrip("/"))
+        named = [k for k in pool if root and os.path.basename(datasets[k]["path"].rstrip("/")) == root]
+        best = named[0] if named else min(
+            pool, key=lambda k: _distance_before(datasets[k]["_created"], model["_started"]))
+        return best, "stats", [k for k in exact if k != best]
 
     candidates = [k for k, ds in datasets.items()
                   if ds["cameras"] and set(model["cameras"]) <= set(ds["cameras"])

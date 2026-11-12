@@ -59,3 +59,34 @@ class TestFindModel(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestMatchDataset(unittest.TestCase):
+    """build_registry.match_dataset: renders con otras cámaras de las mismas demos tienen las mismas
+    estadísticas de estado; el modelo va al que tiene sus cámaras y su dataset_root."""
+
+    def setUp(self):
+        import sys
+        from datetime import datetime
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
+        from build_registry import match_dataset
+        self.match = match_dataset
+        stats = {"min": [0.0, 0.0], "max": [1.0, 1.0], "count": [100]}
+
+        def ds(path, cams, created):
+            return {"_state_stats": stats, "cameras": cams, "path": path, "_created": datetime(2026, 11, created)}
+
+        self.datasets = {"ds_2cam": ds("/d/ds_2cam", ["base_rgb", "wrist_rgb"], 9),
+                         "ds_3cam": ds("/d/ds_3cam", ["base_left_rgb", "base_right_rgb", "wrist_rgb"], 10),
+                         "ds_2cam_copy": ds("/d/ds_2cam_copy", ["base_rgb", "wrist_rgb"], 8)}
+        self.model = {"_state_stats": stats, "cameras": ["base_rgb", "wrist_rgb"],
+                      "_started": datetime(2026, 11, 11), "train_config": None}
+
+    def test_skips_datasets_without_the_model_cameras(self):
+        best, how, others = self.match(self.model, self.datasets)
+        self.assertEqual((best, how), ("ds_2cam", "stats"))
+        self.assertCountEqual(others, ["ds_3cam", "ds_2cam_copy"])
+
+    def test_prefers_the_training_dataset_root(self):
+        self.model["train_config"] = {"dataset_root": "/root/lerobot/ds_2cam_copy"}
+        self.assertEqual(self.match(self.model, self.datasets)[0], "ds_2cam_copy")
