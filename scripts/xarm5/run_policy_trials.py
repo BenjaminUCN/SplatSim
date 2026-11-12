@@ -73,6 +73,11 @@ class Args:
     # acciones que se ejecutan por cada predicción de la política (None: las del modelo, 32 en todos los
     # entrenados hasta ahora); menos = vuelve a mirar más seguido. Hasta horizon - n_obs_steps + 1
     n_action_steps: int | None = None
+    # None: una acción por paso de control, llegue o no el brazo (lo de siempre). Con un valor (rad,
+    # norma de las 5 articulaciones), repite cada acción hasta que el brazo llegue a esa distancia del
+    # comando (0.01 en el agente del SplatSim original) o hasta waypoint_max_steps pasos
+    waypoint_tolerance: float | None = None
+    waypoint_max_steps: int = 10
     # termina el ensayo success_extra_seconds después de que el error de agarre baja de
     # SUCCESS_RADIUS (4 cm): ahorra tiempo y no cambia la tasa de éxito; en esos segundos el brazo
     # sigue acercándose, así el error mínimo no queda cortado en ~4 cm. time_to_success se anota
@@ -135,6 +140,7 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     leaf_fit = call(robot, "place_trial_leaf", **leaf) if leaf is not None else None
     leaf_info = leaf_columns(leaf_fit, leaf["target"] if leaf else None)
     ik_before = dict(agent.ik_counts)
+    waypoints_before = dict(agent.waypoint_counts)
 
     # antes de que el brazo se mueva: cuánto tapa la planta (y las hojas) con el brazo en reposo
     occlusion = occlusion_columns(call(robot, "measure_occlusion")) if measure_occlusion else {}
@@ -177,6 +183,10 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
               **occlusion, **leaf_info}
     if agent.ik_orientation != "off":
         result["ik_fallbacks"] = agent.ik_counts["fallback"] - ik_before["fallback"]
+    if agent.waypoint_tolerance is not None:
+        # acciones terminadas al llegar y por agotar waypoint_max_steps
+        result["waypoints_reached"] = agent.waypoint_counts["reached"] - waypoints_before["reached"]
+        result["waypoint_timeouts"] = agent.waypoint_counts["timeout"] - waypoints_before["timeout"]
     if distances:
         result.update(final_dist=distances[-1], min_dist=min(distances),
                       final_grasp_err=grasp_errors[-1], min_grasp_err=min(grasp_errors))
@@ -221,7 +231,9 @@ def main(args: Args) -> None:
     robot = ZMQClientRobot(port=args.robot_port, host=args.hostname)
     agent = LeRobotDiffusionAgent(checkpoint=args.checkpoint, dataset_root=args.dataset_root,
                                   device="cuda", ik_orientation=args.ik_orientation,
-                                  n_action_steps=args.n_action_steps)
+                                  n_action_steps=args.n_action_steps,
+                                  waypoint_tolerance=args.waypoint_tolerance,
+                                  waypoint_max_steps=args.waypoint_max_steps)
 
     first_obs = robot.get_observations()
     missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
@@ -252,6 +264,8 @@ def main(args: Args) -> None:
         call(robot, "place_trial_leaf", leaf_dir=args.leaf_dir, target=0.0, key=0, seed=args.leaf_seed)
     if args.ik_orientation != "off":
         fields += ["ik_fallbacks"]
+    if args.waypoint_tolerance is not None:
+        fields += ["waypoint_tolerance", "waypoint_max_steps", "waypoints_reached", "waypoint_timeouts"]
     if not manual:
         fields += list(occlusion_columns(call(robot, "measure_occlusion")))
     grasp_point = load_grasp_point()
@@ -291,6 +305,8 @@ def main(args: Args) -> None:
                                 "trial_seconds": args.trial_seconds, "manual": manual,
                                 "success_extra_seconds": args.success_extra_seconds if args.stop_on_success else None,
                                 "n_action_steps": agent.policy.config.n_action_steps,
+                                "waypoint_tolerance": args.waypoint_tolerance,
+                                "waypoint_max_steps": args.waypoint_max_steps if args.waypoint_tolerance else None,
                                 "checkpoint": checkpoint, "run_name": run_name}
                     result = run_trial(robot, agent, None if (args.here or manual) else apple_pos,
                                        args.trial_seconds, metadata, root, grasp_point,
@@ -309,6 +325,9 @@ def main(args: Args) -> None:
                            "trial_seconds": args.trial_seconds,
                            "success_extra_seconds": args.success_extra_seconds if args.stop_on_success else "",
                            "n_action_steps": agent.policy.config.n_action_steps}
+                    if args.waypoint_tolerance is not None:
+                        row.update(waypoint_tolerance=args.waypoint_tolerance,
+                                   waypoint_max_steps=args.waypoint_max_steps)
                     if apple_pos:
                         row.update(x=apple_pos[0], y=apple_pos[1], z=apple_pos[2])
                     writer.writerow(row)

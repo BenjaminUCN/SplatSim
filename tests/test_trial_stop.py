@@ -55,6 +55,7 @@ class FakeRobot:
 class FakeAgent:
     ik_orientation, relative_actions = "off", False
     ik_counts = {"fallback": 0}
+    waypoint_tolerance, waypoint_counts = None, {"reached": 0, "timeout": 0}
 
     def reset(self):
         pass

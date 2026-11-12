@@ -60,6 +60,13 @@ class LeRobotDiffusionAgent:
             "hybrid" also asks for the predicted orientation and falls back to position-only
             when that moves the end effector more than IK_HYBRID_MAX_POS_ERR from the target
             (the xArm5 has 5 DOF, so not every pose is reachable).
+        waypoint_tolerance: None ejecuta una acción por paso de control, llegue o no el brazo (lo de
+            siempre). Con un valor (rad, norma de las 5 articulaciones), repite cada acción hasta que
+            el brazo esté a menos de eso del comando, como el agente del SplatSim original (0.01), o
+            hasta waypoint_max_steps pasos. Mientras repite, la observación igual entra a la cola de
+            la política, así las n_obs_steps observaciones de la próxima predicción siguen siendo
+            pasos seguidos, como en el entrenamiento.
+        waypoint_max_steps: pasos de control como máximo por acción con waypoint_tolerance.
     """
 
     def __init__(
@@ -69,6 +76,8 @@ class LeRobotDiffusionAgent:
         device: str = "cuda",
         n_action_steps: int | None = None,
         ik_orientation: str = "off",
+        waypoint_tolerance: float | None = None,
+        waypoint_max_steps: int = 10,
     ):
         """checkpoint: carpeta del modelo o repo del Hub (None -> DEFAULT_CHECKPOINT).
         dataset_root: dataset con que se entrenó, carpeta o repo del Hub; None -> se busca en
@@ -77,6 +86,13 @@ class LeRobotDiffusionAgent:
         if ik_orientation not in IK_ORIENTATION_MODES:
             raise ValueError(f"ik_orientation debe ser uno de {IK_ORIENTATION_MODES}")
         self.ik_orientation = ik_orientation
+        if waypoint_tolerance is not None and (waypoint_tolerance <= 0 or waypoint_max_steps < 1):
+            raise ValueError("waypoint_tolerance debe ser > 0 y waypoint_max_steps >= 1")
+        self.waypoint_tolerance = waypoint_tolerance
+        self.waypoint_max_steps = waypoint_max_steps
+        self.waypoint_counts = {"reached": 0, "timeout": 0}   # acciones que terminaron así
+        self._held = 0                                         # pasos que lleva la acción actual
+        self._last_joints: np.ndarray | None = None            # último comando articular (5)
         self.ik_counts = {"orientation": 0, "fallback": 0}   # hybrid: con orientación / sin ella
         self.device = device
         self._requested_n_action_steps = n_action_steps   # lo aplica _load_diffusion_policy_model
@@ -323,6 +339,32 @@ class LeRobotDiffusionAgent:
         self.policy.reset()
         self._chunk_reference = None
         self.make_new_prediction = True
+        self._held = 0
+        self._last_joints = None
+
+    def _observe_only(self, obs_frame: dict) -> None:
+        """Mete la observación en la cola de la política sin sacar una acción (lo que hace
+        select_action antes de predecir o sacar)."""
+        from lerobot.policies.utils import populate_queues
+        from lerobot.utils.constants import ACTION, OBS_IMAGES
+        # el frame del preprocesador trae "action" vacía; select_action la saca antes de llenar las
+        # colas, y si no se saca, ese None quedaría en la cola de acciones
+        batch = {k: v for k, v in obs_frame.items() if k != ACTION}
+        if self.policy.config.image_features:
+            batch[OBS_IMAGES] = torch.stack([batch[k] for k in self.policy.config.image_features], dim=-4)
+        self.policy._queues = populate_queues(self.policy._queues, batch, exclude_keys=[ACTION])
+
+    def _waypoint_done(self, joints: np.ndarray) -> bool:
+        """Modo waypoint: la acción actual ya terminó (llegó o se le acabaron los pasos)."""
+        if self._last_joints is None:
+            return True
+        if np.linalg.norm(self._last_joints - joints) < self.waypoint_tolerance:
+            self.waypoint_counts["reached"] += 1
+            return True
+        if self._held >= self.waypoint_max_steps:
+            self.waypoint_counts["timeout"] += 1
+            return True
+        return False
 
     def _new_chunk_next(self) -> bool:
         """select_action va a predecir un chunk nuevo (su cola de acciones está vacía)."""
@@ -366,6 +408,12 @@ class LeRobotDiffusionAgent:
             p.resetJointState(self.dummy_robot, i, obs_dict['joint_positions'][i-1])
         
         
+        if self.waypoint_tolerance is not None and not self.make_new_prediction:
+            if self._waypoint_done(np.asarray(obs_dict["joint_positions"][:5], dtype=float)):
+                self.make_new_prediction = True
+            else:
+                self._observe_only(self._build_obs(obs))
+
         if self.make_new_prediction:
             obs_frame = self._build_obs(obs)  # ya normalizado por self.preprocess
 
@@ -388,7 +436,8 @@ class LeRobotDiffusionAgent:
             self.ee_gripper = self.action_prediction[6]
                 
             self.make_new_prediction = False
-        
+            self._held = 0
+
         ee_pose = self.ee_pose
         ee_rot = self.ee_rot
         
@@ -405,7 +454,11 @@ class LeRobotDiffusionAgent:
 
         # calculate difference between current and target joint angles
         joint_diff = np.array(dummy_joint_pos)[:joints_n] - np.array(obs_dict['joint_positions'])[:joints_n]
-        if np.linalg.norm(joint_diff) < 2.0:
+        if self.waypoint_tolerance is not None:
+            # la próxima llamada decide, con la posición a la que llegó, si sigue con esta acción
+            self._held += 1
+            self._last_joints = np.array(dummy_joint_pos, dtype=float)[:joints_n]
+        elif np.linalg.norm(joint_diff) < 2.0:
             self.make_new_prediction = True
         else:
             print(f"Joint difference norm: {np.linalg.norm(joint_diff):.3f}")
