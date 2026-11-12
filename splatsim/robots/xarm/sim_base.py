@@ -30,6 +30,7 @@ from splatsim.utils.robot_splat_render_utils import (
 )
 
 from .config import FLOOR_Z, SCENE_OBJECTS, SIM_DT
+from .splat_transform import RobotSplatTransform
 
 JointInfo = namedtuple("JointInfo", ["id", "name", "type", "damping", "friction", "lowerLimit",
                                      "upperLimit", "maxForce", "maxVelocity", "controllable"])
@@ -199,29 +200,49 @@ class XArm5SimBase:
     # ── render ───────────────────────────────────────────────────────────────
     def prep_image_rendering(self, data, cached_link_states=None) -> None:
         """Arma self.robot_gaussian: la escena con los links del robot movidos según PyBullet y los
-        objetos en sus poses de `data` (<objeto>_position / _orientation)."""
-        transformations_list = get_transfomration_list(
-            self.dummy_robot, self.initial_link_states, cached_link_states=cached_link_states)
+        objetos en sus poses de `data` (<objeto>_position / _orientation).
+
+        Los links se mueven con RobotSplatTransform (vectorizado); SPLATSIM_LEGACY_TRANSFORM=1 usa
+        las funciones por link de robot_splat_render_utils (mismo resultado, ~10 veces más lento)."""
         robot_transformation = self.object_config[self.robot_name]["transformation"]["matrix"]
         aabb = self.object_config[self.robot_name]["aabb"]["bounding_box"]
-        segmented_list, xyz = get_segmented_indices(
-            self.dummy_robot, self.gaussians_backup, robot_transformation, aabb, self.robot_name,
-            robot_labels=self.robot_labels, transformations_cache=self.transformations_cache)
-        xyz, rot, opacity, shs_featrest, shs_dc = transform_means(
-            self.dummy_robot, self.gaussians_backup, xyz, segmented_list, transformations_list,
-            robot_transformation, robot_name=self.robot_name, transformations_cache=self.transformations_cache)
+        if os.environ.get("SPLATSIM_LEGACY_TRANSFORM"):
+            transformations_list = get_transfomration_list(
+                self.dummy_robot, self.initial_link_states, cached_link_states=cached_link_states)
+            segmented_list, xyz = get_segmented_indices(
+                self.dummy_robot, self.gaussians_backup, robot_transformation, aabb, self.robot_name,
+                robot_labels=self.robot_labels, transformations_cache=self.transformations_cache)
+            xyz, rot, opacity, shs_featrest, shs_dc = transform_means(
+                self.dummy_robot, self.gaussians_backup, xyz, segmented_list, transformations_list,
+                robot_transformation, robot_name=self.robot_name, transformations_cache=self.transformations_cache)
+        else:
+            if getattr(self, "_robot_transform", None) is None:
+                cache = self.transformations_cache[self.robot_name]
+                self._robot_transform = RobotSplatTransform(
+                    self.dummy_robot, self.gaussians_backup, self.robot_labels, cache["transformation"],
+                    cache["transformation_scale"], cache["inv_transformation"], aabb)
+            # get_transfomration_list usa los centros de los links si no le pasan cached_link_states
+            links = cached_link_states or get_curr_link_states(self.dummy_robot, use_link_centers=True)
+            xyz, rot, opacity, shs_featrest, shs_dc = self._robot_transform(self.initial_link_states, links)
 
         parts = {"xyz": [xyz], "rot": [rot], "opacity": [opacity], "scales": [self.gaussians_backup._scaling],
                  "dc": [shs_dc], "rest": [shs_featrest]}
+        # el splat de cada objeto solo cambia si cambia su pose: con la misma pose exacta se reutiliza
+        # (en un ensayo el tomate no tiene gravedad y casi siempre queda quieto)
+        object_cache = self.__dict__.setdefault("_object_splat_cache", {})
         for gaussian, name in zip(self.object_gaussians, self.splat_object_name_list):
-            pos = torch.tensor(data[f"{name}_position"], device="cuda").float()
-            # PyBullet da (x, y, z, w); el splat usa (w, x, y, z)
-            quat = torch.roll(torch.tensor(data[f"{name}_orientation"], device="cuda").float(), 1)
-            xyz_o, rot_o, opacity_o, scales_o, dc_o, rest_o = transform_object(
-                gaussian, object_config=self.object_config[name], pos=pos, quat=quat,
-                robot_transformation=robot_transformation, object_name=name, robot_name=self.robot_name,
-                transformations_cache=self.transformations_cache)
-            for key, value in zip(parts, (xyz_o, rot_o, opacity_o, scales_o, dc_o, rest_o)):
+            pose = (tuple(data[f"{name}_position"]), tuple(data[f"{name}_orientation"]))
+            cached_pose, moved = object_cache.get(name, (None, None))
+            if cached_pose != pose:
+                pos = torch.tensor(pose[0], device="cuda").float()
+                # PyBullet da (x, y, z, w); el splat usa (w, x, y, z)
+                quat = torch.roll(torch.tensor(pose[1], device="cuda").float(), 1)
+                moved = transform_object(
+                    gaussian, object_config=self.object_config[name], pos=pos, quat=quat,
+                    robot_transformation=robot_transformation, object_name=name, robot_name=self.robot_name,
+                    transformations_cache=self.transformations_cache)
+                object_cache[name] = (pose, moved)
+            for key, value in zip(parts, moved):
                 parts[key].append(value)
 
         g = self.robot_gaussian
