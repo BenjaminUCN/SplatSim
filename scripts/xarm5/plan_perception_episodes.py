@@ -91,6 +91,10 @@ class Args:
     """%: oclusión que se le pide a la hoja en B2 (se acepta desde thresholds.hidden_min_occlusion)"""
     candidates: int = 600
     """posiciones del hemisferio que se prueban antes de repartir los sets"""
+    hemisphere_z: tuple[float, float] | None = None
+    """m: reemplaza el rango z del hemisferio de configs/apple_grid.yaml solo para los sets nuevos de
+    esta corrida (p. ej. 0.26 0.42 para agregar tomates altos, que con el hemisferio completo casi no
+    pasan los filtros); queda anotado en perception_info.yaml"""
     frame_margin: float = 40.0
     """px: el tomate de B1 queda al menos así de lejos del borde de la imagen"""
     float_offset: tuple[float, ...] = (0.15, 0.1, 0.2)
@@ -278,6 +282,9 @@ def derive_positions(view: CameraView, anchor, probe: Probe, offsets) -> dict | 
 def choose_positions(args: Args, view: CameraView, probe: Probe, count: int, taken: list, rng) -> list[dict]:
     """count sets nuevos: B1 en cuadro, visible y al alcance, repartidos y lejos de los B1 de taken."""
     _, hemisphere = load_random_shape(APPLE_HEMISPHERE)
+    if args.hemisphere_z is not None:
+        hemisphere = {**hemisphere, "z": tuple(args.hemisphere_z)}
+        print(f"Hemisferio con z {args.hemisphere_z[0]:g}–{args.hemisphere_z[1]:g} m", flush=True)
     pool = []
     for _ in range(args.candidates):
         pos = np.array(sample_hemisphere(hemisphere, rng=rng))
