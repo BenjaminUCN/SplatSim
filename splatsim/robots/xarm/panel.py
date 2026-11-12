@@ -1,6 +1,9 @@
 """Panel de control del sim (viser): el panel compartido (splatsim/robots/station/panel.py) más
 la escena: tomate y grilla de posiciones, poses de las cámaras base y el reloj de la simulación.
 """
+import functools
+import os
+
 import numpy as np
 import viser
 
@@ -15,6 +18,8 @@ from splatsim.utils.scene.apple_grid import (
     in_hemisphere,
     load_grid,
 )
+from splatsim.utils.scene.camera_tripod import tripod_mesh
+from splatsim.utils.scene.hand_held import CAMERA_MESH_DIR, D435I_MESHES, read_stl
 from splatsim.utils.scene.leaf_segmentation import place_between, saved_leaves
 from splatsim.utils.scene.peduncle import DROPPED, EMBED, HELD, INTACT
 from splatsim.utils.render.occlusion import fit_lateral_offset, fit_message
@@ -25,6 +30,7 @@ RANGE_COLOR = (255, 170, 0)   # caja del rango aleatorio (como las esferas de la
 # tallo en la vista 3D: entero (el verde del splat), cortado y sujeto, cortado y suelto
 STEM_COLORS = {INTACT: (69, 117, 33), HELD: (40, 200, 220), DROPPED: (140, 140, 140)}
 CUT_COLOR = (255, 230, 0)     # punto de corte del tallo
+TRIPOD_COLOR = (35, 35, 38)   # trípode de mesa de las cámaras base
 
 
 def fruit_sphere(config: dict) -> tuple[np.ndarray, float]:
@@ -39,6 +45,18 @@ def fruit_sphere(config: dict) -> tuple[np.ndarray, float]:
     if stem:
         hi[2] = min(hi[2], stem["bottom"][2] + EMBED)
     return (lo + hi) / 2, float(np.mean(hi - lo) / 2)
+
+
+@functools.cache
+def d435i_meshes() -> dict:
+    """Mallas de la D435i (scripts/xarm5/build_d435i_mesh.py): vértices, caras y color por parte."""
+    meshes = {}
+    for filename, rgba in D435I_MESHES:
+        triangles = read_stl(os.path.join(CAMERA_MESH_DIR, filename)).reshape(-1, 3)
+        vertices, faces = np.unique(triangles.round(7), axis=0, return_inverse=True)
+        color = tuple(int(float(v) * 255) for v in rgba.split()[:3])
+        meshes[filename.removesuffix(".stl")] = (vertices.astype(np.float32), faces.reshape(-1, 3).astype(np.uint32), color)
+    return meshes
 
 
 def z_to(axis) -> tuple:
@@ -106,6 +124,9 @@ class SimPanel(StationPanel):
                     f"/cams/{cam.name}/frustum", fov=fovy, aspect=aspect, scale=0.08,
                     color=(30, 120, 255), thickness=1.5, thickness_units="screen")
                 self.v.scene.add_label(f"/cams/{cam.name}/label", cam.name)
+                # la D435i con su lente RGB en la pose de la cámara (mallas en el marco óptico de la RGB)
+                for part, (vertices, faces, color) in d435i_meshes().items():
+                    self.v.scene.add_mesh_simple(f"/cams/{cam.name}/{part}", vertices, faces, color=color)
                 self._cam_ui[cam.name] = (xyz, rpy, gizmo)
 
                 self._on_user(xyz, lambda _, c=cam: self._set_cam(c, xyz=self._cam_ui[c.name][0].value))
@@ -123,6 +144,7 @@ class SimPanel(StationPanel):
         xyz_ui.value, rpy_ui.value = cam.xyz, cam.rpy
         gizmo.position = cam.xyz
         gizmo.wxyz = xyzw_to_wxyz(self.s.pybullet_client.getQuaternionFromEuler(cam.rpy))
+        self._draw_tripod(cam)
 
     def _cam_from_gizmo(self, cam):
         _, _, gizmo = self._cam_ui[cam.name]
@@ -130,6 +152,19 @@ class SimPanel(StationPanel):
         cam.set_pose(tuple(float(v) for v in gizmo.position), tuple(float(v) for v in rpy))
         xyz_ui, rpy_ui, _ = self._cam_ui[cam.name]
         xyz_ui.value, rpy_ui.value = cam.xyz, cam.rpy
+        self._draw_tripod(cam)
+
+    def _draw_tripod(self, cam):
+        """El trípode queda vertical bajo el tornillo de la cámara, así que va en el mundo y no bajo el gizmo."""
+        c = self.s.pybullet_client
+        T = np.eye(4)
+        T[:3, :3] = np.array(c.getMatrixFromQuaternion(c.getQuaternionFromEuler(cam.rpy))).reshape(3, 3)
+        T[:3, 3] = cam.xyz
+        mesh = tripod_mesh(T)
+        if mesh is None:
+            self.v.scene.remove_by_name(f"/tripods/{cam.name}")
+        else:
+            self.v.scene.add_mesh_simple(f"/tripods/{cam.name}", *mesh, color=TRIPOD_COLOR)
 
     def _save_cam_poses(self):
         save_camera_poses(self.base_cams)

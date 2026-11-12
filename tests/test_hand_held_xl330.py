@@ -16,7 +16,7 @@ import numpy as np
 
 from splatsim.robots.xl330_gripper import ALERT_BIT, XL330Gripper
 from splatsim.utils.scene.hand_held import (
-    FLANGE_CENTER_MM, GRIPPER_CENTER_MM, JAW_JOINT, JAW_TRAVEL_RAD, MESH_DIR, PIVOT_MM, build_urdf, in_box, load_manifest, merge_splat, origin_matrix, read_ply, read_stl, sample_surface, write_ply,
+    FLANGE_CENTER_MM, GRIPPER_CENTER_MM, JAW_JOINT, JAW_TRAVEL_RAD, MESH_DIR, PIVOT_MM, STAND_THICKNESS_M, build_urdf, in_box, load_manifest, merge_splat, origin_matrix, read_ply, read_stl, sample_surface, write_ply,
 )
 
 OPEN, CLOSED = 1000, 2224
@@ -395,9 +395,11 @@ class TestUrdf(unittest.TestCase):
         rel = np.linalg.inv(T_flange) @ T_base
         def in_flange(mm):
             return (rel @ np.array([*np.array(mm) / 1000, 1]))[:3]
-        np.testing.assert_allclose(in_flange((0, -51.63, -15.8)), (0, 0, 0), atol=1e-7)  # centro de la brida
-        np.testing.assert_allclose(in_flange((-2, 158.27, -15.8)), (0, -0.002, 0.2099), atol=1e-7)  # punta
-        np.testing.assert_allclose(in_flange((0, -51.63, 50)), (0.0658, 0, 0), atol=1e-7)  # z del ensamble hacia +x
+        # la placa del soporte de la cámara (3 mm) queda entre la brida y el disco
+        gap = STAND_THICKNESS_M
+        np.testing.assert_allclose(in_flange((0, -51.63, -15.8)), (0, 0, gap), atol=1e-7)  # centro de la brida
+        np.testing.assert_allclose(in_flange((-2, 158.27, -15.8)), (0, -0.002, 0.2099 + gap), atol=1e-7)  # punta
+        np.testing.assert_allclose(in_flange((0, -51.63, 50)), (0.0658, 0, gap), atol=1e-7)  # z del ensamble hacia +x
         self.assertAlmostEqual(np.linalg.det(rel[:3, :3]), 1.0)
 
     def test_disc_is_bolted_to_the_plate(self):
@@ -413,7 +415,7 @@ class TestUrdf(unittest.TestCase):
         self.build(roll_deg=180)
         T_flange = fk(self.src, "xarm_gripper_base_link")
         rel = np.linalg.inv(T_flange) @ fk(self.dst, "hand_held_base")
-        np.testing.assert_allclose((rel @ np.array([0, -0.05163, 0.05, 1]))[:3], (-0.0658, 0, 0), atol=1e-7)
+        np.testing.assert_allclose((rel @ np.array([0, -0.05163, 0.05, 1]))[:3], (-0.0658, 0, STAND_THICKNESS_M), atol=1e-7)
 
     def test_horn_joint(self):
         self.build()

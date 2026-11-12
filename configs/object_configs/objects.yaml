@@ -363,7 +363,7 @@ xarm5_lite_plant_v3_hand_held_down:
     - [0.0, 0.0, 0.0, 1.0]
   aabb:
     bounding_box:
-    - [-0.5189, -0.119, -0.0008]
+    - [-0.5219, -0.119, -0.0008]
     - [0.2504, 0.102, 0.6086]
     urdf_bbox_adjustment:
     - [0.0, 0.1]

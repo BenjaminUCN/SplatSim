@@ -31,6 +31,42 @@ PLASTIC_KG_PER_MM3 = 1.24e-6                # PLA macizo: estimación, sin pesar
 PART_MASS_KG = {"fixed_steel": 0.078, "moving_plate": 0.032, "moving_jaw": 0.035, "pivot_bolt": 0.008,
                 "xl330": 0.018, "horn": 0.003, "tornillos_m2": 0.002}
 
+# Soporte de la cámara de muñeca (Camera Stand_1300, placa de 3 mm en mm): el disco de r 37.5 centrado en el
+# eje de la brida y la pestaña hacia +x de link_eef, con sus dos M3 a 45 mm (los de la espalda de la D435i).
+CAMERA_MESH_DIR = "splatsim/robot_definitions/meshes/wrist_camera"
+CAMERA_LINK = "wrist_camera_link"
+STAND_MESH = "camera_stand_1300.stl"
+# STL -> link_eef: x igual, el espesor (y del STL) sobre +z (hacia la herramienta), cara en la brida
+T_EEF_STAND = np.array([[1.0, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
+# la placa va entre la brida y mount_xarm5: el gripper queda 3 mm más allá de la brida, sobre +z de link_eef
+STAND_THICKNESS_M = 0.003
+# mallas de scripts/xarm5/build_d435i_mesh.py, en el marco óptico de la RGB: (archivo, rgba)
+D435I_MESHES = (("d435i_body.stl", "0.62 0.63 0.66 1"), ("d435i_front.stl", "0.03 0.03 0.04 1"))
+D435I_DEPTH_M = 0.0251
+# centro de la carcasa en el marco óptico de la RGB (la RGB está a 32.5 mm del centro, hacia un extremo)
+D435I_CENTER_IN_RGB_M = (0.03245, 0.0, -0.00825)
+# centro de la D435i en link_eef: entre los agujeros M3 (x = 67.5 mm) y con la espalda sobre la placa
+D435I_CENTER_EEF_M = (0.0675, 0.0, STAND_THICKNESS_M + D435I_DEPTH_M / 2)
+# ejes de la cámara en link_eef, los mismos de wrist_camera_link: x de la imagen sobre +y, mira hacia +z.
+# Si la cámara está atornillada al revés (RGB del otro lado), es este giro más 180° en z
+R_EEF_D435I = np.array([[0.0, -1, 0], [1, 0, 0], [0, 0, 1]])
+
+
+def physical_wrist_camera_pose() -> np.ndarray:
+    """Marco óptico de la RGB de la D435i montada en el soporte, en link_eef (4x4). wrist_camera_link
+    (el marco que renderiza el sim) está en (0.08, 0, 0): esta es la pose donde queda la lente real."""
+    T = np.eye(4)
+    T[:3, :3] = R_EEF_D435I
+    T[:3, 3] = np.array(D435I_CENTER_EEF_M) - R_EEF_D435I @ np.array(D435I_CENTER_IN_RGB_M)
+    return T
+
+
+def gripper_offset() -> np.ndarray:
+    """La placa del soporte entre la brida y el gripper, en link_eef."""
+    T = np.eye(4)
+    T[2, 3] = STAND_THICKNESS_M
+    return T
+
 
 def _rot_rpy(rpy) -> np.ndarray:
     r, p, y = rpy
@@ -99,6 +135,30 @@ def _add_part(link, part: dict, shift_m, mesh_prefix: str) -> None:
     ET.SubElement(material, "color", rgba=" ".join(str(v) for v in part["rgb"]) + " 1")
     if part.get("collision"):
         geometry(ET.SubElement(link, "collision", name=part["name"]))
+
+
+def _mesh_visual(link, name: str, T: np.ndarray, filename: str, scale: str, rgba: str) -> None:
+    visual = ET.SubElement(link, "visual", name=name)
+    _set_origin(visual, T)
+    ET.SubElement(ET.SubElement(visual, "geometry"), "mesh", filename=filename, scale=scale)
+    ET.SubElement(ET.SubElement(visual, "material", name="wrist_camera_" + name), "color", rgba=rgba)
+
+
+def add_wrist_camera_model(root, camera_parent: str, T_parent_camera: np.ndarray, mesh_prefix: str) -> None:
+    """Cambia el prisma de wrist_camera_link por el soporte y una D435i, como visuales del mismo link: ni el
+    marco de la cámara ni los índices de los links de PyBullet cambian. Las piezas se ubican en link_eef."""
+    link = next(l for l in root.findall("link") if l.get("name") == CAMERA_LINK)
+    if camera_parent != "link_eef":
+        raise ValueError(f"{CAMERA_LINK} hangs from {camera_parent}; the stand is placed in link_eef")
+    for element in link.findall("visual") + link.findall("collision"):
+        link.remove(element)
+    T_camera_eef = np.linalg.inv(T_parent_camera)
+
+    _mesh_visual(link, "camera_stand", T_camera_eef @ T_EEF_STAND, f"{mesh_prefix}/{STAND_MESH}",
+                 "0.001 0.001 0.001", "0.15 0.15 0.17 1")
+    T_d435i = T_camera_eef @ physical_wrist_camera_pose()
+    for filename, rgba in D435I_MESHES:
+        _mesh_visual(link, filename.removesuffix(".stl"), T_d435i, f"{mesh_prefix}/{filename}", "1 1 1", rgba)
 
 
 def _part_mass(part: dict) -> float:
@@ -209,7 +269,7 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
     _inertial(center, 0.001, (0, 0, 0), 1e-8)
 
     fix = ET.SubElement(root, "joint", name="hand_held_fix", type="fixed")
-    _set_origin(fix, T_parent_flange @ flange_from_assembly(roll_deg))
+    _set_origin(fix, gripper_offset() @ T_parent_flange @ flange_from_assembly(roll_deg))
     ET.SubElement(fix, "parent", link=new_parent)
     ET.SubElement(fix, "child", link="hand_held_base")
 
@@ -225,6 +285,16 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
     ET.SubElement(center_joint, "origin", xyz=" ".join(f"{v / 1000:.6f}" for v in GRIPPER_CENTER_MM), rpy="0 0 0")
     ET.SubElement(center_joint, "parent", link="hand_held_base")
     ET.SubElement(center_joint, "child", link="gripper_center_link")
+
+    if CAMERA_LINK in kept:
+        camera_prefix = "wrist_camera"
+        camera_dir = os.path.join(os.path.dirname(os.path.abspath(dst)), camera_prefix)
+        os.makedirs(camera_dir, exist_ok=True)
+        for filename in (STAND_MESH, *(f for f, _ in D435I_MESHES)):
+            shutil.copy2(os.path.join(CAMERA_MESH_DIR, filename), camera_dir)
+        camera_joint = joints[CAMERA_LINK]
+        add_wrist_camera_model(root, camera_joint.find("parent").get("link"),
+                               origin_matrix(camera_joint.find("origin")), camera_prefix)
 
     ET.indent(tree)
     tree.write(dst, encoding="utf-8", xml_declaration=True)
