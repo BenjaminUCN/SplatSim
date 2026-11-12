@@ -14,6 +14,7 @@ corrida se guarda offline en <output_root>/<model_name>/wandb y se sube después
 """
 
 import argparse
+import math
 import netrc
 import os
 import sys
@@ -69,8 +70,10 @@ class TrainConfig:
     # optimización
     training_steps: int = 50000
     batch_size: int = 32
-    num_workers: int = 12               # 16 causaba OOM con 56GB en WSL
-    prefetch_factor: int = 3
+    # Cada worker del DataLoader deja prefetch_factor batches en memoria compartida, así que hay
+    # num_workers × prefetch_factor batches en RAM a la vez. Ver loader_memory_bytes
+    num_workers: int = 12
+    prefetch_factor: int = 1
     image_augmentation: bool = True
     # acciones relativas a la pose del estado en el último paso observado (pos y euler; el gripper
     # queda absoluto). Ver splatsim/utils/data/relative_actions.py
@@ -166,6 +169,105 @@ def select_cameras(input_features: dict, cameras: tuple[str, ...] | None) -> dic
         raise SystemExit(f"Cámaras {sorted(missing)} no están en el dataset (hay {available})")
     return {k: ft for k, ft in input_features.items()
             if not k.startswith(prefix) or k.removeprefix(prefix) in cameras}
+
+
+class Uint8Images(torch.utils.data.Dataset):
+    """Devuelve las imágenes en uint8 en vez de float32 (4 veces menos memoria compartida).
+
+    Los workers decodifican y aplican el aumento de datos en float, y cuantizan al final; el bucle de
+    entrenamiento las pasa a float en la GPU con images_to_float. Los valores que el aumento deja fuera
+    de [0, 1] (ruido, borrado aleatorio) quedan recortados. Las cámaras del dataset que el modelo no usa
+    se descartan aquí para que no pasen por la memoria compartida."""
+
+    def __init__(self, dataset, image_keys):
+        self.dataset = dataset
+        self.image_keys = list(image_keys)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        item = self.dataset[index]
+        for key in [k for k in item if k.startswith("observation.images.")
+                    and k.removesuffix("_is_pad") not in self.image_keys]:
+            del item[key]
+        for key in self.image_keys:
+            item[key] = item[key].clamp(0, 1).mul(255).round().to(torch.uint8)
+        return item
+
+
+def images_to_float(batch: dict, image_keys, device: torch.device) -> dict:
+    """Pasa las imágenes uint8 de Uint8Images a float en [0, 1], ya en `device`.
+
+    Devuelve un dict nuevo: el DataLoader conserva el que entregó, y si se modificara en el lugar esa
+    referencia mantendría viva en la GPU la copia sin normalizar (~0,7 GB con 3 cámaras y batch 32)."""
+    return batch | {key: batch[key].to(device, non_blocking=True).float().div_(255) for key in image_keys}
+
+
+def release_step_inputs(pipeline):
+    """Suelta la última transición que cada paso del preprocesador de LeRobot guarda en
+    _current_transition. Los primeros pasos (renombrar, agregar dimensión de batch) reciben las imágenes
+    de images_to_float ya en la GPU, y sin esto esa copia sin normalizar seguiría ocupando VRAM durante
+    el forward y el backward. Algunos pasos contienen sub-pasos (AddBatchDimensionProcessorStep)."""
+    for step in pipeline.steps:
+        for obj in (step, *vars(step).values()):
+            if getattr(obj, "_current_transition", None) is not None:
+                obj._current_transition = None
+
+
+def loader_memory_bytes(image_frames: dict[str, tuple[int, int]], batch_size: int,
+                        num_workers: int, prefetch_factor: int, bytes_per_value: int = 1) -> int:
+    """RAM de los batches de imágenes que tiene el DataLoader a la vez.
+
+    image_frames: {cámara: (frames por muestra, valores por frame)}. Hay num_workers × prefetch_factor
+    batches en memoria compartida, más la copia de pin_memory y el que se está usando."""
+    batch = batch_size * sum(frames * size for frames, size in image_frames.values()) * bytes_per_value
+    in_flight = num_workers * prefetch_factor + 2 if num_workers else 1
+    return batch * in_flight
+
+
+def total_ram_bytes() -> int:
+    """RAM de la máquina, o el límite del contenedor si es menor (cgroup v2, pods de la nube)."""
+    total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    try:
+        limit = Path("/sys/fs/cgroup/memory.max").read_text().strip()
+        if limit.isdigit():
+            total = min(total, int(limit))
+    except OSError:
+        pass
+    return total
+
+
+# Fracción de la RAM que pueden ocupar los batches en vuelo. Los workers y el proceso principal ocupan
+# varios GB más; con 56 GB en WSL, 3 cámaras 480x640 en float32 (~27 GB, 48%) terminó en OOM y
+# 2 cámaras (~18 GB, 32%) entrenaban bien
+MAX_LOADER_RAM_FRACTION = 0.4
+
+
+def check_loader_memory(cfg: TrainConfig, image_frames: dict[str, tuple[int, int]]):
+    """Imprime la RAM estimada del DataLoader y aborta antes de entrenar si no cabe."""
+    need = loader_memory_bytes(image_frames, cfg.batch_size, cfg.num_workers, cfg.prefetch_factor)
+    total = total_ram_bytes()
+    print(f"DataLoader: {cfg.num_workers} workers × prefetch {cfg.prefetch_factor}, "
+          f"~{need / 1e9:.1f} GB de imágenes en RAM ({need / total:.0%} de {total / 1e9:.0f} GB)")
+    if need > MAX_LOADER_RAM_FRACTION * total:
+        raise SystemExit(f"El DataLoader ocuparía ~{need / 1e9:.1f} GB, más del "
+                         f"{MAX_LOADER_RAM_FRACTION:.0%} de la RAM: baja --prefetch-factor, "
+                         "--num-workers o --batch-size, o reescala el dataset (resize_dataset.py)")
+
+
+def warn_if_vram_overflows(device: torch.device):
+    """Avisa si PyTorch reservó más VRAM que la que tiene la GPU. En WSL/Windows el driver no falla:
+    usa RAM del sistema como memoria de GPU y cada paso se vuelve ~10 veces más lento (3 cámaras
+    480x640 con batch 32: 19,6 GB en una RTX 5080 de 16 GB, 4,5 s por paso; con batch 16, 0,3 s)."""
+    if device.type != "cuda":
+        return
+    reserved = torch.cuda.memory_reserved(device)
+    total = torch.cuda.get_device_properties(device).total_memory
+    if reserved > total:
+        print(f"AVISO: el entrenamiento ocupa {reserved / 1e9:.1f} GB de VRAM y la GPU tiene "
+              f"{total / 1e9:.1f} GB; el resto va a la RAM del sistema y es mucho más lento. "
+              "Baja --batch-size o usa --resize-shape (p. ej. 240 320)")
 
 
 def wandb_logged_in() -> bool:
@@ -283,8 +385,12 @@ def main(cfg: TrainConfig):
         image_transforms=make_image_transforms() if cfg.image_augmentation else None,
     )
 
+    image_keys = list(policy_cfg.image_features)
+    check_loader_memory(cfg, {k: (len(delta_timestamps[k]), math.prod(policy_cfg.image_features[k].shape))
+                              for k in image_keys})
+
     run = start_wandb(cfg, model_name, output_directory, {
-        "cameras_used": list(policy_cfg.image_features), "dataset_episodes": dataset.num_episodes,
+        "cameras_used": image_keys, "dataset_episodes": dataset.num_episodes,
         "dataset_frames": dataset.num_frames, "fps": dataset_metadata.fps})
     if run is not None:
         with open(output_directory / "train_config.yaml", "a") as f:
@@ -295,7 +401,7 @@ def main(cfg: TrainConfig):
     optimizer = policy_cfg.get_optimizer_preset().build(policy.parameters())
     scaler = GradScaler()
     dataloader = torch.utils.data.DataLoader(
-        dataset,
+        Uint8Images(dataset, image_keys),
         batch_size=cfg.batch_size,
         shuffle=True,
         num_workers=cfg.num_workers,
@@ -316,9 +422,11 @@ def main(cfg: TrainConfig):
     last_log = (time.monotonic(), 0)    # para la velocidad entre registros de W&B
     while not done:
         for batch in dataloader:
+            batch = images_to_float(batch, image_keys, device)
             if cfg.relative_actions:
                 batch["action"] = to_relative(batch["action"], batch["observation.state"], policy_cfg.n_obs_steps - 1)
             batch = preprocessor(batch)
+            release_step_inputs(preprocessor)
 
             # Mixed precision con bfloat16 (óptimo para RTX 50xx)
             with autocast(device_type="cuda", dtype=torch.bfloat16):
@@ -329,6 +437,8 @@ def main(cfg: TrainConfig):
             scaler.update()
             optimizer.zero_grad(set_to_none=True)  # Más eficiente en memoria
 
+            if step == 2:                    # el primer paso todavía no reservó todo
+                warn_if_vram_overflows(device)
             if step % cfg.log_freq == 0:
                 print(f"step: {step} loss: {loss.item():.3f}")
             if run is not None and step % cfg.wandb_log_freq == 0:

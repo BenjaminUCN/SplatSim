@@ -23,8 +23,8 @@ n_action_steps: 32        # actions executed per prediction; <= horizon - n_obs_
 # ── Optimization ─────────────────────────────────────────────────────────────
 training_steps: 50000
 batch_size: 32
-num_workers: 12           # 16 caused OOM with 56 GB in WSL
-prefetch_factor: 3
+num_workers: 12           # each worker keeps prefetch_factor batches in shared memory;
+prefetch_factor: 1        # the script prints the estimate and stops if it is over 40% of the RAM
 image_augmentation: true  # brightness, contrast, random erasing, gaussian noise
 torch_compile: false      # compile the U-Net and image encoders (slower start, maybe faster steps)
 
