@@ -54,7 +54,7 @@ class LeRobotDiffusionAgent:
         dataset_root: LeRobot dataset the policy was trained on: local folder, or Hugging Face
             repo id / URL (only meta/ is downloaded).
         device: "cuda" or "cpu".
-        n_action_steps: overrides the default chunk size of 32.
+        n_action_steps: acciones que se ejecutan por predicción (None: las del modelo, normalmente 32).
         ik_orientation: "off" solves IK for the predicted position only (what every trial did
             before 2026-11-10: the Euler angles passed to PyBullet were silently ignored);
             "hybrid" also asks for the predicted orientation and falls back to position-only
@@ -79,7 +79,7 @@ class LeRobotDiffusionAgent:
         self.ik_orientation = ik_orientation
         self.ik_counts = {"orientation": 0, "fallback": 0}   # hybrid: con orientación / sin ella
         self.device = device
-        self._n_act_steps = n_action_steps or _N_ACT_STEPS
+        self._requested_n_action_steps = n_action_steps   # lo aplica _load_diffusion_policy_model
         self._obs_buffer: deque[dict[str, torch.Tensor]] = deque(maxlen=_N_OBS_STEPS)
         self._action_queue: list[np.ndarray] = []
 
@@ -122,6 +122,19 @@ class LeRobotDiffusionAgent:
         self.policy = DiffusionPolicy.from_pretrained(checkpoint)
         self.policy.to(self.device)
         self.policy.eval()
+        n_action_steps = self._requested_n_action_steps
+        if n_action_steps is not None:
+            # acciones ejecutadas por predicción: el chunk entrenado es de horizon pasos desde el primer
+            # paso observado, así que caben hasta horizon - n_obs_steps + 1 (modeling_diffusion.py)
+            cfg = self.policy.config
+            limit = cfg.horizon - cfg.n_obs_steps + 1
+            if not 1 <= n_action_steps <= limit:
+                raise ValueError(f"n_action_steps debe estar entre 1 y {limit} (horizon {cfg.horizon}, "
+                                 f"n_obs_steps {cfg.n_obs_steps})")
+            print(f"[LeRobotDiffusionAgent] n_action_steps {cfg.n_action_steps} -> {n_action_steps}")
+            cfg.n_action_steps = n_action_steps
+            self.policy.reset()                  # la cola de acciones se crea con maxlen n_action_steps
+        self._n_act_steps = self.policy.config.n_action_steps
         
         print("[LeRobotDiffusionAgent] Policy Config:.")
         print(self.policy.config)

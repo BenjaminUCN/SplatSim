@@ -70,6 +70,9 @@ class Args:
     leaf_seed: int = 0
     # IK del agente: off (solo posición, lo de siempre) o hybrid (con la orientación si alcanza)
     ik_orientation: str = "off"
+    # acciones que se ejecutan por cada predicción de la política (None: las del modelo, 32 en todos los
+    # entrenados hasta ahora); menos = vuelve a mirar más seguido. Hasta horizon - n_obs_steps + 1
+    n_action_steps: int | None = None
     # termina el ensayo success_extra_seconds después de que el error de agarre baja de
     # SUCCESS_RADIUS (4 cm): ahorra tiempo y no cambia la tasa de éxito; en esos segundos el brazo
     # sigue acercándose, así el error mínimo no queda cortado en ~4 cm. time_to_success se anota
@@ -217,7 +220,8 @@ def main(args: Args) -> None:
 
     robot = ZMQClientRobot(port=args.robot_port, host=args.hostname)
     agent = LeRobotDiffusionAgent(checkpoint=args.checkpoint, dataset_root=args.dataset_root,
-                                  device="cuda", ik_orientation=args.ik_orientation)
+                                  device="cuda", ik_orientation=args.ik_orientation,
+                                  n_action_steps=args.n_action_steps)
 
     first_obs = robot.get_observations()
     missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
@@ -240,7 +244,7 @@ def main(args: Args) -> None:
     total = len(positions) * len(targets) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
               "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point", "trial_seconds",
-              "time_to_success", "stopped_on_success", "success_extra_seconds"]
+              "time_to_success", "stopped_on_success", "success_extra_seconds", "n_action_steps"]
     if targets != [None]:
         fields += ["occlusion_target", "leaf_status", "leaf", "leaf_camera", "occlusion_fit"]
     elif not manual:
@@ -286,6 +290,7 @@ def main(args: Args) -> None:
                     metadata = {"pos_idx": pos_idx, "trial": trial, "apple_position": apple_pos,
                                 "trial_seconds": args.trial_seconds, "manual": manual,
                                 "success_extra_seconds": args.success_extra_seconds if args.stop_on_success else None,
+                                "n_action_steps": agent.policy.config.n_action_steps,
                                 "checkpoint": checkpoint, "run_name": run_name}
                     result = run_trial(robot, agent, None if (args.here or manual) else apple_pos,
                                        args.trial_seconds, metadata, root, grasp_point,
@@ -302,7 +307,8 @@ def main(args: Args) -> None:
                         result["manual_success"] = int(answer == "Success")
                     row = {"pos_idx": pos_idx, "trial": trial, **result, "grasp_point": point_text,
                            "trial_seconds": args.trial_seconds,
-                           "success_extra_seconds": args.success_extra_seconds if args.stop_on_success else ""}
+                           "success_extra_seconds": args.success_extra_seconds if args.stop_on_success else "",
+                           "n_action_steps": agent.policy.config.n_action_steps}
                     if apple_pos:
                         row.update(x=apple_pos[0], y=apple_pos[1], z=apple_pos[2])
                     writer.writerow(row)
