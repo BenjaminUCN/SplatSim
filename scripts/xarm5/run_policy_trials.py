@@ -70,10 +70,12 @@ class Args:
     leaf_seed: int = 0
     # IK del agente: off (solo posición, lo de siempre) o hybrid (con la orientación si alcanza)
     ik_orientation: str = "off"
-    # termina el ensayo apenas el error de agarre baja de SUCCESS_RADIUS (4 cm): ahorra tiempo y no
-    # cambia la tasa de éxito, pero el error mínimo de esos ensayos queda en ~4 cm en vez del que
-    # habría alcanzado después. time_to_success se anota igual con o sin esta opción
+    # termina el ensayo success_extra_seconds después de que el error de agarre baja de
+    # SUCCESS_RADIUS (4 cm): ahorra tiempo y no cambia la tasa de éxito; en esos segundos el brazo
+    # sigue acercándose, así el error mínimo no queda cortado en ~4 cm. time_to_success se anota
+    # igual con o sin esta opción
     stop_on_success: bool = True
+    success_extra_seconds: float = 5.0   # tiempo simulado (de reloj en el robot real)
 
 
 def run_name_for(checkpoint: str) -> str:
@@ -115,11 +117,12 @@ def occlusion_columns(measured: dict) -> dict:
 
 def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_point,
               reset: bool = True, measure_occlusion: bool = False, leaf: dict | None = None,
-              stop_on_success: bool = False) -> dict:
+              stop_on_success: bool = False, success_extra_seconds: float = 0.0) -> dict:
     """apple_pos None: el tomate se deja donde está. Sin su posición en la observación (robot
     real) solo se cuentan los frames. leaf: {leaf_dir, target, key, seed} para place_trial_leaf.
     time_to_success: segundos desde el primer comando hasta que el error de agarre baja de
-    SUCCESS_RADIUS (tiempo simulado en el sim, de reloj en el robot real); vacío si no llega."""
+    SUCCESS_RADIUS (tiempo simulado en el sim, de reloj en el robot real); vacío si no llega.
+    stop_on_success: corta el ensayo success_extra_seconds después de ese momento."""
     call(robot, "stop_recording")
     if reset:
         call(robot, "reset_robot")
@@ -143,7 +146,7 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     period = 1 / obs["control_hz"] if "control_hz" in obs else 0.0
     frames, distances, grasp_errors = 0, [], []
     clock = (lambda o: o["sim_time"]) if "sim_time" in obs else (lambda o: time.monotonic())
-    start, time_to_success = clock(obs), None
+    start, time_to_success, stopped = clock(obs), None, False
     while True:
         t0 = time.monotonic()
         robot.command_joint_state(agent.act(obs))
@@ -158,14 +161,16 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
             grasp_errors.append(float(grasp_error(obs["state"], apple, grasp_point)))
             if time_to_success is None and grasp_errors[-1] <= SUCCESS_RADIUS:
                 time_to_success = round(clock(obs) - start, 3)
-                if stop_on_success:
-                    call(robot, "stop_recording")
-                    break
+            if (stop_on_success and time_to_success is not None
+                    and clock(obs) - start >= time_to_success + success_extra_seconds - 1e-9):
+                call(robot, "stop_recording")
+                stopped = True
+                break
         if not obs["recording"]:   # el servidor cortó al llegar a trial_seconds
             break
 
     result = {"folder": folder, "frames": frames, "time_to_success": time_to_success,
-              "stopped_on_success": int(stop_on_success and time_to_success is not None),
+              "stopped_on_success": int(stopped),
               **occlusion, **leaf_info}
     if agent.ik_orientation != "off":
         result["ik_fallbacks"] = agent.ik_counts["fallback"] - ik_before["fallback"]
@@ -235,7 +240,7 @@ def main(args: Args) -> None:
     total = len(positions) * len(targets) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
               "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point", "trial_seconds",
-              "time_to_success", "stopped_on_success"]
+              "time_to_success", "stopped_on_success", "success_extra_seconds"]
     if targets != [None]:
         fields += ["occlusion_target", "leaf_status", "leaf", "leaf_camera", "occlusion_fit"]
     elif not manual:
@@ -280,11 +285,13 @@ def main(args: Args) -> None:
                             continue
                     metadata = {"pos_idx": pos_idx, "trial": trial, "apple_position": apple_pos,
                                 "trial_seconds": args.trial_seconds, "manual": manual,
+                                "success_extra_seconds": args.success_extra_seconds if args.stop_on_success else None,
                                 "checkpoint": checkpoint, "run_name": run_name}
                     result = run_trial(robot, agent, None if (args.here or manual) else apple_pos,
                                        args.trial_seconds, metadata, root, grasp_point,
                                        reset=not manual, measure_occlusion=not manual, leaf=leaf,
-                                       stop_on_success=args.stop_on_success and not manual)
+                                       stop_on_success=args.stop_on_success and not manual,
+                                       success_extra_seconds=args.success_extra_seconds)
                     if manual:
                         call(robot, "stop_recording")
                         answer = ask_operator(robot, f"Trial {n}/{total} finished: result?",
@@ -294,7 +301,8 @@ def main(args: Args) -> None:
                             continue
                         result["manual_success"] = int(answer == "Success")
                     row = {"pos_idx": pos_idx, "trial": trial, **result, "grasp_point": point_text,
-                           "trial_seconds": args.trial_seconds}
+                           "trial_seconds": args.trial_seconds,
+                           "success_extra_seconds": args.success_extra_seconds if args.stop_on_success else ""}
                     if apple_pos:
                         row.update(x=apple_pos[0], y=apple_pos[1], z=apple_pos[2])
                     writer.writerow(row)
