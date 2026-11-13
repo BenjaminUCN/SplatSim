@@ -350,10 +350,17 @@ def start_wandb(cfg: TrainConfig, model_name: str, output_directory: Path, extra
         mode = "offline"
         print("[W&B] Sin `wandb login` (ni WANDB_API_KEY): la corrida se guarda offline en "
               f"{output_directory / 'wandb'}; súbela después con `wandb sync`")
-    run = wandb.init(project=cfg.wandb_project, entity=cfg.wandb_entity, name=model_name,
-                     notes=cfg.description or None, tags=[cfg.name] if cfg.name else None,
-                     dir=str(output_directory), mode=mode,
-                     config={**asdict(cfg), "model_name": model_name, **extra})
+    kwargs = dict(project=cfg.wandb_project, entity=cfg.wandb_entity, name=model_name,
+                  notes=cfg.description or None, tags=[cfg.name] if cfg.name else None,
+                  dir=str(output_directory), config={**asdict(cfg), "model_name": model_name, **extra})
+    try:
+        run = wandb.init(mode=mode, **kwargs)
+    except Exception as e:  # noqa: BLE001  sin W&B se entrena igual
+        if mode == "offline":
+            raise
+        # p. ej. un 403 desde un pod en China (13-nov): la corrida queda offline y se sube con `wandb sync`
+        print(f"[W&B] No se pudo iniciar online ({type(e).__name__}: {str(e)[:200]}); sigue offline")
+        run = wandb.init(mode="offline", **kwargs)
     print(f"[W&B] {run.url or f'offline: {run.dir}'}")
     return run
 

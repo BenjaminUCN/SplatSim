@@ -69,5 +69,43 @@ class TestConfig(unittest.TestCase):
         self.assertEqual(cfg.seed, 2)
 
 
+class FakeRun:
+    def __init__(self, mode):
+        self.mode, self.url, self.dir = mode, None, "/tmp/wandb-offline"
+
+
+class FakeWandb:
+    """wandb.init falla online (como el 403 desde un pod en China) y funciona offline."""
+
+    def __init__(self, fail_offline=False):
+        self.modes, self.fail_offline = [], fail_offline
+
+    def init(self, mode, **kwargs):
+        self.modes.append(mode)
+        if mode == "online" or self.fail_offline:
+            raise RuntimeError("Error uploading run: returned error 403")
+        return FakeRun(mode)
+
+
+class TestWandbFallback(unittest.TestCase):
+    def setUp(self):
+        self.cfg = td.load_config(["--config", "configs/train/diffusion.yaml", "--wandb-mode", "online"])
+
+    def start(self, fake):
+        from unittest import mock
+        with mock.patch.dict(sys.modules, {"wandb": fake}), mock.patch.object(td, "wandb_logged_in", return_value=True):
+            return td.start_wandb(self.cfg, "m", Path("/tmp"), {})
+
+    def test_online_failure_falls_back_to_offline(self):
+        fake = FakeWandb()
+        run = self.start(fake)
+        self.assertEqual(fake.modes, ["online", "offline"])
+        self.assertEqual(run.mode, "offline")
+
+    def test_offline_failure_still_raises(self):
+        with self.assertRaises(RuntimeError):
+            self.start(FakeWandb(fail_offline=True))
+
+
 if __name__ == "__main__":
     unittest.main()
