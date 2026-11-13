@@ -14,15 +14,18 @@ corrida se guarda offline en <output_root>/<model_name>/wandb y se sube después
 """
 
 import argparse
+import copy
 import math
 import netrc
 import os
+import random
 import sys
 import time
 from dataclasses import asdict, dataclass, fields, replace
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import torch
 import tyro
 import yaml
@@ -67,7 +70,21 @@ class TrainConfig:
     # Entrena más rápido, y el agente le sigue pasando las del sim tal cual. Con un dataset ya reescalado
     # (scripts/xarm5/resize_dataset.py) se pone el mismo tamaño, para que el modelo reescale las del sim
     resize_shape: tuple[int, int] | None = None
+    # Encoder de imágenes. Por defecto (LeRobot desde may-2026) ResNet18 de ImageNet con BatchNorm;
+    # Diffusion Policy lo entrena desde cero con GroupNorm: pretrained_backbone: null, group_norm: true
+    pretrained_backbone: str | None = "ResNet18_Weights.IMAGENET1K_V1"
+    group_norm: bool = False
     # optimización
+    seed: int | None = None             # None -> otra corrida cada vez
+    # Learning rate coseno con warmup (el preset de DiffusionConfig: warmup 500, termina en ~0).
+    # False -> constante 1e-4, como todos los modelos hasta el 13-nov
+    lr_scheduler: bool = False
+    lr_warmup_steps: int = 500
+    # Promedio exponencial de los pesos, como Diffusion Policy (power 0.75, máximo 0.9999). Se guarda
+    # y se evalúa el modelo promediado. Con BatchNorm conviene group_norm (las estadísticas se copian)
+    ema: bool = False
+    ema_power: float = 0.75
+    ema_max_decay: float = 0.9999
     training_steps: int = 50000
     batch_size: int = 32
     # Cada worker del DataLoader deja prefetch_factor batches en memoria compartida, así que hay
@@ -149,6 +166,45 @@ def make_image_transforms() -> ImageTransforms:
             },
         )
     )
+
+
+def seed_everything(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def seed_worker(worker_id: int):
+    """Semilla de cada worker del DataLoader a partir de la del proceso (para random y numpy)."""
+    seed = torch.initial_seed() % 2**32
+    random.seed(seed)
+    np.random.seed(seed)
+
+
+class EMA:
+    """Copia de la política con el promedio exponencial de los pesos, como EMAModel de
+    diffusion_policy: decay = 1 - (1 + step)^-power, recortado a [0, max_decay]. Los buffers
+    (p. ej. estadísticas de BatchNorm) se copian tal cual."""
+
+    def __init__(self, model: torch.nn.Module, power: float = 0.75, max_decay: float = 0.9999):
+        self.model = copy.deepcopy(model).eval().requires_grad_(False)
+        self.power = power
+        self.max_decay = max_decay
+        self.step = 0
+
+    def decay(self) -> float:
+        value = 1 - (1 + self.step) ** -self.power
+        return min(max(value, 0.0), self.max_decay)
+
+    @torch.no_grad()
+    def update(self, model: torch.nn.Module):
+        decay = self.decay()
+        for ema_p, p in zip(self.model.parameters(), model.parameters()):
+            ema_p.lerp_(p.detach(), 1 - decay)
+        for ema_b, b in zip(self.model.buffers(), model.buffers()):
+            ema_b.copy_(b)
+        self.step += 1
 
 
 def make_delta_timestamps(delta_indices: list[int] | None, fps: int) -> list[float]:
@@ -312,6 +368,9 @@ def main(cfg: TrainConfig):
     print(f"Output: {output_directory}")
 
     device = torch.device(cfg.device)
+    if cfg.seed is not None:
+        seed_everything(cfg.seed)
+        print(f"Semilla: {cfg.seed}")
 
     print(f"Setting optimizations for device: {device}")
     # Optimizaciones RTX 5080
@@ -337,7 +396,12 @@ def main(cfg: TrainConfig):
         horizon=cfg.horizon,
         n_action_steps=cfg.n_action_steps,
         resize_shape=tuple(cfg.resize_shape) if cfg.resize_shape else None,
+        pretrained_backbone_weights=cfg.pretrained_backbone,
+        use_group_norm=cfg.group_norm,
+        scheduler_warmup_steps=cfg.lr_warmup_steps,
     )
+    print(f"Encoder: {cfg.pretrained_backbone or 'desde cero'}, "
+          f"{'GroupNorm' if cfg.group_norm else 'BatchNorm'}")
     print(f"Cameras: {list(policy_cfg.image_features)}")
     policy = DiffusionPolicy(policy_cfg)
     stats = dataset_metadata.stats
@@ -356,6 +420,7 @@ def main(cfg: TrainConfig):
     policy.to(device)
     print("Setting memory format to channels_last for CNN optimizations")
     policy.to(memory_format=torch.channels_last)  # Optimizado para CNNs con imágenes
+    ema = EMA(policy, cfg.ema_power, cfg.ema_max_decay) if cfg.ema else None   # antes de compilar
     if cfg.torch_compile:
         # module.compile() en vez de torch.compile(module) o compile_model de DiffusionConfig: esos
         # agregan _orig_mod. a las claves guardadas. Se compilan las submódulos porque aquí se
@@ -399,7 +464,16 @@ def main(cfg: TrainConfig):
     # Create the optimizer and dataloader for offline training
     print("Creating optimizer and dataloader")
     optimizer = policy_cfg.get_optimizer_preset().build(policy.parameters())
+    lr_scheduler = (policy_cfg.get_scheduler_preset().build(optimizer, cfg.training_steps)
+                    if cfg.lr_scheduler else None)
+    print(f"Learning rate: {policy_cfg.optimizer_lr:g}, "
+          + (f"coseno con warmup {cfg.lr_warmup_steps}" if lr_scheduler else "constante")
+          + (", EMA" if ema else ""))
     scaler = GradScaler()
+    generator = None
+    if cfg.seed is not None:
+        generator = torch.Generator()
+        generator.manual_seed(cfg.seed)
     dataloader = torch.utils.data.DataLoader(
         Uint8Images(dataset, image_keys),
         batch_size=cfg.batch_size,
@@ -409,6 +483,8 @@ def main(cfg: TrainConfig):
         drop_last=True,
         prefetch_factor=cfg.prefetch_factor,
         persistent_workers=True,
+        worker_init_fn=seed_worker,
+        generator=generator,
     )
 
     checkpoint_root = output_directory / "checkpoints"
@@ -436,6 +512,10 @@ def main(cfg: TrainConfig):
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad(set_to_none=True)  # Más eficiente en memoria
+            if lr_scheduler is not None:
+                lr_scheduler.step()
+            if ema is not None:
+                ema.update(policy)
 
             if step == 2:                    # el primer paso todavía no reservó todo
                 warn_if_vram_overflows(device)
@@ -454,7 +534,7 @@ def main(cfg: TrainConfig):
 
                 print(f"Saving checkpoint to {checkpoint_dir}")
 
-                policy.save_pretrained(checkpoint_dir / "policy")
+                (ema.model if ema else policy).save_pretrained(checkpoint_dir / "policy")
                 preprocessor.save_pretrained(checkpoint_dir / "preprocessor")
                 postprocessor.save_pretrained(checkpoint_dir / "postprocessor")
                 if run is not None:
@@ -471,13 +551,14 @@ def main(cfg: TrainConfig):
     print(f"\n Training time: {end_time - start_time}")
 
     # Save the policy checkpoint, alongside the pre/post processors
-    policy.save_pretrained(output_directory)
+    final = ema.model if ema else policy      # con EMA se guarda y se evalúa el modelo promediado
+    final.save_pretrained(output_directory)
     preprocessor.save_pretrained(output_directory)
     postprocessor.save_pretrained(output_directory)
 
     if cfg.push_to_hub:
         repo_id = f"{cfg.hub_user}/robot_learning_tutorial_{model_name}"
-        policy.push_to_hub(repo_id)
+        final.push_to_hub(repo_id)
         preprocessor.push_to_hub(repo_id)
         postprocessor.push_to_hub(repo_id)
     if run is not None:

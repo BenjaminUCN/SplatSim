@@ -19,10 +19,20 @@ arrangement: null         # or a camera arrangement from configs/camera_poses.ya
 n_obs_steps: 2            # observation horizon
 horizon: 64               # predicted action horizon; multiple of 8 with the default U-Net
 n_action_steps: 32        # actions executed per prediction; <= horizon - n_obs_steps + 1
+# Image encoder. Default: ImageNet ResNet18 with BatchNorm (LeRobot default since May 2026).
+# Diffusion Policy trains it from scratch with GroupNorm: pretrained_backbone: null, group_norm: true
+pretrained_backbone: ResNet18_Weights.IMAGENET1K_V1
+group_norm: false
 
 # ── Optimization ─────────────────────────────────────────────────────────────
 training_steps: 50000
 batch_size: 32
+seed: null                # null -> a different run every time
+lr_scheduler: false       # true -> cosine with warmup (Diffusion Policy); false -> constant 1e-4
+lr_warmup_steps: 500
+ema: false                # true -> save and evaluate the EMA of the weights (Diffusion Policy)
+ema_power: 0.75
+ema_max_decay: 0.9999
 num_workers: 12           # each worker keeps prefetch_factor batches in shared memory;
 prefetch_factor: 1        # the script prints the estimate and stops if it is over 40% of the RAM
 image_augmentation: true  # brightness, contrast, random erasing, gaussian noise
