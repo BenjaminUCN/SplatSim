@@ -174,6 +174,8 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
     def _step(self, n: int = 1) -> None:
         for _ in range(n):
             self.pybullet_client.stepSimulation()
+            if self.gripper is not None:    # sin use_gripper no se crea
+                self.gripper.follow()       # gripper v4: mandíbula y bastón siguen al horn
         self.sim_steps += n
 
     def _advance(self, n: int) -> None:

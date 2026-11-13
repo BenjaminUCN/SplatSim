@@ -173,6 +173,21 @@ python scripts/xarm5/plan_trajectories.py --episodes 6 --out ~/data/bc_data/plan
 python scripts/xarm5/render_recordings.py ~/data/bc_data/planned_cut --fps 10 --robot_name xarm5_lite_plant_v3_hand_held_down
 ```
 
+`xarm5_lite_plant_v3_hand_held_v4_down` is the same scene with the v4 tool, to compare with `_hand_held_down`:
+
+- **v4 changes:** the XL330 is 9.30 mm closer to the arm, so the horn axis is at (12.7, 4.565) mm. The pruner has measured dimensions and sits 7.10 mm higher, on two columns of the bottom plate. An HN05 adapter on the horn drives a 62.72 mm rod to a pin on the pruner's moving plate, which forms a four-bar linkage.
+- **Linkage:** `hand_held_rod_joint` hangs from the horn. In the sim only the horn has a motor; after every physics step, the jaw and rod are set from the horn angle (`splatsim/utils/scene/hand_held_linkage.py`). The horn turns 85.9° from open to closed, and the jaw closes faster at the start: at half the horn travel it is 61 % closed.
+- **Meshes:** `splatsim/robot_definitions/meshes/hand_held_xl330_v4/` is built from the CAD package by `scripts/xarm5/import_hand_held_v4.py`. Its `manifest.json` holds the geometry that changed and the linkage parameters. The package has no new XL330, horn or screw meshes, so it uses the v3 ones moved by 9.30 mm; the mount and top cover are the v3 ones.
+- **Unconfirmed in the CAD:** where the pruner pin goes, the width of `anvil_lip`, the 6 × 3 mm rod, and the sign between the horn angle and the Dynamixel position.
+- **Not covered yet:** the real station's 3D view (`xarm5_urdf_joints` in `urdf_view.py`) still moves the jaw in proportion to the horn.
+
+```bash
+python scripts/xarm5/import_hand_held_v4.py ~/Downloads/paquete_v4
+python scripts/xarm5/build_hand_held_urdf.py --mesh-dir splatsim/robot_definitions/meshes/hand_held_xl330_v4 --dst ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_v4_down.urdf
+python scripts/xarm5/hand_held_splat.py --new-scene xarm5_lite_plant_v3_hand_held_v4_down --urdf '~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_v4_down.urdf' --mesh-dir splatsim/robot_definitions/meshes/hand_held_xl330_v4
+python scripts/xarm5/add_peduncle.py --scene xarm5_lite_plant_v3_hand_held_v4_down
+```
+
 `xarm5_lite_plant_v3_hand_held_down_cam_down` is the same scene with the camera stand turned 180° on the flange, so the D435i sits below the tool (on the blue cover's side). The camera is remounted turned 180° on the stand, so its image stays upright; the tool now shows at the top of the wrist image instead of the bottom. It shares the splat of `_hand_held_down` (the camera is not in the splat):
 
 ```bash

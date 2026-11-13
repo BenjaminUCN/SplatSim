@@ -16,7 +16,7 @@ import pybullet as p
 import yaml
 from pybullet_utils.bullet_client import BulletClient
 
-from splatsim.utils.scene.hand_held import MESH_DIR, PIVOT_MM, load_manifest, merge_splat, read_ply, read_stl, sample_surface, write_ply
+from splatsim.utils.scene.hand_held import MESH_DIR, load_design, load_manifest, merge_splat, read_ply, read_stl, sample_surface, write_ply
 from splatsim.utils.paths import load_yaml
 
 from splatsim.utils.paths import OBJECTS_CONFIG as OBJECTS  # noqa: E402
@@ -38,6 +38,7 @@ def main() -> None:
     parser.add_argument("--new-scene", help="default: <scene>_hand_held")
     parser.add_argument("--urdf", default=DEFAULT_URDF)
     parser.add_argument("--spacing-mm", type=float, default=1.5)
+    parser.add_argument("--mesh-dir", default=MESH_DIR, help="the gripper meshes the URDF was built with (v3 by default)")
     args = parser.parse_args()
 
     new_scene = args.new_scene or args.scene + "_hand_held"
@@ -70,15 +71,17 @@ def main() -> None:
         T[:3, 3] = state[4]
         return T
 
-    # todas las mallas están en el marco del ensamble, que es el de hand_held_base
+    # todas las mallas están en el marco del ensamble, que es el de hand_held_base; las del horn y el bastón
+    # están puestas con el gripper abierto, que es su pose con q = 0
+    design = load_design(args.mesh_dir)
     base = link_pose("hand_held_base")
     rng = np.random.default_rng(0)
     xyz, rgb, labels = [], [], []
-    for part in load_manifest():
-        points = sample_surface(read_stl(os.path.join(MESH_DIR, part["file"])), args.spacing_mm, rng) / 1000
+    for part in load_manifest(args.mesh_dir):
+        points = sample_surface(read_stl(os.path.join(args.mesh_dir, part["file"])), args.spacing_mm, rng) / 1000
         if part["link"] == "jaw":   # las mallas están cerradas; el link en q = 0 está abierto
             frame = link_pose("hand_held_jaw")
-            world = (points - np.array([*PIVOT_MM, 0.0]) / 1000) @ frame[:3, :3].T + frame[:3, 3]
+            world = (points - np.array([*design["pivot_mm"], 0.0]) / 1000) @ frame[:3, :3].T + frame[:3, 3]
         else:
             world = points @ base[:3, :3].T + base[:3, 3]
         xyz.append(world)
@@ -105,7 +108,7 @@ def main() -> None:
     entry["urdf_path"] = [args.urdf]
     entry["model_path"] = raw[args.scene]["model_path"].rstrip("/\\") + suffix
     entry["aabb"] = {**entry["aabb"], "bounding_box": aabb}
-    entry["gripper"] = "hand_held_xl330"
+    entry["gripper"] = design["gripper"]
     with open(OBJECTS, "a", encoding="utf-8") as f:
         f.write(yaml.safe_dump({new_scene: entry}, sort_keys=False, default_flow_style=None))
     print(f"{dropped} gaussians removed, {len(merged)} in total; {out}")

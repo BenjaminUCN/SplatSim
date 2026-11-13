@@ -13,6 +13,8 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
+from .hand_held_linkage import ROD_JOINT, Linkage
+
 MESH_DIR = "splatsim/robot_definitions/meshes/hand_held_xl330"
 GRIPPER_BASE_LINK = "xarm_gripper_base_link"
 KEEP_LINKS = ("wrist_camera_link",)
@@ -132,6 +134,19 @@ def load_manifest(mesh_dir: str = MESH_DIR) -> list[dict]:
         return json.load(f)["parts"]
 
 
+def load_design(mesh_dir: str = MESH_DIR) -> dict:
+    """Geometría del gripper de una carpeta de mallas: la del v3 (estas constantes) salvo lo que diga su
+    manifest.json (el v4 trae otro eje del horn, otro centro del filo y el cuatro barras en "linkage")."""
+    with open(os.path.join(mesh_dir, "manifest.json"), encoding="utf-8") as f:
+        manifest = json.load(f)
+    return {"gripper": manifest.get("gripper", "hand_held_xl330"),
+            "horn_axis_mm": tuple(manifest.get("horn_axis_mm", HORN_AXIS_MM)),
+            "pivot_mm": tuple(manifest.get("pivot_mm", PIVOT_MM)),
+            "jaw_travel_rad": float(manifest.get("jaw_travel_rad", JAW_TRAVEL_RAD)),
+            "gripper_center_mm": tuple(manifest.get("gripper_center_mm", GRIPPER_CENTER_MM)),
+            "linkage": manifest.get("linkage")}
+
+
 def _inertial(link, mass: float, com_m, inertia: float) -> None:
     inertial = ET.SubElement(link, "inertial")
     ET.SubElement(inertial, "origin", xyz=" ".join(f"{v:.6f}" for v in com_m), rpy="0 0 0")
@@ -240,8 +255,9 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
             if any(f'"{n}"' in text or f">{n}<" in text for n in [*removed, *removed_joints]):
                 root.remove(element)
 
-    # mallas junto al URDF, con ruta relativa
-    prefix = "hand_held_xl330"
+    # mallas junto al URDF, con ruta relativa, en una carpeta con el nombre de la de origen (v3 y v4 no se pisan)
+    prefix = os.path.basename(os.path.normpath(mesh_dir))
+    design = load_design(mesh_dir)
     out_dir = os.path.join(os.path.dirname(os.path.abspath(dst)), prefix)
     os.makedirs(out_dir, exist_ok=True)
     parts = load_manifest(mesh_dir)
@@ -250,6 +266,7 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
     base_parts = [p for p in parts if p["link"] == "base"]
     horn_parts = [p for p in parts if p["link"] == "horn"]
     jaw_parts = [p for p in parts if p["link"] == "jaw"]
+    rod_parts = [p for p in parts if p["link"] == "rod"]
     if extra_horn_mesh:
         shutil.copy2(extra_horn_mesh, out_dir)
         horn_parts.append({"name": "horn_extra", "file": os.path.basename(extra_horn_mesh), "link": "horn",
@@ -262,7 +279,7 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
     com = sum(m * np.array(p["com_mm"]) for m, p in zip(masses, base_parts)) / masses.sum() / 1000
     _inertial(base, float(masses.sum()), com, 1e-3)
 
-    horn_origin_m = np.array([*HORN_AXIS_MM, 0.0]) / 1000
+    horn_origin_m = np.array([*design["horn_axis_mm"], 0.0]) / 1000
     horn = ET.SubElement(root, "link", name="hand_held_horn")
     for part in horn_parts:
         _add_part(horn, part, -horn_origin_m, prefix)
@@ -270,7 +287,8 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
 
     if jaw_parts:
         # las mallas están con la mandíbula cerrada; q = 0 es abierta, como el horn
-        pivot_m = np.array([*PIVOT_MM, 0.0]) / 1000
+        pivot_m = np.array([*design["pivot_mm"], 0.0]) / 1000
+        jaw_travel = design["jaw_travel_rad"]
         jaw = ET.SubElement(root, "link", name="hand_held_jaw")
         for part in jaw_parts:
             _add_part(jaw, part, -pivot_m, prefix)
@@ -278,11 +296,32 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
         jaw_com = sum(m * np.array(p["com_mm"]) for m, p in zip(jaw_masses, jaw_parts)) / jaw_masses.sum() / 1000
         _inertial(jaw, float(jaw_masses.sum()), jaw_com - pivot_m, 1e-4)
         jaw_joint = ET.SubElement(root, "joint", name=JAW_JOINT, type="revolute")
-        ET.SubElement(jaw_joint, "origin", xyz=" ".join(f"{v:.6f}" for v in pivot_m), rpy=f"0 0 {-JAW_TRAVEL_RAD:.5f}")
+        ET.SubElement(jaw_joint, "origin", xyz=" ".join(f"{v:.6f}" for v in pivot_m), rpy=f"0 0 {-jaw_travel:.5f}")
         ET.SubElement(jaw_joint, "parent", link="hand_held_base")
         ET.SubElement(jaw_joint, "child", link="hand_held_jaw")
         ET.SubElement(jaw_joint, "axis", xyz="0 0 1")
-        ET.SubElement(jaw_joint, "limit", lower="0", upper=f"{JAW_TRAVEL_RAD:.5f}", effort="5", velocity="5")
+        ET.SubElement(jaw_joint, "limit", lower="0", upper=f"{jaw_travel:.5f}", effort="5", velocity="5")
+
+    if rod_parts:
+        # bastón del cuatro barras: cuelga del horn en su pasador; mallas puestas con el gripper abierto (q = 0)
+        if not design["linkage"]:
+            raise ValueError(f"{mesh_dir} has rod parts but no linkage in its manifest")
+        linkage = Linkage.from_manifest(design["linkage"])
+        pin_m = np.array([*linkage.horn_pin(1.0), 0.0]) / 1000
+        rod = ET.SubElement(root, "link", name="hand_held_rod")
+        for part in rod_parts:
+            _add_part(rod, part, -pin_m, prefix)
+        rod_mass = sum(_part_mass(p) for p in rod_parts)
+        rod_com = sum(_part_mass(p) * np.array(p["com_mm"]) for p in rod_parts) / rod_mass / 1000
+        _inertial(rod, float(rod_mass), rod_com - pin_m, 1e-6)
+        angles = [linkage.joints_at(t)[2] for t in np.linspace(0, 1, 101)]
+        rod_joint = ET.SubElement(root, "joint", name=ROD_JOINT, type="revolute")
+        ET.SubElement(rod_joint, "origin", xyz=" ".join(f"{v:.6f}" for v in pin_m - horn_origin_m), rpy="0 0 0")
+        ET.SubElement(rod_joint, "parent", link="hand_held_horn")
+        ET.SubElement(rod_joint, "child", link="hand_held_rod")
+        ET.SubElement(rod_joint, "axis", xyz="0 0 1")
+        ET.SubElement(rod_joint, "limit", lower=f"{min(angles):.5f}", upper=f"{max(angles):.5f}", effort="5",
+                      velocity="20")
 
     center = ET.SubElement(root, "link", name="gripper_center_link")
     _inertial(center, 0.001, (0, 0, 0), 1e-8)
@@ -301,7 +340,8 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
     ET.SubElement(drive, "limit", lower="0", upper=f"{travel_rad:.5f}", effort="0.52", velocity="10.8")
 
     center_joint = ET.SubElement(root, "joint", name="gripper_center_fix", type="fixed")
-    ET.SubElement(center_joint, "origin", xyz=" ".join(f"{v / 1000:.6f}" for v in GRIPPER_CENTER_MM), rpy="0 0 0")
+    ET.SubElement(center_joint, "origin", xyz=" ".join(f"{v / 1000:.6f}" for v in design["gripper_center_mm"]),
+                  rpy="0 0 0")
     ET.SubElement(center_joint, "parent", link="hand_held_base")
     ET.SubElement(center_joint, "child", link="gripper_center_link")
 

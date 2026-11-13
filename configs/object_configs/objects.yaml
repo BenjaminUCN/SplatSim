@@ -398,3 +398,29 @@ xarm5_lite_plant_v3_hand_held_down_cam_down:
   use_gripper: true
   gripper: hand_held_xl330
   object_overrides: {plastic_apple: plastic_apple_peduncle}
+xarm5_lite_plant_v3_hand_held_v4_down:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_v4_down.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_v4_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5218, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330_v4
+  object_overrides: {plastic_apple: plastic_apple_peduncle}

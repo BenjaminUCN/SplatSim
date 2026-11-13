@@ -1,0 +1,277 @@
+{
+ "source": "paquete_v4 (construir_hand_held_XL330_v4.py): v3 servo moved 9.30 mm, measured pruner, HN05 adapter v3 and rod; mount_xarm5 and top_cover from v3",
+ "units": "mm",
+ "gripper": "hand_held_xl330_v4",
+ "horn_axis_mm": [
+  12.7,
+  4.56524
+ ],
+ "pivot_mm": [
+  9.66,
+  58.97
+ ],
+ "jaw_travel_rad": 0.615,
+ "gripper_center_mm": [
+  -9.9,
+  97.0,
+  -4.215
+ ],
+ "linkage": {
+  "horn_axis_mm": [
+   12.7,
+   4.56524
+  ],
+  "pivot_mm": [
+   9.66,
+   58.97
+  ],
+  "yoke_mm": [
+   -13.88,
+   57.64
+  ],
+  "jaw_travel_rad": 0.615,
+  "crank_mm": 11.5,
+  "rod_mm": 62.72,
+  "branch": 1
+ },
+ "parts": [
+  {
+   "name": "mount_xarm5",
+   "file": "mount_xarm5.stl",
+   "link": "base",
+   "rgb": [
+    0.35,
+    0.35,
+    0.38
+   ],
+   "collision": true,
+   "volume_mm3": 35019.5,
+   "com_mm": [
+    -0.0,
+    -46.586,
+    -15.954
+   ]
+  },
+  {
+   "name": "top_cover",
+   "file": "top_cover.stl",
+   "link": "base",
+   "rgb": [
+    0.2,
+    0.5,
+    0.85
+   ],
+   "collision": true,
+   "volume_mm3": 15437.3,
+   "com_mm": [
+    -0.0,
+    -0.104,
+    -1.162
+   ]
+  },
+  {
+   "name": "xl330",
+   "file": "xl330.stl",
+   "link": "base",
+   "rgb": [
+    0.14,
+    0.15,
+    0.17
+   ],
+   "collision": true,
+   "volume_mm3": 15184.5,
+   "com_mm": [
+    12.71,
+    -2.669,
+    -24.108
+   ]
+  },
+  {
+   "name": "tornillos_m2",
+   "file": "tornillos_m2.stl",
+   "link": "base",
+   "rgb": [
+    0.15,
+    0.35,
+    0.75
+   ],
+   "collision": false,
+   "volume_mm3": 150.5,
+   "com_mm": [
+    12.7,
+    -2.935,
+    -13.455
+   ]
+  },
+  {
+   "name": "horn",
+   "file": "horn.stl",
+   "link": "horn",
+   "rgb": [
+    0.62,
+    0.64,
+    0.68
+   ],
+   "collision": false,
+   "volume_mm3": 645.7,
+   "com_mm": [
+    12.7,
+    4.562,
+    -11.315
+   ]
+  },
+  {
+   "name": "bottom_plate",
+   "file": "bottom_plate.stl",
+   "link": "base",
+   "rgb": [
+    0.85,
+    0.35,
+    0.1
+   ],
+   "collision": true,
+   "volume_mm3": 58022.4,
+   "com_mm": [
+    -0.464,
+    -4.679,
+    -16.977
+   ]
+  },
+  {
+   "name": "fixed_steel",
+   "file": "fixed_steel.stl",
+   "link": "base",
+   "rgb": [
+    0.35,
+    0.38,
+    0.4
+   ],
+   "collision": false,
+   "volume_mm3": 9461.2,
+   "com_mm": [
+    -10.38,
+    51.071,
+    -10.72
+   ]
+  },
+  {
+   "name": "anvil",
+   "file": "anvil.stl",
+   "link": "base",
+   "rgb": [
+    0.95,
+    0.62,
+    0.15
+   ],
+   "collision": true,
+   "volume_mm3": 5595.9,
+   "com_mm": [
+    -14.783,
+    92.569,
+    -5.165
+   ]
+  },
+  {
+   "name": "anvil_lip",
+   "file": "anvil_lip.stl",
+   "link": "base",
+   "rgb": [
+    0.95,
+    0.62,
+    0.15
+   ],
+   "collision": true,
+   "volume_mm3": 1424.1,
+   "com_mm": [
+    -16.107,
+    98.187,
+    -0.055
+   ]
+  },
+  {
+   "name": "pivot_bolt",
+   "file": "pivot_bolt.stl",
+   "link": "base",
+   "rgb": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "collision": false,
+   "volume_mm3": 1770.2,
+   "com_mm": [
+    9.66,
+    58.967,
+    -12.595
+   ]
+  },
+  {
+   "name": "moving_jaw",
+   "file": "moving_jaw.stl",
+   "link": "jaw",
+   "rgb": [
+    0.75,
+    0.75,
+    0.72
+   ],
+   "collision": true,
+   "volume_mm3": 6021.9,
+   "com_mm": [
+    0.436,
+    96.526,
+    -4.215
+   ]
+  },
+  {
+   "name": "moving_plate",
+   "file": "moving_plate.stl",
+   "link": "jaw",
+   "rgb": [
+    0.08,
+    0.08,
+    0.09
+   ],
+   "collision": false,
+   "volume_mm3": 7674.4,
+   "com_mm": [
+    -1.842,
+    80.797,
+    -14.675
+   ]
+  },
+  {
+   "name": "adaptador_hn05",
+   "file": "adaptador_hn05.stl",
+   "link": "horn",
+   "rgb": [
+    0.92,
+    0.92,
+    0.9
+   ],
+   "collision": false,
+   "volume_mm3": 1578.5,
+   "com_mm": [
+    12.701,
+    4.565,
+    -8.112
+   ]
+  },
+  {
+   "name": "baston",
+   "file": "baston.stl",
+   "link": "rod",
+   "rgb": [
+    0.3,
+    0.3,
+    0.33
+   ],
+   "collision": false,
+   "volume_mm3": 1170.8,
+   "com_mm": [
+    -5.976,
+    34.308,
+    -5.3
+   ]
+  }
+ ]
+}
