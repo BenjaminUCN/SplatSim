@@ -21,6 +21,12 @@ aceptan, se corrigen ("válido desde este frame") o se excluyen, y quedan en
 Carpetas renderizadas con scripts/xarm5/render_recordings.py (traen render_info.yaml): se superpone la
 trayectoria original de teleoperación (~30 Hz, naranja) a la remuestreada (puntos azules, un
 punto por frame) y la carpeta Resampling compara ambas en el tiempo.
+
+Ensayos de scripts/xarm5/run_policy_trials.py (carpetas con trials.csv):
+    python scripts/xarm5/review_recordings.py --root ~/data/policy_trials
+Las corridas aparecen como <modelo>/<fecha>. Cada episodio muestra su resultado (✓/✗, error mínimo,
+oclusión, posición) y la carpeta Trial filters filtra por éxito, nivel de oclusión, fila z y posición
+de la grilla.
 """
 import io
 import hashlib
@@ -62,6 +68,7 @@ from splatsim.utils.trials.grasp_point import (  # noqa: E402
     save_grasp_point,
     tomato_in_ee,
 )
+from splatsim.utils.trials import trial_table  # noqa: E402
 from splatsim.utils.data.stop_labels import (  # noqa: E402
     VALID_RADIUS,
     auto_valid_from,
@@ -98,6 +105,22 @@ class Args:
     urdf: str | None = None
 
 
+def recording_folders(root: Path, depth: int = 2) -> list[str]:
+    """Carpetas con episodios (subcarpetas con .pkl), como rutas relativas a root. Busca hasta `depth`
+    niveles: las corridas de ensayos están en <modelo>/<fecha>/. No sigue enlaces simbólicos (las
+    carpetas de comparisons/ apuntan a corridas que ya aparecen)."""
+    found = []
+    for d in sorted(root.iterdir()):
+        if not d.is_dir() or d.is_symlink():
+            continue
+        children = [e for e in d.iterdir() if e.is_dir() and not e.is_symlink()]
+        if any(any(e.glob("*.pkl")) for e in children):
+            found.append(d.name)
+        elif depth > 1:
+            found += [f"{d.name}/{sub}" for sub in recording_folders(d, depth - 1)]
+    return found
+
+
 def _pkl_key(p: Path):
     return (0, int(p.stem), "") if p.stem.isdigit() else (1, 0, p.stem)
 
@@ -108,6 +131,7 @@ class RecordingFolder:
 
     def __init__(self, path: Path):
         self.path = path
+        self.trials = trial_table.load_trials(path)   # {} si no es una corrida de run_policy_trials.py
         self.episodes = sorted((d for d in path.iterdir() if d.is_dir() and any(d.glob("*.pkl"))),
                                key=lambda d: (not d.name.isdigit(), int(d.name) if d.name.isdigit() else 0, d.name))
         self.names = [d.name for d in self.episodes]
@@ -295,8 +319,11 @@ class Reviewer:
         print(f"[Review] http://localhost:{port}")
 
     def _folders(self) -> list[str]:
-        return sorted(d.name for d in self.root.iterdir()
-                      if d.is_dir() and any(e.is_dir() and any(e.glob("*.pkl")) for e in d.iterdir()))
+        return recording_folders(self.root)
+
+    def _folder_name(self) -> str | None:
+        """Nombre de la carpeta abierta en el desplegable (ruta relativa a --root)."""
+        return self.folder.path.relative_to(self.root).as_posix() if self.folder is not None else None
 
     # ── GUI ──────────────────────────────────────────────────────────────────
     def _build_gui(self):
@@ -312,6 +339,15 @@ class Reviewer:
         with gui.add_folder("Episode"):
             self.filter_select = gui.add_dropdown("Show", ["all", "kept", "discarded", "stop: unlabeled"],
                                                   initial_value="all")
+            self.trials_folder = gui.add_folder("Trial filters")
+            with self.trials_folder:
+                self.trial_result = gui.add_dropdown("Result", list(trial_table.RESULTS),
+                                                     hint=f"Success: min grasp error ≤ {SUCCESS_RADIUS * 100:.0f} cm")
+                self.trial_occlusion = gui.add_dropdown("Occlusion (%)", ["all"], hint="Target occlusion level")
+                self.trial_z = gui.add_dropdown("Row z (m)", ["all"])
+                self.trial_position = gui.add_dropdown("Position", ["all"], hint="Index in the grid")
+                self.trial_summary = gui.add_markdown("")
+            self.trials_folder.visible = False
             self.episode_select = gui.add_dropdown("Episode", ["-"])
             nav = gui.add_button_group("Navigate", ["◀ Prev", "Next ▶"])
             self.discard_box = gui.add_checkbox("Discard episode", False,
@@ -353,7 +389,8 @@ class Reviewer:
                 "Show source recording", True,
                 hint="Rendered folders: original teleoperation trail (orange) and resampled frames (blue)")
             gui.add_markdown(f"Gradient: start → end (`{COLORMAP}`). Stop label: green = in position, "
-                             "blue = not yet, gray = not used. Other trails: gray = kept, red = discarded")
+                             "blue = not yet, gray = not used. Other trails: gray = kept, red = discarded; "
+                             "trial runs: green = success")
 
         with gui.add_folder("Grasp point", expand_by_default=False):
             gui.add_markdown("Where the tomato's center must be in the end-effector frame for success "
@@ -384,6 +421,8 @@ class Reviewer:
         self.folder_select.on_update(lambda e: e.client and self.open_folder(self.folder_select.value))
         refresh.on_click(lambda _: self._refresh())
         self.filter_select.on_update(lambda e: e.client and self._refresh_episode_list())
+        for w in (self.trial_result, self.trial_occlusion, self.trial_z, self.trial_position):
+            w.on_update(lambda e: e.client and self._apply_trial_filters())
         self.episode_select.on_update(
             lambda e: e.client and self.open_episode(self.episode_select.value.split(" ")[0]))
         nav.on_click(lambda e: self._step_episode(-1 if e.target.value.startswith("◀") else 1))
@@ -548,7 +587,7 @@ class Reviewer:
         último episodio."""
         folders = self._folders()
         self.folder_select.options = folders or ["-"]
-        name = self.folder.path.name if self.folder is not None else None
+        name = self._folder_name()
         if name not in folders:
             name = folders[0] if folders else None
         if name is None:
@@ -564,6 +603,7 @@ class Reviewer:
         elif self.folder.grasp_point is not None:
             self._show_point_fields(self.folder.grasp_point, load_point_source())
         self.folder_select.value = name
+        self._setup_trial_filters()
         self._refresh_episode_list()
         visible = self._visible_names()
         if visible:
@@ -590,15 +630,38 @@ class Reviewer:
         folder.save_cache()
         print(f"[Review] {folder.path.name}: {len(folder.names)} trayectorias en {time.monotonic() - t0:.0f} s")
 
+    def _setup_trial_filters(self):
+        """Carpeta Trial filters: solo en corridas con trials.csv, con los valores de esa corrida."""
+        rows = self.folder.trials
+        self.trials_folder.visible = bool(rows)
+        self.trial_result.value = "all"
+        for widget, column in ((self.trial_occlusion, "occlusion_target"), (self.trial_z, "z"),
+                               (self.trial_position, "pos_idx")):
+            widget.options = trial_table.options(rows, column)
+            widget.value = "all"
+
+    def _apply_trial_filters(self):
+        self._refresh_episode_list()
+        visible = self._visible_names()
+        if visible and self.episode not in visible:
+            self.open_episode(visible[0])
+        self._draw_background()
+
     def _visible_names(self) -> list[str]:
         f, mode = self.folder, self.filter_select.value
         if mode == "kept":
-            return [n for n in f.names if n not in f.discarded]
-        if mode == "discarded":
-            return [n for n in f.names if n in f.discarded]
-        if mode == "stop: unlabeled":
-            return [n for n in f.names if n not in f.stop_labels and n not in f.discarded]
-        return list(f.names)
+            names = [n for n in f.names if n not in f.discarded]
+        elif mode == "discarded":
+            names = [n for n in f.names if n in f.discarded]
+        elif mode == "stop: unlabeled":
+            names = [n for n in f.names if n not in f.stop_labels and n not in f.discarded]
+        else:
+            names = list(f.names)
+        if not f.trials:
+            return names
+        return [n for n in names if trial_table.matches(
+            f.trials.get(n), self.trial_result.value, self.trial_occlusion.value, self.trial_z.value,
+            self.trial_position.value)]
 
     def _label(self, name: str) -> str:
         entry = self.folder.cached(name)
@@ -606,11 +669,18 @@ class Reviewer:
         broken = " · ⚠" if entry and entry.get("unreadable") else ""
         manual = self.folder.stop_labels.get(name)
         stop = (" · ⊘" if manual.get("exclude") else " · ✓") if manual else ""
-        return f"{name}{frames}{broken}{stop}" + (" · ✗" if name in self.folder.discarded else "")
+        row = self.folder.trials.get(name)
+        trial = f" · {trial_table.short_label(row)}" if row else ""
+        return f"{name}{trial}{frames}{broken}{stop}" + (" · discarded" if name in self.folder.discarded else "")
 
     def _refresh_episode_list(self):
         names = self._visible_names()
         options = [self._label(n) for n in names] or ["-"]
+        rows = [self.folder.trials[n] for n in names if n in self.folder.trials]
+        if self.folder.trials:
+            wins = sum(1 for r in rows if r["success"])
+            self.trial_summary.content = (f"{len(names)} of {len(self.folder.trials)} trials shown · "
+                                          f"{wins}/{len(rows)} successes" if rows else "No trial matches")
         self.episode_select.options = options
         if self.episode in names:
             self.episode_select.value = options[names.index(self.episode)]
@@ -758,6 +828,8 @@ class Reviewer:
             lines.append(f"gripper {g[0]:.2f} → {g[-1]:.2f}")
         if d.get("unreadable"):
             lines.append(f"**⚠ unreadable files:** {', '.join(d['unreadable'])} (skipped)")
+        if self.episode in f.trials:
+            lines[1:1] = trial_table.details(f.trials[self.episode])
         kept = len(f.names) - len(f.discarded)
         lines.append(f"folder: {kept} kept, {len(f.discarded)} discarded of {len(f.names)}")
         self.episode_info.content = "  \n".join(lines)
@@ -968,7 +1040,9 @@ class Reviewer:
                 continue
             ee = entry["ee"]
             segs.append(np.stack([ee[:-1], ee[1:]], axis=1))
-            color = (200, 60, 60) if name in self.folder.discarded else (150, 150, 150)
+            row = self.folder.trials.get(name)
+            color = ((200, 60, 60) if name in self.folder.discarded
+                     else (0, 131, 0) if row and row["success"] else (150, 150, 150))
             cols.append(np.broadcast_to(np.array(color, np.uint8), (len(ee) - 1, 2, 3)))
         if segs:
             self.v.scene.add_line_segments("/others", np.concatenate(segs), np.concatenate(cols),
