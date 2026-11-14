@@ -87,6 +87,10 @@ class TrainConfig:
     ema_max_decay: float = 0.9999
     training_steps: int = 50000
     batch_size: int = 32
+    # acumulación de gradientes: cada paso de optimización junta grad_accumulation lotes de
+    # batch_size / grad_accumulation muestras (mismo batch efectivo, menos VRAM; con GroupNorm da el
+    # mismo gradiente). Con BatchNorm las estadísticas se calculan por lote chico
+    grad_accumulation: int = 1
     # Cada worker del DataLoader deja prefetch_factor batches en memoria compartida, así que hay
     # num_workers × prefetch_factor batches en RAM a la vez. Ver loader_memory_bytes
     num_workers: int = 12
@@ -311,6 +315,23 @@ def loader_memory_bytes(image_frames: dict[str, tuple[int, int]], batch_size: in
     return batch * in_flight
 
 
+def micro_batch(cfg) -> int:
+    """Muestras por lote del DataLoader: batch_size / grad_accumulation."""
+    if cfg.grad_accumulation < 1 or cfg.batch_size % cfg.grad_accumulation:
+        raise SystemExit(f"batch_size {cfg.batch_size} no se divide en grad_accumulation {cfg.grad_accumulation}")
+    return cfg.batch_size // cfg.grad_accumulation
+
+
+def grouped(batches, n: int):
+    """Lotes de n en n (para la acumulación de gradientes); descarta el grupo incompleto del final."""
+    group = []
+    for b in batches:
+        group.append(b)
+        if len(group) == n:
+            yield group
+            group = []
+
+
 def total_ram_bytes() -> int:
     """RAM de la máquina, o el límite del contenedor si es menor (cgroup v2, pods de la nube)."""
     total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
@@ -331,7 +352,7 @@ MAX_LOADER_RAM_FRACTION = 0.4
 
 def check_loader_memory(cfg: TrainConfig, image_frames: dict[str, tuple[int, int]]):
     """Imprime la RAM estimada del DataLoader y aborta antes de entrenar si no cabe."""
-    need = loader_memory_bytes(image_frames, cfg.batch_size, cfg.num_workers, cfg.prefetch_factor)
+    need = loader_memory_bytes(image_frames, micro_batch(cfg), cfg.num_workers, cfg.prefetch_factor)
     total = total_ram_bytes()
     print(f"DataLoader: {cfg.num_workers} workers × prefetch {cfg.prefetch_factor}, "
           f"~{need / 1e9:.1f} GB de imágenes en RAM ({need / total:.0%} de {total / 1e9:.0f} GB)")
@@ -515,7 +536,7 @@ def main(cfg: TrainConfig):
         generator.manual_seed(cfg.seed)
     dataloader = torch.utils.data.DataLoader(
         Uint8Images(dataset, image_keys),
-        batch_size=cfg.batch_size,
+        batch_size=micro_batch(cfg),
         shuffle=True,
         num_workers=cfg.num_workers,
         pin_memory=True,
@@ -536,19 +557,23 @@ def main(cfg: TrainConfig):
     done = False
     last_log = (time.monotonic(), 0)    # para la velocidad entre registros de W&B
     while not done:
-        for batch in dataloader:
-            batch = images_to_float(batch, image_keys, device)
-            batch = drop_cameras(batch, image_keys, cfg.camera_dropout, cfg.camera_dropout_p)
-            if cfg.relative_actions:
-                batch["action"] = to_relative(batch["action"], batch["observation.state"], policy_cfg.n_obs_steps - 1)
-            batch = preprocessor(batch)
-            release_step_inputs(preprocessor)
+        for group in grouped(dataloader, cfg.grad_accumulation):
+            loss = 0.0
+            for batch in group:
+                batch = images_to_float(batch, image_keys, device)
+                batch = drop_cameras(batch, image_keys, cfg.camera_dropout, cfg.camera_dropout_p)
+                if cfg.relative_actions:
+                    batch["action"] = to_relative(batch["action"], batch["observation.state"], policy_cfg.n_obs_steps - 1)
+                batch = preprocessor(batch)
+                release_step_inputs(preprocessor)
 
-            # Mixed precision con bfloat16 (óptimo para RTX 50xx)
-            with autocast(device_type="cuda", dtype=torch.bfloat16):
-                loss, _ = policy.forward(batch)
+                # Mixed precision con bfloat16 (óptimo para RTX 50xx)
+                with autocast(device_type="cuda", dtype=torch.bfloat16):
+                    micro_loss, _ = policy.forward(batch)
+                scaler.scale(micro_loss / len(group)).backward()
+                loss = loss + micro_loss.detach() / len(group)
+                del batch, micro_loss
 
-            scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad(set_to_none=True)  # Más eficiente en memoria
