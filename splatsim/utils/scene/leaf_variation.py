@@ -109,13 +109,12 @@ def place_episode_leaf(server, draw: EpisodeDraw, cameras: list[str],
         return [], {**info, "status": "already_covered"}
 
     client = server.pybullet_client
-    view = server.cameras[camera]
+    origin, right = camera_origin(server, camera)
     tomato = np.array(client.getBasePositionAndOrientation(server.apple.body_id)[0])
-    view_axis = np.asarray(view.xyz, float) - tomato
-    right = np.reshape(client.getMatrixFromQuaternion(client.getQuaternionFromEuler(view.rpy)), (3, 3))[:, 0]
+    view_axis = origin - tomato
     direction = lateral_direction(view_axis, right, draw.direction_deg)
     wxyz = roll_quaternion(view_axis, draw.roll_deg)
-    position_at = lambda fraction, offset: place_between(view.xyz, tomato, fraction) + offset * direction  # noqa: E731
+    position_at = lambda fraction, offset: place_between(origin, tomato, fraction) + offset * direction  # noqa: E731
 
     leaf = {"name": draw.leaf.stem, "ply": str(draw.leaf), "position": position_at(FRACTIONS[0], 0.0).tolist(),
             "wxyz": list(wxyz), "enabled": True}
@@ -137,6 +136,18 @@ def place_episode_leaf(server, draw: EpisodeDraw, cameras: list[str],
     return [server.occluders.items[name].entry()], {
         **info, "status": fit["status"], "leaf": draw.leaf.stem, "occlusion": fit["occlusion"],
         "fraction": fit["fraction"], "offset": round(fit["offset"], 4), "arm_distance": distance}
+
+
+def camera_origin(server, camera: str) -> tuple[np.ndarray, np.ndarray]:
+    """Posición de la cámara y su eje x en el mundo, ahora. Las cámaras base tienen xyz/rpy fijos;
+    la de muñeca (WristCamera) sigue a su link, así que depende de la pose actual del brazo."""
+    client = server.pybullet_client
+    view = server.cameras[camera]
+    if hasattr(view, "xyz"):
+        rot = client.getMatrixFromQuaternion(client.getQuaternionFromEuler(view.rpy))
+        return np.asarray(view.xyz, float), np.reshape(rot, (3, 3))[:, 0]
+    state = client.getLinkState(server.dummy_robot, view.link_index, computeForwardKinematics=True)
+    return np.asarray(state[4], float), np.reshape(client.getMatrixFromQuaternion(state[5]), (3, 3))[:, 0]
 
 
 def arm_points(server, per_link: int = 5) -> np.ndarray:

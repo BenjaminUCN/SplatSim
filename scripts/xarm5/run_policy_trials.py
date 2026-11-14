@@ -68,6 +68,13 @@ class Args:
     occlusion_targets: tuple[float, ...] | None = None
     leaf_dir: str = "~/data/occluders/xarm5_lite_plant_v3"
     leaf_seed: int = 0
+    # cámara en que la hoja tapa el tomate (None: las cámaras base, como antes). Con wrist_rgb, la hoja
+    # se ajusta con el brazo en la pose de pregrasp del planner (efector a leaf_pregrasp m del punto de
+    # agarre, inclinación leaf_pitch_deg o la más cercana que alcance), porque en la pose inicial la
+    # muñeca no ve el tomate en casi ninguna posición. La hoja queda fija en el mundo durante el ensayo
+    leaf_camera: str | None = None
+    leaf_pregrasp: float = 0.09     # el centro del rango de pregrasp de las demos (0.06–0.12 m)
+    leaf_pitch_deg: float = -27.5   # el centro del rango de inclinación de las demos (−50 a −5°)
     # IK del agente: off (solo posición, lo de siempre) o hybrid (con la orientación si alcanza)
     ik_orientation: str = "off"
     # acciones que se ejecutan por cada predicción de la política (None: las del modelo, 32 en todos los
@@ -122,6 +129,19 @@ def blank(obs: dict, cameras) -> dict:
         image = obs[cam]
         out[cam] = image * 0 if hasattr(image, "detach") else np.zeros_like(image)
     return out
+
+
+def pregrasp_q(kin, tomato, point, seed, back: float, pitch_deg: float) -> list[float] | None:
+    """Articulaciones del brazo en la pose de pregrasp de plan_trajectories.plan_episode: el efector
+    `back` m antes de la pose de agarre, sobre el eje de la herramienta. Prueba pitch_deg y después
+    las inclinaciones del rango de las demos más cercanas a ella; None si ninguna alcanza."""
+    from plan_trajectories import grasp_pose
+    for pitch in [pitch_deg, *sorted(np.linspace(-50.0, -5.0, 10), key=lambda p: abs(p - pitch_deg))]:
+        pos, rot = grasp_pose(tomato, np.radians(pitch), point)
+        q = kin.ik(pos - back * rot[:, 2], rot, seed)
+        if q is not None:
+            return [float(v) for v in q]
+    return None
 
 
 def grid_index(apple_grid, pos, tol: float = 0.01) -> int:
@@ -290,6 +310,23 @@ def main(args: Args) -> None:
     if not manual:
         fields += list(occlusion_columns(call(robot, "measure_occlusion")))
     grasp_point = load_grasp_point()
+    pregrasp = {}   # pos_idx -> articulaciones de pregrasp (--leaf_camera wrist_rgb)
+    if args.leaf_camera and targets != [None]:
+        if args.leaf_camera not in first_obs:
+            raise SystemExit(f"--leaf_camera {args.leaf_camera}: el servidor no tiene esa cámara")
+        if "wrist" in args.leaf_camera:
+            from plan_trajectories import ARM_JOINTS, Kinematics
+            kin = Kinematics(call(robot, "robot_urdf"))
+            call(robot, "reset_robot")
+            sim_q = robot.get_observations()["sim_joint_positions"]
+            seed = [sim_q[i] for i in kin.movable[:ARM_JOINTS]]
+            for pos_idx in positions:
+                apple_pos = here if args.here else apple_grid[pos_idx]
+                pregrasp[pos_idx] = pregrasp_q(kin, apple_pos, grasp_point, seed,
+                                               args.leaf_pregrasp, args.leaf_pitch_deg)
+                if pregrasp[pos_idx] is None:
+                    print(f"[Trials] AVISO: sin pregrasp para la posición {pos_idx}: la hoja se ajusta "
+                          "con el brazo en la pose inicial")
     # con qué punto se midió el error de agarre: compare_trials.py recalcula si cambió
     point_text = " ".join(f"{v:.4f}" for v in grasp_point)
 
@@ -304,6 +341,8 @@ def main(args: Args) -> None:
                 # la misma hoja (sorteada por posición) en todos los niveles: solo cambia cuánto tapa
                 leaf = None if target is None else {"leaf_dir": args.leaf_dir, "target": target,
                                                     "key": pos_idx, "seed": args.leaf_seed}
+                if leaf is not None and args.leaf_camera:
+                    leaf.update(cameras=[args.leaf_camera], reference_q=pregrasp.get(pos_idx))
                 for trial in range(args.trials_per_position):
                     n += 1
                     where = "actual" if args.here else ""
@@ -329,7 +368,9 @@ def main(args: Args) -> None:
                                 "waypoint_tolerance": args.waypoint_tolerance,
                                 "waypoint_max_steps": args.waypoint_max_steps if args.waypoint_tolerance else None,
                                 "checkpoint": checkpoint, "run_name": run_name,
-                                "blank_cameras": list(args.blank_cameras)}
+                                "blank_cameras": list(args.blank_cameras),
+                                "leaf_reference": "pregrasp" if pregrasp.get(pos_idx) else None,
+                                "leaf_pregrasp": args.leaf_pregrasp if pregrasp else None}
                     result = run_trial(robot, agent, None if (args.here or manual) else apple_pos,
                                        args.trial_seconds, metadata, root, grasp_point,
                                        reset=not manual, measure_occlusion=not manual, leaf=leaf,
