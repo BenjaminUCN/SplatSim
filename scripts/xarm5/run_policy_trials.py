@@ -84,6 +84,9 @@ class Args:
     # igual con o sin esta opción
     stop_on_success: bool = True
     success_extra_seconds: float = 5.0   # tiempo simulado (de reloj en el robot real)
+    # cámaras que la política recibe en negro (p. ej. base_rgb o wrist_rgb), para medir de cuál depende.
+    # Solo cambia lo que ve la política: la grabación del ensayo guarda la imagen real
+    blank_cameras: tuple[str, ...] = ()
 
 
 def run_name_for(checkpoint: str) -> str:
@@ -110,6 +113,17 @@ def leaf_columns(fit: dict | None, target: float | None) -> dict:
             "leaf_camera": fit.get("camera"), "occlusion_fit": fit.get("occlusion")}
 
 
+def blank(obs: dict, cameras) -> dict:
+    """Copia de obs con las imágenes de esas cámaras en negro (mismo tipo y forma)."""
+    if not cameras:
+        return obs
+    out = dict(obs)
+    for cam in cameras:
+        image = obs[cam]
+        out[cam] = image * 0 if hasattr(image, "detach") else np.zeros_like(image)
+    return out
+
+
 def grid_index(apple_grid, pos, tol: float = 0.01) -> int:
     """Índice de la grilla más cercano a pos si está a menos de tol (m), si no -1."""
     if not apple_grid:
@@ -125,12 +139,14 @@ def occlusion_columns(measured: dict) -> dict:
 
 def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_point,
               reset: bool = True, measure_occlusion: bool = False, leaf: dict | None = None,
-              stop_on_success: bool = False, success_extra_seconds: float = 0.0) -> dict:
+              stop_on_success: bool = False, success_extra_seconds: float = 0.0,
+              blank_cameras: tuple[str, ...] = ()) -> dict:
     """apple_pos None: el tomate se deja donde está. Sin su posición en la observación (robot
     real) solo se cuentan los frames. leaf: {leaf_dir, target, key, seed} para place_trial_leaf.
     time_to_success: segundos desde el primer comando hasta que el error de agarre baja de
     SUCCESS_RADIUS (tiempo simulado en el sim, de reloj en el robot real); vacío si no llega.
-    stop_on_success: corta el ensayo success_extra_seconds después de ese momento."""
+    stop_on_success: corta el ensayo success_extra_seconds después de ese momento.
+    blank_cameras: cámaras que la política recibe en negro."""
     call(robot, "stop_recording")
     if reset:
         call(robot, "reset_robot")
@@ -158,7 +174,7 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     start, time_to_success, stopped = clock(obs), None, False
     while True:
         t0 = time.monotonic()
-        robot.command_joint_state(agent.act(obs))
+        robot.command_joint_state(agent.act(blank(obs, blank_cameras)))
         obs = robot.get_observations()
         frames += 1
         time.sleep(max(0.0, period - (time.monotonic() - t0)))
@@ -264,6 +280,11 @@ def main(args: Args) -> None:
         call(robot, "place_trial_leaf", leaf_dir=args.leaf_dir, target=0.0, key=0, seed=args.leaf_seed)
     if args.ik_orientation != "off":
         fields += ["ik_fallbacks"]
+    if args.blank_cameras:
+        fields += ["blank_cameras"]
+    unknown = set(args.blank_cameras) - set(policy_cameras(agent))
+    if unknown:
+        raise SystemExit(f"--blank_cameras: la política no usa {sorted(unknown)} (usa {policy_cameras(agent)})")
     if args.waypoint_tolerance is not None:
         fields += ["waypoint_tolerance", "waypoint_max_steps", "waypoints_reached", "waypoint_timeouts"]
     if not manual:
@@ -307,12 +328,14 @@ def main(args: Args) -> None:
                                 "n_action_steps": agent.policy.config.n_action_steps,
                                 "waypoint_tolerance": args.waypoint_tolerance,
                                 "waypoint_max_steps": args.waypoint_max_steps if args.waypoint_tolerance else None,
-                                "checkpoint": checkpoint, "run_name": run_name}
+                                "checkpoint": checkpoint, "run_name": run_name,
+                                "blank_cameras": list(args.blank_cameras)}
                     result = run_trial(robot, agent, None if (args.here or manual) else apple_pos,
                                        args.trial_seconds, metadata, root, grasp_point,
                                        reset=not manual, measure_occlusion=not manual, leaf=leaf,
                                        stop_on_success=args.stop_on_success and not manual,
-                                       success_extra_seconds=args.success_extra_seconds)
+                                       success_extra_seconds=args.success_extra_seconds,
+                                       blank_cameras=args.blank_cameras)
                     if manual:
                         call(robot, "stop_recording")
                         answer = ask_operator(robot, f"Trial {n}/{total} finished: result?",
@@ -328,6 +351,8 @@ def main(args: Args) -> None:
                     if args.waypoint_tolerance is not None:
                         row.update(waypoint_tolerance=args.waypoint_tolerance,
                                    waypoint_max_steps=args.waypoint_max_steps)
+                    if args.blank_cameras:
+                        row["blank_cameras"] = " ".join(args.blank_cameras)
                     if apple_pos:
                         row.update(x=apple_pos[0], y=apple_pos[1], z=apple_pos[2])
                     writer.writerow(row)
