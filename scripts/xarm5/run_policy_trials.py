@@ -22,6 +22,7 @@ queda en la columna manual_success (Discard no escribe fila). La duración es de
 """
 import time
 import csv
+import json
 import datetime
 import os
 import re
@@ -94,6 +95,11 @@ class Args:
     # cámaras que la política recibe en negro (p. ej. base_rgb o wrist_rgb), para medir de cuál depende.
     # Solo cambia lo que ve la política: la grabación del ensayo guarda la imagen real
     blank_cameras: tuple[str, ...] = ()
+    # mide cuánto del tomate tapa la escena en esta cámara (p. ej. wrist_rgb) cada track_every pasos
+    # de control durante el ensayo, no solo al inicio: guarda la serie en occlusion_track.json de cada
+    # episodio y su resumen en trials.csv (track_<cámara>_mean, _max, _pre_success y _in_view)
+    track_occlusion: str | None = None
+    track_every: int = 5
 
 
 def run_name_for(checkpoint: str) -> str:
@@ -157,16 +163,38 @@ def occlusion_columns(measured: dict) -> dict:
     return {f"occlusion_{cam}": r["occlusion"] for cam, r in measured.items()}
 
 
+TRACK_FILE = "occlusion_track.json"
+
+
+def track_columns(camera: str) -> list[str]:
+    return [f"track_{camera}_{k}" for k in ("mean", "max", "pre_success", "in_view")]
+
+
+def track_summary(camera: str, samples: list[tuple[float, float | None]],
+                  time_to_success: float | None) -> dict:
+    """samples: (segundos desde el inicio, % tapado o None si el tomate no está en cuadro). mean/max
+    sobre las muestras en cuadro; pre_success: la media hasta time_to_success (todo el ensayo si no
+    llegó); in_view: fracción de muestras con el tomate en cuadro."""
+    seen = [o for _, o in samples if o is not None]
+    pre = [o for t, o in samples if o is not None and (time_to_success is None or t <= time_to_success + 1e-9)]
+    mean = lambda v: round(float(np.mean(v)), 1) if v else None  # noqa: E731
+    cols = track_columns(camera)
+    return {cols[0]: mean(seen), cols[1]: max(seen) if seen else None, cols[2]: mean(pre),
+            cols[3]: round(len(seen) / len(samples), 2) if samples else None}
+
+
 def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_point,
               reset: bool = True, measure_occlusion: bool = False, leaf: dict | None = None,
               stop_on_success: bool = False, success_extra_seconds: float = 0.0,
-              blank_cameras: tuple[str, ...] = ()) -> dict:
+              blank_cameras: tuple[str, ...] = (), track_camera: str | None = None,
+              track_every: int = 5) -> dict:
     """apple_pos None: el tomate se deja donde está. Sin su posición en la observación (robot
     real) solo se cuentan los frames. leaf: {leaf_dir, target, key, seed} para place_trial_leaf.
     time_to_success: segundos desde el primer comando hasta que el error de agarre baja de
     SUCCESS_RADIUS (tiempo simulado en el sim, de reloj en el robot real); vacío si no llega.
     stop_on_success: corta el ensayo success_extra_seconds después de ese momento.
-    blank_cameras: cámaras que la política recibe en negro."""
+    blank_cameras: cámaras que la política recibe en negro.
+    track_camera: mide la oclusión del tomate en esa cámara cada track_every pasos (track_summary)."""
     call(robot, "stop_recording")
     if reset:
         call(robot, "reset_robot")
@@ -192,11 +220,20 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     frames, distances, grasp_errors = 0, [], []
     clock = (lambda o: o["sim_time"]) if "sim_time" in obs else (lambda o: time.monotonic())
     start, time_to_success, stopped = clock(obs), None, False
+
+    def track():
+        r = call(robot, "measure_occlusion", camera_names=[track_camera]).get(track_camera) or {}
+        samples.append((round(clock(obs) - start, 3), r.get("occlusion")))
+    samples = []
+    if track_camera:
+        track()
     while True:
         t0 = time.monotonic()
         robot.command_joint_state(agent.act(blank(obs, blank_cameras)))
         obs = robot.get_observations()
         frames += 1
+        if track_camera and frames % track_every == 0:
+            track()
         time.sleep(max(0.0, period - (time.monotonic() - t0)))
         if APPLE_KEY in obs:
             ee = np.asarray(obs["state"][:3])
@@ -217,6 +254,11 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     result = {"folder": folder, "frames": frames, "time_to_success": time_to_success,
               "stopped_on_success": int(stopped),
               **occlusion, **leaf_info}
+    if track_camera:
+        result.update(track_summary(track_camera, samples, time_to_success))
+        with open(os.path.join(folder, TRACK_FILE), "w") as f:
+            json.dump({"camera": track_camera, "every": track_every,
+                       "samples": [{"t": t, "occlusion": o} for t, o in samples]}, f)
     if agent.ik_orientation != "off":
         result["ik_fallbacks"] = agent.ik_counts["fallback"] - ik_before["fallback"]
     if agent.waypoint_tolerance is not None:
@@ -309,6 +351,10 @@ def main(args: Args) -> None:
         fields += ["waypoint_tolerance", "waypoint_max_steps", "waypoints_reached", "waypoint_timeouts"]
     if not manual:
         fields += list(occlusion_columns(call(robot, "measure_occlusion")))
+    if args.track_occlusion:
+        if manual or args.track_occlusion not in first_obs:
+            raise SystemExit(f"--track_occlusion {args.track_occlusion}: solo en el sim y con una cámara del servidor")
+        fields += track_columns(args.track_occlusion)
     grasp_point = load_grasp_point()
     pregrasp = {}   # pos_idx -> articulaciones de pregrasp (--leaf_camera wrist_rgb)
     if args.leaf_camera and targets != [None]:
@@ -376,7 +422,8 @@ def main(args: Args) -> None:
                                        reset=not manual, measure_occlusion=not manual, leaf=leaf,
                                        stop_on_success=args.stop_on_success and not manual,
                                        success_extra_seconds=args.success_extra_seconds,
-                                       blank_cameras=args.blank_cameras)
+                                       blank_cameras=args.blank_cameras,
+                                       track_camera=args.track_occlusion, track_every=args.track_every)
                     if manual:
                         call(robot, "stop_recording")
                         answer = ask_operator(robot, f"Trial {n}/{total} finished: result?",

@@ -85,6 +85,10 @@ class TrialTableTest(unittest.TestCase):
         self.assertIn("wrist_rgb", text)
         self.assertIn("success at 7.2 s", text)
         self.assertIn("wrist_rgb 83.8 %", "\n".join(tt.details(self.rows["002"])))
+        tracked = {**self.rows["000"], "track_wrist_rgb_mean": "33.1", "track_wrist_rgb_max": "80.0",
+                   "track_wrist_rgb_pre_success": "", "track_wrist_rgb_in_view": "0.76"}
+        self.assertIn("in wrist_rgb: mean 33.1 %, max 80 %, before success – %, in view 0.76",
+                      "\n".join(tt.details(tracked)))
 
 
 class RecordingFoldersTest(unittest.TestCase):

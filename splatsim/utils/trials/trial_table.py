@@ -104,6 +104,12 @@ def details(row: dict) -> list[str]:
             if c.startswith("occlusion_") and c.endswith("_rgb") and level_text(v)]
     if seen:
         lines.append("tomato hidden at start: " + ", ".join(seen))
+    for c in row:   # --track_occlusion: track_<cámara>_mean, _max, _pre_success, _in_view
+        if c.startswith("track_") and c.endswith("_mean") and level_text(row[c]):
+            cam = c.removeprefix("track_").removesuffix("_mean")
+            v = {k: level_text(row.get(f"track_{cam}_{k}")) or "–" for k in ("mean", "max", "pre_success", "in_view")}
+            lines.append(f"tomato hidden during the trial in {cam}: mean {v['mean']} %, max {v['max']} %, "
+                         f"before success {v['pre_success']} %, in view {v['in_view']} of the time")
     if row.get("blank_cameras"):
         lines.append(f"cameras blacked out for the policy: {row['blank_cameras']}")
     return lines
