@@ -92,6 +92,12 @@ class TrainConfig:
     num_workers: int = 12
     prefetch_factor: int = 1
     image_augmentation: bool = True
+    # camera dropout: en cada muestra, cada cámara de camera_dropout se pone en negro (todos los pasos
+    # observados) con probabilidad camera_dropout_p, como --blank_cameras de run_policy_trials.py.
+    # Obliga a la política a usar las otras cámaras (sin esto, DP-16/8 ignora base_rgb). Nunca deja
+    # una muestra sin ninguna cámara
+    camera_dropout: tuple[str, ...] = ()
+    camera_dropout_p: float = 0.3
     # acciones relativas a la pose del estado en el último paso observado (pos y euler; el gripper
     # queda absoluto). Ver splatsim/utils/data/relative_actions.py
     relative_actions: bool = False
@@ -252,6 +258,29 @@ class Uint8Images(torch.utils.data.Dataset):
         return item
 
 
+def drop_cameras(batch: dict, image_keys, dropout: tuple[str, ...], p: float,
+                 generator: torch.Generator | None = None) -> dict:
+    """Pone en negro, por muestra, cada cámara de `dropout` con probabilidad p (imágenes ya en float,
+    antes de normalizar: igual que una cámara en negro en la evaluación). Si en una muestra caerían
+    todas las cámaras del modelo, se deja la primera que no está en `dropout` (o la primera)."""
+    keys = list(image_keys)
+    drop = [f"observation.images.{c}" for c in dropout]
+    if not drop or p <= 0:
+        return batch
+    n = batch[keys[0]].shape[0]
+    device = batch[keys[0]].device
+    mask = {k: torch.rand(n, generator=generator, device="cpu").lt(p).to(device) if k in drop
+            else torch.zeros(n, dtype=torch.bool, device=device) for k in keys}
+    everything = torch.stack([mask[k] for k in keys]).all(0)
+    keep = next((k for k in keys if k not in drop), keys[0])
+    mask[keep] = mask[keep] & ~everything
+    out = dict(batch)
+    for k in drop:
+        m = mask[k].view(-1, *[1] * (batch[k].dim() - 1))
+        out[k] = batch[k].masked_fill(m, 0.0)
+    return out
+
+
 def images_to_float(batch: dict, image_keys, device: torch.device) -> dict:
     """Pasa las imágenes uint8 de Uint8Images a float en [0, 1], ya en `device`.
 
@@ -395,6 +424,9 @@ def main(cfg: TrainConfig):
         raise SystemExit("Usa cameras o arrangement, no ambos")
     cameras = tuple(arrangement_cameras(cfg.arrangement)) if cfg.arrangement else cfg.cameras
     input_features = select_cameras(input_features, cameras)
+    used = [k.removeprefix("observation.images.") for k in input_features if k.startswith("observation.images.")]
+    if set(cfg.camera_dropout) - set(used):
+        raise SystemExit(f"camera_dropout: el modelo no usa {sorted(set(cfg.camera_dropout) - set(used))} (usa {used})")
 
     policy_cfg = DiffusionConfig(
         input_features=input_features,
@@ -506,6 +538,7 @@ def main(cfg: TrainConfig):
     while not done:
         for batch in dataloader:
             batch = images_to_float(batch, image_keys, device)
+            batch = drop_cameras(batch, image_keys, cfg.camera_dropout, cfg.camera_dropout_p)
             if cfg.relative_actions:
                 batch["action"] = to_relative(batch["action"], batch["observation.state"], policy_cfg.n_obs_steps - 1)
             batch = preprocessor(batch)

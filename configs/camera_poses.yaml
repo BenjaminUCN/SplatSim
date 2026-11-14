@@ -15,4 +15,6 @@ cameras:
 arrangements:
   1cam: [base_rgb]
   2cam: [base_rgb, wrist_rgb]
+  2cam_left: [base_left_rgb, wrist_rgb]
+  2cam_right: [base_right_rgb, wrist_rgb]
   3cam: [base_left_rgb, base_right_rgb, wrist_rgb]
