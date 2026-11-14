@@ -74,15 +74,21 @@ def write_atomic(path: Path, data: bytes):
     os.replace(tmp, path)
 
 
-def compact_episode(episode: Path) -> tuple[int, int, int]:
-    """(frames compactados, imágenes ya en image_1, imágenes escritas en pkl_images)."""
+def compact_episode(episode: Path) -> tuple[int, int, int, list[str]]:
+    """(frames compactados, imágenes ya en image_1, imágenes escritas en pkl_images, .pkl que no se pueden
+    leer). Un .pkl dañado queda como está."""
     pkls = sorted(episode.glob("*.pkl"), key=lambda p: int(p.stem) if p.stem.isdigit() else p.stem)
     manifest_path = episode / MANIFEST
     manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else {}
     done = reused = written = 0
+    broken = []
     for pos, pkl in enumerate(pkls):
-        with open(pkl, "rb") as f:
-            frame = pickle.load(f)
+        try:
+            with open(pkl, "rb") as f:
+                frame = pickle.load(f)
+        except Exception as e:
+            broken.append(f"{pkl}: {type(e).__name__}: {e}")
+            continue
         keys = image_keys(frame)
         if not keys:
             continue
@@ -108,7 +114,7 @@ def compact_episode(episode: Path) -> tuple[int, int, int]:
             raise RuntimeError(f"{pkl}: el pkl compactado no se relee bien")
         write_atomic(pkl, data)
         done += 1
-    return done, reused, written
+    return done, reused, written, broken
 
 
 def episodes(roots: list[Path]) -> list[Path]:
@@ -124,13 +130,17 @@ def main(argv=None):
     eps = episodes([r.expanduser() for r in args.roots])
     print(f"{len(eps)} episodios", flush=True)
     totals = np.zeros(3, dtype=int)
+    broken = []
     with ProcessPoolExecutor(args.workers) as pool:
         for i, (ep, result) in enumerate(zip(eps, pool.map(compact_episode, eps)), 1):
-            totals += result
-            print(f"[{i}/{len(eps)}] {ep}: {result[0]} frames, {result[1]} en image_1, {result[2]} nuevas",
-                  flush=True)
+            totals += result[:3]
+            broken += result[3]
+            print(f"[{i}/{len(eps)}] {ep}: {result[0]} frames, {result[1]} en image_1, {result[2]} nuevas"
+                  + (f", {len(result[3])} dañados" if result[3] else ""), flush=True)
     print(f"total: {totals[0]} frames, {totals[1]} imágenes ya en image_1, {totals[2]} escritas en {OUT_DIR}/")
-    return 0
+    for line in broken:
+        print("dañado (sin tocar):", line)
+    return 1 if broken else 0
 
 
 if __name__ == "__main__":

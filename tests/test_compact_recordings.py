@@ -34,7 +34,7 @@ class CompactRecordingsTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_compacts_and_keeps_every_image(self):
-        self.assertEqual(cr.compact_episode(self.ep), (3, 3, 3))
+        self.assertEqual(cr.compact_episode(self.ep), (3, 3, 3, []))
         manifest = json.loads((self.ep / cr.MANIFEST).read_text())
         for i, frame in enumerate(self.frames, 1):
             with open(self.ep / f"{i:05d}.pkl", "rb") as f:
@@ -51,8 +51,14 @@ class CompactRecordingsTest(unittest.TestCase):
     def test_rerun_is_a_no_op(self):
         cr.compact_episode(self.ep)
         before = (self.ep / cr.MANIFEST).read_text()
-        self.assertEqual(cr.compact_episode(self.ep), (0, 0, 0))
+        self.assertEqual(cr.compact_episode(self.ep), (0, 0, 0, []))
         self.assertEqual((self.ep / cr.MANIFEST).read_text(), before)
+
+    def test_broken_pkl_is_left_alone(self):
+        (self.ep / "00002.pkl").write_bytes(b"\x00" * 64)
+        done, _, _, broken = cr.compact_episode(self.ep)
+        self.assertEqual((done, len(broken)), (2, 1))
+        self.assertEqual((self.ep / "00002.pkl").read_bytes(), b"\x00" * 64)
 
 
 if __name__ == "__main__":
