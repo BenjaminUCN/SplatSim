@@ -108,6 +108,10 @@ class TrainConfig:
     torch_compile: bool = False         # compila la U-Net y los encoders (no cambia el modelo guardado)
     # logging / guardado
     log_freq: int = 1
+    # cada resume_every pasos guarda el estado completo (pesos, EMA, optimizador, LR, escalador, paso y
+    # generadores aleatorios) en <output_root>/<model_name>/resume/state.pt, reemplazándolo; al volver a
+    # lanzar con el mismo model_name sigue desde ahí (corte de luz, OOM). Se borra al terminar. 0 = no
+    resume_every: int = 1000
     save_freq: int = 10000
     push_to_hub: bool = True
     hub_user: str = "LuEduSoHu"
@@ -215,6 +219,47 @@ class EMA:
         for ema_b, b in zip(self.model.buffers(), model.buffers()):
             ema_b.copy_(b)
         self.step += 1
+
+
+RESUME_FILE = Path("resume") / "state.pt"
+
+
+def save_resume(path: Path, step: int, policy, ema, optimizer, lr_scheduler, scaler) -> None:
+    """Estado para seguir el entrenamiento; se escribe a un temporal y se renombra (un corte a mitad
+    de la escritura deja el anterior intacto)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state = {"step": step, "policy": policy.state_dict(), "optimizer": optimizer.state_dict(),
+             "scaler": scaler.state_dict(), "torch_rng": torch.get_rng_state(),
+             "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+             "numpy_rng": np.random.get_state(), "python_rng": random.getstate()}
+    if ema is not None:
+        state["ema"] = {"model": ema.model.state_dict(), "step": ema.step}
+    if lr_scheduler is not None:
+        state["lr_scheduler"] = lr_scheduler.state_dict()
+    tmp = path.with_suffix(".tmp")
+    torch.save(state, tmp)
+    os.replace(tmp, path)
+
+
+def load_resume(path: Path, policy, ema, optimizer, lr_scheduler, scaler) -> int:
+    """Carga lo de save_resume y devuelve el paso en que sigue (0 si no hay estado)."""
+    if not path.exists():
+        return 0
+    state = torch.load(path, map_location="cpu", weights_only=False)
+    policy.load_state_dict(state["policy"])
+    optimizer.load_state_dict(state["optimizer"])
+    scaler.load_state_dict(state["scaler"])
+    if ema is not None and "ema" in state:
+        ema.model.load_state_dict(state["ema"]["model"])
+        ema.step = state["ema"]["step"]
+    if lr_scheduler is not None and "lr_scheduler" in state:
+        lr_scheduler.load_state_dict(state["lr_scheduler"])
+    torch.set_rng_state(state["torch_rng"])
+    if state.get("cuda_rng") is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(state["cuda_rng"])
+    np.random.set_state(state["numpy_rng"])
+    random.setstate(state["python_rng"])
+    return int(state["step"])
 
 
 def make_delta_timestamps(delta_indices: list[int] | None, fps: int) -> list[float]:
@@ -553,8 +598,11 @@ def main(cfg: TrainConfig):
     # Run training loop
     start_time = datetime.now()
     print(f"[{start_time.strftime('%y%m%d %H:%M')}] Starting training loop")
-    step = 0
-    done = False
+    resume_path = output_directory / RESUME_FILE
+    step = load_resume(resume_path, policy, ema, optimizer, lr_scheduler, scaler) if cfg.resume_every else 0
+    if step:
+        print(f"[Resume] sigue desde el paso {step} ({resume_path})")
+    done = step >= cfg.training_steps
     last_log = (time.monotonic(), 0)    # para la velocidad entre registros de W&B
     while not done:
         for group in grouped(dataloader, cfg.grad_accumulation):
@@ -606,6 +654,8 @@ def main(cfg: TrainConfig):
                     run.log({"checkpoint/loss": loss.item()}, step=step)
 
             step += 1
+            if cfg.resume_every and step % cfg.resume_every == 0 and step < cfg.training_steps:
+                save_resume(resume_path, step, policy, ema, optimizer, lr_scheduler, scaler)
             if step >= cfg.training_steps:
                 done = True
                 break
@@ -620,6 +670,8 @@ def main(cfg: TrainConfig):
     final.save_pretrained(output_directory)
     preprocessor.save_pretrained(output_directory)
     postprocessor.save_pretrained(output_directory)
+    if resume_path.exists():
+        resume_path.unlink()            # el modelo final ya está guardado
 
     if cfg.push_to_hub:
         repo_id = f"{cfg.hub_user}/robot_learning_tutorial_{model_name}"
