@@ -315,6 +315,19 @@ class TestPipeline(Base):
         self.assertIn("máximo", job["error"])
         self.assertEqual(self.provider.live, {})
 
+    def test_cost_limit_waits_for_the_upload(self):
+        self.provider.autostart = False
+        job = self.submit(max_cost=1.0)
+        self.run_until(lambda: job["status"] == "starting")
+        job["phase"] = "upload"
+        job["billing_ts"] = time.time() - 1.1 * 3600   # $1.10: dentro del margen de subida
+        self.orch.tick()
+        self.assertNotEqual(job["status"], "failed")
+        job["billing_ts"] = time.time() - 1.3 * 3600   # $1.30: pasa el margen
+        self.orch.tick()
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("margen de subida", job["error"])
+
 
 def make_recordings(root: Path, episodes=("000", "001"), cameras=("base_rgb", "wrist_rgb"), discarded=()):
     for episode in episodes:
