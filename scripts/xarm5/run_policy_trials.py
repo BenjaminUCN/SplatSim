@@ -78,6 +78,11 @@ class Args:
     leaf_pitch_deg: float = -27.5   # el centro del rango de inclinación de las demos (−50 a −5°)
     # IK del agente: off (solo posición, lo de siempre) o hybrid (con la orientación si alcanza)
     ik_orientation: str = "off"
+    # muestreador de la difusión (None: el del modelo, DDPM) y sus pasos (None: los del modelo, 100). DDIM
+    # muestrea los mismos modelos entrenados con DDPM, sin reentrenar; p. ej. --noise_scheduler DDIM
+    # --num_inference_steps 16
+    noise_scheduler: str | None = None
+    num_inference_steps: int | None = None
     # acciones que se ejecutan por cada predicción de la política (None: las del modelo, 32 en todos los
     # entrenados hasta ahora); menos = vuelve a mirar más seguido. Hasta horizon - n_obs_steps + 1
     n_action_steps: int | None = None
@@ -204,6 +209,8 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     leaf_fit = call(robot, "place_trial_leaf", **leaf) if leaf is not None else None
     leaf_info = leaf_columns(leaf_fit, leaf["target"] if leaf else None)
     ik_before = dict(agent.ik_counts)
+    latencies = getattr(agent, "chunk_latencies_ms", [])   # los agentes de prueba no lo tienen
+    chunks_before = len(latencies)
     waypoints_before = dict(agent.waypoint_counts)
 
     # antes de que el brazo se mueva: cuánto tapa la planta (y las hojas) con el brazo en reposo
@@ -259,6 +266,9 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
         with open(os.path.join(folder, TRACK_FILE), "w") as f:
             json.dump({"camera": track_camera, "every": track_every,
                        "samples": [{"t": t, "occlusion": o} for t, o in samples]}, f)
+    chunks = latencies[chunks_before:]
+    if chunks:   # el primer bloque del primer ensayo incluye la carga de CUDA: la mediana lo absorbe
+        result.update(chunk_latency_ms=round(float(np.median(chunks)), 2), chunks=len(chunks))
     if agent.ik_orientation != "off":
         result["ik_fallbacks"] = agent.ik_counts["fallback"] - ik_before["fallback"]
     if agent.waypoint_tolerance is not None:
@@ -311,7 +321,9 @@ def main(args: Args) -> None:
                                   device="cuda", ik_orientation=args.ik_orientation,
                                   n_action_steps=args.n_action_steps,
                                   waypoint_tolerance=args.waypoint_tolerance,
-                                  waypoint_max_steps=args.waypoint_max_steps)
+                                  waypoint_max_steps=args.waypoint_max_steps,
+                                  noise_scheduler=args.noise_scheduler,
+                                  num_inference_steps=args.num_inference_steps)
 
     first_obs = robot.get_observations()
     missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
@@ -334,7 +346,8 @@ def main(args: Args) -> None:
     total = len(positions) * len(targets) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
               "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point", "trial_seconds",
-              "time_to_success", "stopped_on_success", "success_extra_seconds", "n_action_steps"]
+              "time_to_success", "stopped_on_success", "success_extra_seconds", "n_action_steps",
+              "noise_scheduler", "num_inference_steps", "chunk_latency_ms", "chunks"]
     if targets != [None]:
         fields += ["occlusion_target", "leaf_status", "leaf", "leaf_camera", "occlusion_fit"]
     elif not manual:
@@ -435,7 +448,8 @@ def main(args: Args) -> None:
                     row = {"pos_idx": pos_idx, "trial": trial, **result, "grasp_point": point_text,
                            "trial_seconds": args.trial_seconds,
                            "success_extra_seconds": args.success_extra_seconds if args.stop_on_success else "",
-                           "n_action_steps": agent.policy.config.n_action_steps}
+                           "n_action_steps": agent.policy.config.n_action_steps,
+                           "noise_scheduler": agent.sampler[0], "num_inference_steps": agent.sampler[1]}
                     if args.waypoint_tolerance is not None:
                         row.update(waypoint_tolerance=args.waypoint_tolerance,
                                    waypoint_max_steps=args.waypoint_max_steps)

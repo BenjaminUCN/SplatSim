@@ -42,6 +42,49 @@ def checkpoint_relative_actions(checkpoint: str) -> bool:
         return bool((yaml.safe_load(f) or {}).get("relative_actions", False))
 
 
+SAMPLERS = ("DDPM", "DDIM")
+
+
+def set_sampler(policy, name: str | None = None, steps: int | None = None) -> tuple[str, int]:
+    """Cambia el muestreador de difusión de un DiffusionPolicy ya cargado, sin reentrenar: DDIM usa el mismo
+    beta schedule, la misma predicción (epsilon) y los mismos pasos de entrenamiento que el modelo. steps None:
+    los del modelo (num_inference_steps, o num_train_timesteps si no lo fija). Devuelve (muestreador, pasos)."""
+    from lerobot.policies.diffusion.modeling_diffusion import _make_noise_scheduler
+    cfg, model = policy.config, policy.diffusion
+    if name is not None:
+        if name not in SAMPLERS:
+            raise ValueError(f"noise_scheduler debe ser uno de {SAMPLERS}")
+        cfg.noise_scheduler_type = name
+        model.noise_scheduler = _make_noise_scheduler(
+            name, num_train_timesteps=cfg.num_train_timesteps, beta_start=cfg.beta_start,
+            beta_end=cfg.beta_end, beta_schedule=cfg.beta_schedule, clip_sample=cfg.clip_sample,
+            clip_sample_range=cfg.clip_sample_range, prediction_type=cfg.prediction_type)
+    if steps is not None:
+        if not 1 <= steps <= cfg.num_train_timesteps:
+            raise ValueError(f"num_inference_steps debe estar entre 1 y {cfg.num_train_timesteps}")
+        cfg.num_inference_steps = steps
+        model.num_inference_steps = steps
+    return cfg.noise_scheduler_type, model.num_inference_steps
+
+
+def time_chunks(policy, out: list[float]) -> None:
+    """Anota en `out` los ms que tarda cada predicción de un bloque de acciones (generate_actions: codificar
+    las imágenes y muestrear la difusión), con la GPU sincronizada antes y después."""
+    import time
+    generate = policy.diffusion.generate_actions
+
+    def timed(*args, **kwargs):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        actions = generate(*args, **kwargs)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        out.append((time.perf_counter() - t0) * 1000)
+        return actions
+    policy.diffusion.generate_actions = timed
+
+
 class LeRobotDiffusionAgent:
     """
     SplatSim agent wrapping a LeRobot DiffusionPolicy checkpoint.
@@ -78,6 +121,8 @@ class LeRobotDiffusionAgent:
         ik_orientation: str = "off",
         waypoint_tolerance: float | None = None,
         waypoint_max_steps: int = 10,
+        noise_scheduler: str | None = None,
+        num_inference_steps: int | None = None,
     ):
         """checkpoint: carpeta del modelo o repo del Hub (None -> DEFAULT_CHECKPOINT).
         dataset_root: dataset con que se entrenó, carpeta o repo del Hub; None -> se busca en
@@ -96,6 +141,9 @@ class LeRobotDiffusionAgent:
         self.ik_counts = {"orientation": 0, "fallback": 0}   # hybrid: con orientación / sin ella
         self.device = device
         self._requested_n_action_steps = n_action_steps   # lo aplica _load_diffusion_policy_model
+        # muestreador de la difusión al evaluar (None: el del modelo, DDPM de 100 pasos en todos hasta ahora)
+        self._requested_sampler = (noise_scheduler, num_inference_steps)
+        self.chunk_latencies_ms: list[float] = []         # una por bloque de acciones predicho
         self._obs_buffer: deque[dict[str, torch.Tensor]] = deque(maxlen=_N_OBS_STEPS)
         self._action_queue: list[np.ndarray] = []
 
@@ -151,6 +199,9 @@ class LeRobotDiffusionAgent:
             cfg.n_action_steps = n_action_steps
             self.policy.reset()                  # la cola de acciones se crea con maxlen n_action_steps
         self._n_act_steps = self.policy.config.n_action_steps
+        self.sampler = set_sampler(self.policy, *self._requested_sampler)
+        print(f"[LeRobotDiffusionAgent] Muestreador {self.sampler[0]}, {self.sampler[1]} pasos")
+        time_chunks(self.policy, self.chunk_latencies_ms)
         
         print("[LeRobotDiffusionAgent] Policy Config:.")
         print(self.policy.config)
