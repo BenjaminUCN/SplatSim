@@ -94,6 +94,9 @@ class Args:
     # comando (0.01 en el agente del SplatSim original) o hasta waypoint_max_steps pasos
     waypoint_tolerance: float | None = None
     waypoint_max_steps: int = 10
+    # None: la pinza recibe el valor predicho (lo de siempre). Con un valor, 1 si la predicción lo alcanza y
+    # 0 si no, como la orden binaria de las demos del planificador
+    gripper_threshold: float | None = None
     # termina el ensayo success_extra_seconds después de que el error de agarre baja de
     # SUCCESS_RADIUS (4 cm): ahorra tiempo y no cambia la tasa de éxito; en esos segundos el brazo
     # sigue acercándose, así el error mínimo no queda cortado en ~4 cm. time_to_success se anota
@@ -336,7 +339,8 @@ def main(args: Args) -> None:
                                   waypoint_tolerance=args.waypoint_tolerance,
                                   waypoint_max_steps=args.waypoint_max_steps,
                                   noise_scheduler=args.noise_scheduler,
-                                  num_inference_steps=args.num_inference_steps)
+                                  num_inference_steps=args.num_inference_steps,
+                                  gripper_threshold=args.gripper_threshold)
 
     first_obs = robot.get_observations()
     missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
@@ -370,6 +374,8 @@ def main(args: Args) -> None:
         call(robot, "place_trial_leaf", leaf_dir=args.leaf_dir, target=0.0, key=0, seed=args.leaf_seed)
     if args.ik_orientation != "off":
         fields += ["ik_fallbacks"]
+    if args.gripper_threshold is not None:
+        fields += ["gripper_threshold"]
     if args.blank_cameras:
         fields += ["blank_cameras"]
     unknown = set(args.blank_cameras) - set(policy_cameras(agent))
@@ -440,6 +446,7 @@ def main(args: Args) -> None:
                                 "success_extra_seconds": args.success_extra_seconds if args.stop_on_success else None,
                                 "n_action_steps": agent.policy.config.n_action_steps,
                                 "waypoint_tolerance": args.waypoint_tolerance,
+                                "gripper_threshold": args.gripper_threshold,
                                 "waypoint_max_steps": args.waypoint_max_steps if args.waypoint_tolerance else None,
                                 "checkpoint": checkpoint, "run_name": run_name,
                                 "blank_cameras": list(args.blank_cameras),
@@ -468,6 +475,8 @@ def main(args: Args) -> None:
                     if args.waypoint_tolerance is not None:
                         row.update(waypoint_tolerance=args.waypoint_tolerance,
                                    waypoint_max_steps=args.waypoint_max_steps)
+                    if args.gripper_threshold is not None:
+                        row["gripper_threshold"] = args.gripper_threshold
                     if args.blank_cameras:
                         row["blank_cameras"] = " ".join(args.blank_cameras)
                     if apple_pos:

@@ -111,6 +111,9 @@ class LeRobotDiffusionAgent:
             la política, así las n_obs_steps observaciones de la próxima predicción siguen siendo
             pasos seguidos, como en el entrenamiento.
         waypoint_max_steps: pasos de control como máximo por acción con waypoint_tolerance.
+        gripper_threshold: None manda a la pinza el valor que predice la política (lo de siempre).
+            Con un valor, manda 1 (cerrar) si la predicción es mayor o igual y 0 (abrir) si no, como en
+            las demos del planificador, donde la orden es 0 o 1.
     """
 
     def __init__(
@@ -124,6 +127,7 @@ class LeRobotDiffusionAgent:
         waypoint_max_steps: int = 10,
         noise_scheduler: str | None = None,
         num_inference_steps: int | None = None,
+        gripper_threshold: float | None = None,
     ):
         """checkpoint: carpeta del modelo o repo del Hub (None -> DEFAULT_CHECKPOINT).
         dataset_root: dataset con que se entrenó, carpeta o repo del Hub; None -> se busca en
@@ -136,6 +140,7 @@ class LeRobotDiffusionAgent:
             raise ValueError("waypoint_tolerance debe ser > 0 y waypoint_max_steps >= 1")
         self.waypoint_tolerance = waypoint_tolerance
         self.waypoint_max_steps = waypoint_max_steps
+        self.gripper_threshold = gripper_threshold
         self.waypoint_counts = {"reached": 0, "timeout": 0}   # acciones que terminaron así
         self._held = 0                                         # pasos que lleva la acción actual
         self._last_joints: np.ndarray | None = None            # último comando articular (5)
@@ -434,6 +439,13 @@ class LeRobotDiffusionAgent:
             self.dummy_robot, endEffectorLinkIndex=EE_LINK_INDEX, targetPosition=position,
             residualThreshold=0.00001, maxNumIterations=10000, restPoses=rest, **kwargs)
 
+    def gripper_command(self) -> float:
+        """Orden de la pinza: la predicha o, con gripper_threshold, 0/1."""
+        g = float(self.ee_gripper)
+        if self.gripper_threshold is None:
+            return g
+        return 1.0 if g >= self.gripper_threshold else 0.0
+
     def _solve_ik(self, position, quaternion, rest):
         """off: solo posición. hybrid: con orientación si el efector queda a menos de
         IK_HYBRID_MAX_POS_ERR del objetivo; si no, solo posición."""
@@ -528,7 +540,7 @@ class LeRobotDiffusionAgent:
             print(f"Joint difference: {joint_diff}")
 
         joints = np.array(dummy_joint_pos)[:joints_n]
-        joints = np.append(joints, self.ee_gripper)
+        joints = np.append(joints, self.gripper_command())
         
         return joints
     

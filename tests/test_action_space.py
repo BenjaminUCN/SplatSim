@@ -118,6 +118,7 @@ class JointAgentTest(unittest.TestCase):
         agent.make_new_prediction = True
         agent.dummy_robot = 0
         agent._held = 0
+        agent.gripper_threshold = None
         seen = []
         agent._build_obs = lambda obs: seen.append(obs) or {}
         agent.postprocess = lambda a: a
@@ -127,6 +128,16 @@ class JointAgentTest(unittest.TestCase):
         np.testing.assert_allclose(command, [0.1, 0.2, 0.3, 0.4, 0.0, 1.0], rtol=1e-6)
         self.assertTrue(agent.make_new_prediction)        # una acción por paso, como en pose
         agent._solve_ik.assert_not_called()
+
+    def test_gripper_threshold_binarizes_the_command(self):
+        agent = object.__new__(LeRobotDiffusionAgent)
+        agent.ee_gripper = 0.62
+        agent.gripper_threshold = None
+        self.assertAlmostEqual(agent.gripper_command(), 0.62)
+        agent.gripper_threshold = 0.5
+        self.assertEqual(agent.gripper_command(), 1.0)
+        agent.ee_gripper = 0.31
+        self.assertEqual(agent.gripper_command(), 0.0)
 
 
 if __name__ == "__main__":
