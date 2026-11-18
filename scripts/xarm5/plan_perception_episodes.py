@@ -27,6 +27,12 @@ desde la cámara y el tomate con la oclusión del splat (con el brazo fuera de c
 para el splat. Los que no cumplen (o no llegan al tomate) se guardan con valid=false y los motivos, o
 se descartan con --invalid skip.
 
+Con --target peduncle (una escena con cortadora y tomate con tallo, p. ej. --robot-name
+xarm5_lite_plant_v3_hand_held_down_cam_down) los episodios cortan el pedúnculo como en plan_trajectories.py:
+el centro del filo va al punto de corte con la cortadora abierta, cierra, y se retira con el tomate
+sujeto. El error final es el del centro del filo al punto de corte, y un episodio sin el tomate sujeto al
+final queda marcado. Las hojas de B2 son las de la planta (--leaf-dir ~/data/occluders/xarm5_lite_plant_v3).
+
 Salida, como plan_trajectories.py: un episodio por carpeta (000/, 001/, ...; 20 seguidos por set),
 con meta.json (set, tomato_category, arm_config, apple_position, valid, reasons, ...);
 perception_episodes.csv con una fila por condición; positions.yaml y sets/<set>.json. Los sets
@@ -65,7 +71,7 @@ from splatsim.utils.scene.perception_design import (  # noqa: E402
     check_tomato,
     farthest_points,
 )
-from splatsim.utils.trials.grasp_point import grasp_error, load_grasp_point  # noqa: E402
+from splatsim.utils.trials.grasp_point import grasp_error, gripper_center, load_grasp_point  # noqa: E402
 
 POSITIONS_FILE = "positions.yaml"
 EPISODES_CSV = "perception_episodes.csv"
@@ -135,20 +141,32 @@ class Args:
     hold: tuple[float, float] = (2.0, 5.0)
     perturb: float = 0.0
     gripper: float = 0.0
+    target: Literal["tomato", "peduncle"] = "tomato"
+    """peduncle: corta el pedúnculo en vez de agarrar el tomate (ver arriba y plan_trajectories.py)"""
+    peduncle_pitch_deg: tuple[float, float] = (-25.0, 0.0)
+    """inclinación con --target peduncle (reemplaza --pitch-deg)"""
 
     def plan_args(self) -> PlanArgs:
         keys = ("robot_name", "control_hz", "pitch_deg", "pregrasp", "joint_speed", "approach_speed",
-                "start_pause", "settle", "hold", "perturb", "gripper", "seed", "max_final_error")
+                "start_pause", "settle", "hold", "perturb", "gripper", "seed", "max_final_error",
+                "target", "peduncle_pitch_deg")
         return PlanArgs(**{k: getattr(self, k) for k in keys})
+
+    def reach_pitch_deg(self) -> tuple[float, float]:
+        """Inclinaciones con que el planificador llega al objetivo."""
+        return self.peduncle_pitch_deg if self.target == "peduncle" else self.pitch_deg
 
 
 # ── brazo ────────────────────────────────────────────────────────────────────
 class Arm:
     """Pone el brazo del servidor en una pose (sin física) y mide cómo se ve desde la cámara."""
 
-    def __init__(self, server, kin: Kinematics, view: CameraView, point: np.ndarray, q_reset):
+    def __init__(self, server, kin: Kinematics, view: CameraView, point: np.ndarray, q_reset,
+                 aim_offset=(0.0, 0.0, 0.0)):
         self.s, self.kin, self.view, self.point = server, kin, view, point
         self.q_reset = np.asarray(q_reset, float)
+        # del centro del tomate a donde va `point` (el punto de corte con --target peduncle; el tomate no gira)
+        self.aim_offset = np.asarray(aim_offset, float)
         self.joints = kin.movable[:ARM_JOINTS]       # mismo URDF: mismos índices en el servidor
 
     def set(self, q) -> None:
@@ -169,11 +187,15 @@ class Arm:
         pos, rot = self.kin.fk(q)
         st = self.stats(q)
         return {"arm_fraction": st["fraction"], "arm": st, "ee_uv": self.view.uv_fraction(pos),
-                "grasp_distance": round(float(np.linalg.norm(pos + rot @ self.point - np.asarray(tomato))), 4)}
+                "grasp_distance": round(float(np.linalg.norm(pos + rot @ self.point - self.aim(tomato))), 4)}
+
+    def aim(self, tomato) -> np.ndarray:
+        """Adonde tiene que llegar `point` con el tomate en `tomato`."""
+        return np.asarray(tomato, float) + self.aim_offset
 
     def can_grasp(self, tomato, pitches_deg) -> bool:
         """Hay agarre con alguna inclinación del planificador (plan_episode prueba más)."""
-        return any(self.kin.ik(*grasp_pose(tomato, np.radians(p), self.point), self.q_reset) is not None
+        return any(self.kin.ik(*grasp_pose(self.aim(tomato), np.radians(p), self.point), self.q_reset) is not None
                    for p in np.linspace(*pitches_deg, 4))
 
     def in_view_start(self, tomato, distance, args: Args, rng) -> tuple | None:
@@ -240,7 +262,7 @@ class Probe:
     def reachable(self, pos) -> bool:
         """Hay agarre y poses A4/A5 con el brazo en cuadro."""
         a = self.args
-        return (self.arm.can_grasp(pos, a.pitch_deg)
+        return (self.arm.can_grasp(pos, a.reach_pitch_deg())
                 and self.arm.in_view_start(pos, a.near_distance, a, self.rng) is not None
                 and self.arm.in_view_start(pos, a.far_distance, a, self.rng) is not None)
 
@@ -288,7 +310,7 @@ def choose_positions(args: Args, view: CameraView, probe: Probe, count: int, tak
     pool = []
     for _ in range(args.candidates):
         pos = np.array(sample_hemisphere(hemisphere, rng=rng))
-        if view.in_frame([pos], args.frame_margin)[0] and probe.arm.can_grasp(pos, args.pitch_deg):
+        if view.in_frame([pos], args.frame_margin)[0] and probe.arm.can_grasp(pos, args.reach_pitch_deg()):
             pool.append(pos)
     if not pool:
         raise SystemExit("Ninguna posición del hemisferio queda en cuadro y al alcance: revisa el hemisferio "
@@ -411,7 +433,7 @@ def run_set(server, arm: Arm, probe: Probe, args: Args, k: int, positions: dict,
         for a in args.arm_configs:
             if starts[a] is not None:
                 for _ in range(args.plan_attempts):
-                    plan = plan_episode(arm.kin, starts[a][0], tomato, point, plan_args, rng)
+                    plan = plan_episode(arm.kin, starts[a][0], arm.aim(tomato), point, plan_args, rng)
                     if plan is not None:
                         plans.setdefault(a, []).append(plan)
                         break
@@ -444,23 +466,26 @@ def run_set(server, arm: Arm, probe: Probe, args: Args, k: int, positions: dict,
                 print(f"  set {k:03d} {b}_{a}: descartado ({'; '.join(reasons)})", flush=True)
                 continue
 
-            name, folder, states, plan, final_err = None, None, None, None, None
+            name, folder, states, plan, final_err, held = None, None, None, None, None, None
             for attempt in range(args.plan_attempts if a in plans else 0):
-                plan = plans[a][0] if attempt == 0 else plan_episode(arm.kin, starts[a][0], tomato, point,
-                                                                     plan_args, rng)
+                plan = plans[a][0] if attempt == 0 else plan_episode(arm.kin, starts[a][0], arm.aim(tomato),
+                                                                     point, plan_args, rng)
                 if plan is None:
                     continue
                 folder = episodes.out / f".{k:03d}_{b}_{a}.tmp"
                 shutil.rmtree(folder, ignore_errors=True)
                 folder.mkdir()
                 states = execute_from(server, arm, starts[a][0], plan, tomato, folder)
-                final_err = float(grasp_error(states, tomato, point)[plan["target_end"] - 1])
-                if final_err <= args.max_final_error:
+                final_err = float(grasp_error(states, arm.aim(tomato), point)[plan["target_end"] - 1])
+                held = server.peduncle.held if args.target == "peduncle" else None
+                if final_err <= args.max_final_error and held is not False:
                     break
             if plan is None or states is None:
                 reasons.append("el planificador no encontró trayectoria hasta el tomate")
             elif final_err > args.max_final_error:
                 reasons.append(f"no llegó al tomate (error final {final_err * 100:.1f} cm)")
+            elif held is False:
+                reasons.append("no terminó con el tomate sujeto")
             valid = not reasons
             if folder is not None and (valid or args.invalid == "mark"):
                 name = episodes.take()
@@ -473,7 +498,9 @@ def run_set(server, arm: Arm, probe: Probe, args: Args, k: int, positions: dict,
                         "tomato_scene": scene, "occluders": leaf_entries, "leaf_fit": leaf_fit,
                         "pitch_deg": round(plan["pitch_deg"], 2), "pregrasp": round(plan["pregrasp"], 4),
                         "phases": plan["phases"], "final_grasp_error": round(final_err, 4),
-                        "seed": args.seed, "target": "tomato"}
+                        "seed": args.seed, "target": args.target,
+                        **({"peduncle_cut": server.peduncle.cut, "peduncle_held": held}
+                           if args.target == "peduncle" else {})}
                 (folder / "meta.json").write_text(json.dumps(meta, indent=2))
                 os.rename(folder, episodes.out / name)
                 saved += 1
@@ -509,7 +536,13 @@ def main(args: Args):
     view = CameraView(tuple(cam.xyz), tuple(cam.rpy), BASE_CAM_FOV, IMAGE_W, IMAGE_H)
     server.reset_robot()
     q_reset = np.asarray(server.state_observation()["joint_positions"][:ARM_JOINTS], float)
-    arm = Arm(server, Kinematics(server.urdf_path), view, load_grasp_point(), q_reset)
+    point, aim_offset = load_grasp_point(), np.zeros(3)
+    if args.target == "peduncle":
+        if server.peduncle is None or server.peduncle.blade_link is None:
+            raise SystemExit(f"--target peduncle necesita una escena con cortadora y tallo: {args.robot_name} no lo es")
+        point = gripper_center(server.urdf_path)                 # el centro del filo
+        aim_offset = np.asarray(server.peduncle.stem["cut"])     # del centro del tomate al punto de corte
+    arm = Arm(server, Kinematics(server.urdf_path), view, point, q_reset, aim_offset)
     probe = Probe(server, arm, args)
     left = arm.left_sign(args.side_joints)
     sets = load_or_choose_positions(args, out, view, probe)
