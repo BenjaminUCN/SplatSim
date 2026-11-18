@@ -43,6 +43,7 @@ def make_agent(tolerance, max_steps=10):
     agent.waypoint_tolerance = tolerance
     agent.waypoint_max_steps = max_steps
     agent.gripper_threshold = None
+    agent.hold_while_closing = False
     agent.waypoint_counts = {"reached": 0, "timeout": 0}
     agent._held = 0
     agent._last_joints = None

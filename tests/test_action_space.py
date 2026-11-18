@@ -119,6 +119,7 @@ class JointAgentTest(unittest.TestCase):
         agent.dummy_robot = 0
         agent._held = 0
         agent.gripper_threshold = None
+        agent.hold_while_closing = False
         seen = []
         agent._build_obs = lambda obs: seen.append(obs) or {}
         agent.postprocess = lambda a: a
@@ -138,6 +139,33 @@ class JointAgentTest(unittest.TestCase):
         self.assertEqual(agent.gripper_command(), 1.0)
         agent.ee_gripper = 0.31
         self.assertEqual(agent.gripper_command(), 0.0)
+
+    def test_hold_while_closing_keeps_the_arm_still_until_closed(self):
+        agent = object.__new__(LeRobotDiffusionAgent)
+        agent._hold_joints, agent.hold_count = None, 0
+        hold = lambda arm, grip, closed: agent._hold_for_closing(  # noqa: E731
+            {"gripper_position": [closed]}, np.array(arm, dtype=float), grip)
+        joints, grip = hold([0.1] * 5, 0.3, 0.0)                # abierta, sin orden de cerrar: la política
+        np.testing.assert_allclose(joints, [0.1] * 5)
+        self.assertEqual(grip, 0.3)
+        joints, grip = hold([0.2] * 5, 0.6, 0.0)                # ordena cerrar: quieto aquí
+        np.testing.assert_allclose(joints, [0.2] * 5)
+        self.assertEqual((grip, agent.hold_count), (1.0, 1))
+        joints, grip = hold([0.5] * 5, 0.2, 0.5)                # la política se mueve y abre: no se usa
+        np.testing.assert_allclose(joints, [0.2] * 5)
+        self.assertEqual(grip, 1.0)
+        joints, grip = hold([0.5] * 5, 0.9, 0.85)               # ya cerró: sigue la política
+        np.testing.assert_allclose(joints, [0.5] * 5)
+        self.assertEqual((grip, agent.hold_count), (0.9, 1))
+        joints, grip = hold([0.6] * 5, 0.9, 0.95)               # cerrada: no vuelve a quedarse quieto
+        self.assertEqual(agent.hold_count, 1)
+        _, grip = hold([0.6] * 5, 0.7, 0.0)                     # se abrió y ordena cerrar otra vez
+        self.assertEqual(agent.hold_count, 2)
+        _, grip = hold([0.6] * 5, 0.7, 0.0)
+        np.testing.assert_allclose(_, [0.6] * 5)
+        joints, _ = agent._hold_for_closing({"joint_positions": np.array([0, 0, 0, 0, 0, 0.9])},
+                                            np.array([0.7] * 5), 0.7)   # sin gripper_position: joint_positions[5]
+        np.testing.assert_allclose(joints, [0.7] * 5)
 
 
 if __name__ == "__main__":

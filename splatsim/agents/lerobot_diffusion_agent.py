@@ -15,6 +15,7 @@ from torchvision import transforms
 from splatsim.image_classifier import SimpleCNN
 from splatsim.utils.data.action_space import action_space_of
 from splatsim.utils.data.registry import dataset_source_for_checkpoint, hub_repo_id
+from splatsim.utils.scene.peduncle import CLOSED_FRACTION
 
 _N_OBS_STEPS = 2   # temporal window size
 _N_ACT_STEPS = 32  # action chunk size
@@ -24,6 +25,7 @@ DEFAULT_CHECKPOINT = "~/lerobot/examples/tutorial/diffusion/outputs/robot_learni
 DEFAULT_DATASET_ROOT = "~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010"
 IK_ORIENTATION_MODES = ("off", "hybrid")
 IK_HYBRID_MAX_POS_ERR = 0.01   # m
+CLOSE_COMMAND = 0.5   # orden de la pinza desde la que cuenta como "cerrar" (las demos dan 0/1)
 EE_LINK_INDEX = 6
 
 
@@ -114,6 +116,11 @@ class LeRobotDiffusionAgent:
         gripper_threshold: None manda a la pinza el valor que predice la política (lo de siempre).
             Con un valor, manda 1 (cerrar) si la predicción es mayor o igual y 0 (abrir) si no, como en
             las demos del planificador, donde la orden es 0 o 1.
+        hold_while_closing: cuando la orden de la pinza llega a CLOSE_COMMAND con la pinza todavía abierta,
+            deja el brazo quieto en el objetivo de esa acción y manda cerrar del todo hasta que la pinza
+            llega a CLOSED_FRACTION (0.8, cuando el simulador decide el corte); después sigue la política.
+            Así cierran las demos del planificador, con el brazo quieto. Mientras tanto la política
+            igual recibe las observaciones y saca acciones, que no se usan.
     """
 
     def __init__(
@@ -128,6 +135,7 @@ class LeRobotDiffusionAgent:
         noise_scheduler: str | None = None,
         num_inference_steps: int | None = None,
         gripper_threshold: float | None = None,
+        hold_while_closing: bool = False,
     ):
         """checkpoint: carpeta del modelo o repo del Hub (None -> DEFAULT_CHECKPOINT).
         dataset_root: dataset con que se entrenó, carpeta o repo del Hub; None -> se busca en
@@ -141,6 +149,9 @@ class LeRobotDiffusionAgent:
         self.waypoint_tolerance = waypoint_tolerance
         self.waypoint_max_steps = waypoint_max_steps
         self.gripper_threshold = gripper_threshold
+        self.hold_while_closing = hold_while_closing
+        self._hold_joints: np.ndarray | None = None   # hold_while_closing: brazo quieto aquí mientras cierra
+        self.hold_count = 0                            # veces que se quedó quieto para cerrar
         self.waypoint_counts = {"reached": 0, "timeout": 0}   # acciones que terminaron así
         self._held = 0                                         # pasos que lleva la acción actual
         self._last_joints: np.ndarray | None = None            # último comando articular (5)
@@ -403,6 +414,7 @@ class LeRobotDiffusionAgent:
         self.make_new_prediction = True
         self._held = 0
         self._last_joints = None
+        self._hold_joints = None
 
     def _observe_only(self, obs_frame: dict) -> None:
         """Mete la observación en la cola de la política sin sacar una acción (lo que hace
@@ -438,6 +450,21 @@ class LeRobotDiffusionAgent:
         return p.calculateInverseKinematics(
             self.dummy_robot, endEffectorLinkIndex=EE_LINK_INDEX, targetPosition=position,
             residualThreshold=0.00001, maxNumIterations=10000, restPoses=rest, **kwargs)
+
+    def _hold_for_closing(self, obs: dict, joints: np.ndarray, gripper: float) -> tuple[np.ndarray, float]:
+        """hold_while_closing: el comando del brazo y de la pinza en este paso."""
+        if "gripper_position" in obs:
+            closed = float(np.ravel(obs["gripper_position"])[0])
+        else:
+            closed = float(np.ravel(obs["joint_positions"])[joints.size])
+        if self._hold_joints is None and gripper >= CLOSE_COMMAND and closed < CLOSED_FRACTION:
+            self._hold_joints = np.array(joints, dtype=float)
+            self.hold_count += 1
+        if self._hold_joints is not None:
+            if closed < CLOSED_FRACTION:
+                return self._hold_joints.copy(), 1.0
+            self._hold_joints = None   # ya cerró: la política sigue
+        return joints, gripper
 
     def gripper_command(self) -> float:
         """Orden de la pinza: la predicha o, con gripper_threshold, 0/1."""
@@ -540,7 +567,10 @@ class LeRobotDiffusionAgent:
             print(f"Joint difference: {joint_diff}")
 
         joints = np.array(dummy_joint_pos)[:joints_n]
-        joints = np.append(joints, self.gripper_command())
+        gripper = self.gripper_command()
+        if self.hold_while_closing:
+            joints, gripper = self._hold_for_closing(obs_dict, joints, gripper)
+        joints = np.append(joints, gripper)
         
         return joints
     

@@ -100,6 +100,8 @@ class Args:
     # None: la pinza recibe el valor predicho (lo de siempre). Con un valor, 1 si la predicción lo alcanza y
     # 0 si no, como la orden binaria de las demos del planificador
     gripper_threshold: float | None = None
+    # al ordenar cerrar la pinza, el brazo se queda quieto hasta que cierra (como en las demos del planificador)
+    hold_while_closing: bool = False
     # termina el ensayo success_extra_seconds después de que el error de agarre baja de
     # SUCCESS_RADIUS (4 cm): ahorra tiempo y no cambia la tasa de éxito; en esos segundos el brazo
     # sigue acercándose, así el error mínimo no queda cortado en ~4 cm. time_to_success se anota
@@ -222,6 +224,7 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     latencies = getattr(agent, "chunk_latencies_ms", [])   # los agentes de prueba no lo tienen
     chunks_before = len(latencies)
     waypoints_before = dict(agent.waypoint_counts)
+    holds_before = getattr(agent, "hold_count", 0)
 
     # antes de que el brazo se mueva: cuánto tapa la planta (y las hojas) con el brazo en reposo
     occlusion = occlusion_columns(call(robot, "measure_occlusion")) if measure_occlusion else {}
@@ -299,6 +302,8 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
         # acciones terminadas al llegar y por agotar waypoint_max_steps
         result["waypoints_reached"] = agent.waypoint_counts["reached"] - waypoints_before["reached"]
         result["waypoint_timeouts"] = agent.waypoint_counts["timeout"] - waypoints_before["timeout"]
+    if getattr(agent, "hold_while_closing", False):
+        result["closing_holds"] = agent.hold_count - holds_before
     if distances:
         result.update(final_dist=distances[-1], min_dist=min(distances),
                       final_grasp_err=grasp_errors[-1], min_grasp_err=min(grasp_errors))
@@ -353,7 +358,8 @@ def main(args: Args) -> None:
                                   waypoint_max_steps=args.waypoint_max_steps,
                                   noise_scheduler=args.noise_scheduler,
                                   num_inference_steps=args.num_inference_steps,
-                                  gripper_threshold=args.gripper_threshold)
+                                  gripper_threshold=args.gripper_threshold,
+                                  hold_while_closing=args.hold_while_closing)
 
     first_obs = robot.get_observations()
     missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
@@ -390,6 +396,8 @@ def main(args: Args) -> None:
         fields += ["ik_fallbacks"]
     if args.gripper_threshold is not None:
         fields += ["gripper_threshold"]
+    if args.hold_while_closing:
+        fields += ["closing_holds"]
     if args.blank_cameras:
         fields += ["blank_cameras"]
     unknown = set(args.blank_cameras) - set(policy_cameras(agent))
@@ -461,6 +469,7 @@ def main(args: Args) -> None:
                                 "n_action_steps": agent.policy.config.n_action_steps,
                                 "waypoint_tolerance": args.waypoint_tolerance,
                                 "gripper_threshold": args.gripper_threshold,
+                                "hold_while_closing": args.hold_while_closing,
                                 "waypoint_max_steps": args.waypoint_max_steps if args.waypoint_tolerance else None,
                                 "checkpoint": checkpoint, "run_name": run_name,
                                 "blank_cameras": list(args.blank_cameras),
