@@ -26,6 +26,37 @@ JAW_JOINT = "hand_held_jaw_joint"
 JAW_TRAVEL_RAD = 0.615          # 35.3°, medido entre las fotos abierta y cerrada
 # mitad del borde dentado del yunque, a media altura de la mandíbula
 GRIPPER_CENTER_MM = (-9.9, 97.0, -10.9)
+# Cortadora real, medida con calibre (2026-11-16), en mm y en el marco hand_held_base. El pruner de las mallas
+# (PIVOT_MM, JAW_TRAVEL_RAD) está ~10 mm corrido respecto a la pieza real; no se toca porque los splats de las
+# escenas se generaron con él. Medido: pivote -> eje del sector (-17.6, -11.6) 65.8; pivote -> agujero del
+# tensor 18.3; eje del sector -> agujero del tensor 53.4 cerrada y 69.78 abierta; punta-yunque abierta 40.0.
+# La dirección del pivote (71.5° desde el eje del sector) y la forma del filo salen de fotos con regla (±1-2 mm).
+REAL_PIVOT_MM = (3.28, 50.80)
+REAL_JAW_TRAVEL_RAD = 0.937          # 53.7°, de cerrada a abierta del todo
+# filo de la hoja móvil con la mandíbula cerrada: (radio desde el pivote real en mm, dirección en grados)
+BLADE_HEEL = (17.0, 124.3)           # donde empieza el filo, junto al pivote
+BLADE_MID = (42.0, 117.5)            # mitad del filo
+BLADE_TIP = (67.0, 105.9)            # punta: falta la medida directa pivote -> punta (fotos 65-71, CAD 67)
+REAL_BLADE_LINKS = {"blade_pivot_link": None, "blade_heel_link": BLADE_HEEL, "blade_mid_link": BLADE_MID,
+                    "blade_tip_link": BLADE_TIP}
+
+
+def real_blade_points_mm(z_mm: float, tip_radius_mm: float | None = None) -> dict:
+    """Pivote real y puntos del filo (cerrada) en hand_held_base, en mm. tip_radius_mm cambia el radio de la
+    punta y corre la mitad del filo con ella (el talón queda fijo)."""
+    out = {}
+    for name, polar in REAL_BLADE_LINKS.items():
+        if polar is None:
+            out[name] = (*REAL_PIVOT_MM, z_mm)
+            continue
+        r, deg = polar
+        if tip_radius_mm is not None and name == "blade_tip_link":
+            r = tip_radius_mm
+        elif tip_radius_mm is not None and name == "blade_mid_link":
+            r += (tip_radius_mm - BLADE_TIP[0]) / 2
+        a = np.radians(deg)
+        out[name] = (REAL_PIVOT_MM[0] + r * np.cos(a), REAL_PIVOT_MM[1] + r * np.sin(a), z_mm)
+    return out
 # ensamble -> marco del gripper viejo: la punta sobre z (herramienta) y la z del ensamble sobre x, que apunta
 # hacia arriba con la herramienta horizontal y joint5 = 0
 R_FLANGE_ASSEMBLY = np.array([[0.0, 0, 1], [1, 0, 0], [0, 1, 0]])
@@ -200,7 +231,8 @@ def _part_mass(part: dict) -> float:
 
 
 def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, roll_deg: float = 0.0,
-               extra_horn_mesh: str | None = None, keep_links=KEEP_LINKS, camera_down: bool = False) -> dict:
+               extra_horn_mesh: str | None = None, keep_links=KEEP_LINKS, camera_down: bool = False,
+               real_blade: bool = True, blade_tip_radius_mm: float | None = None) -> dict:
     """Escribe dst: src sin el gripper del xArm y con el hand_held_XL330, y copia las mallas al lado.
     Los links de keep_links (y lo que cuelga de ellos) siguen en la misma pose. extra_horn_mesh: STL
     (mm, marco del ensamble) de lo que gira con el horn, p.ej. la hoja móvil."""
@@ -358,6 +390,18 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
             _set_origin(camera_joint, T_parent_camera)
         add_wrist_camera_model(root, camera_joint.find("parent").get("link"), T_parent_camera, camera_prefix,
                                camera_down)
+
+    if real_blade:
+        # hoja real (ver REAL_PIVOT_MM): links fijos a hand_held_base, al final para no mover los índices de los
+        # demás links (los splats los usan). El eje del pivote es la z de hand_held_base.
+        points = real_blade_points_mm(design["gripper_center_mm"][2], blade_tip_radius_mm)
+        for name, xyz_mm in points.items():
+            link = ET.SubElement(root, "link", name=name)
+            _inertial(link, 0.001, (0, 0, 0), 1e-8)
+            joint = ET.SubElement(root, "joint", name=name.replace("_link", "_fix"), type="fixed")
+            ET.SubElement(joint, "origin", xyz=" ".join(f"{v / 1000:.6f}" for v in xyz_mm), rpy="0 0 0")
+            ET.SubElement(joint, "parent", link="hand_held_base")
+            ET.SubElement(joint, "child", link=name)
 
     ET.indent(tree)
     tree.write(dst, encoding="utf-8", xml_declaration=True)

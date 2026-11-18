@@ -32,6 +32,10 @@ def main() -> None:
     parser.add_argument("--camera-down", action="store_true",
                         help="camera stand turned 180 deg on the flange (tab towards -x of link_eef) and the "
                              "camera remounted so its image stays upright; wrist_camera_link moves with it")
+    parser.add_argument("--no-real-blade", action="store_true",
+                        help="leave out blade_pivot/heel/mid/tip_link (the measured pruner, see REAL_PIVOT_MM)")
+    parser.add_argument("--blade-tip-mm", type=float,
+                        help="real pivot -> blade tip distance in mm (default: BLADE_TIP in hand_held.py)")
     args = parser.parse_args()
 
     src = os.path.expanduser(args.src)
@@ -40,7 +44,8 @@ def main() -> None:
     linkage = load_design(args.mesh_dir)["linkage"]
     travel = Linkage.from_manifest(linkage).travel_rad if linkage else HAND_HELD_TRAVEL_RAD
     info = build_urdf(src, dst, travel, mesh_dir=args.mesh_dir, roll_deg=args.roll_deg, extra_horn_mesh=args.moving_part,
-                      camera_down=args.camera_down)
+                      camera_down=args.camera_down, real_blade=not args.no_real_blade,
+                      blade_tip_radius_mm=args.blade_tip_mm)
     print(f"Wrote {dst}")
     print(f"Removed links: {', '.join(info['removed'])}")
     print(f"Kept and moved to {info['parent']}: {', '.join(info['reparented']) or '-'}")

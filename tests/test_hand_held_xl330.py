@@ -473,6 +473,24 @@ class TestUrdf(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_urdf(self.dst, self.dst + ".2", 1.878)
 
+    def test_real_blade_links_go_last_and_match_the_measurements(self):
+        from splatsim.utils.scene import hand_held as hh
+        self.build(real_blade=False)
+        before = [j.get("name") for j in ET.parse(self.dst).getroot().iter("joint")]
+        self.build(blade_tip_radius_mm=70.0)
+        joints = {j.get("name"): j for j in ET.parse(self.dst).getroot().iter("joint")}
+        names = list(joints)
+        self.assertEqual(names[:len(before)], before)                 # los links de antes no cambian de índice
+        self.assertEqual(names[len(before):], ["blade_pivot_fix", "blade_heel_fix", "blade_mid_fix", "blade_tip_fix"])
+        xyz = {n: np.array(joints[n].find("origin").get("xyz").split(), float) * 1000 for n in names[len(before):]}
+        pivot = xyz["blade_pivot_fix"]
+        np.testing.assert_allclose(pivot[:2], hh.REAL_PIVOT_MM, atol=1e-3)
+        self.assertAlmostEqual(np.linalg.norm(pivot[:2] - np.array([-17.6, -11.6])), 65.8, delta=0.05)   # medido
+        self.assertAlmostEqual(np.linalg.norm(xyz["blade_tip_fix"][:2] - pivot[:2]), 70.0, delta=1e-3)
+        self.assertAlmostEqual(pivot[2], GRIPPER_CENTER_MM[2], delta=1e-3)
+        for n in xyz:
+            self.assertEqual(joints[n].find("parent").get("link"), "hand_held_base")
+
     def test_all_mesh_references_exist(self):
         self.build()
         for mesh in ET.parse(self.dst).getroot().iter("mesh"):
