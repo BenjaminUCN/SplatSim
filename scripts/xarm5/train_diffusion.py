@@ -42,6 +42,7 @@ from lerobot.transforms import (
 )
 from lerobot.utils.feature_utils import dataset_to_policy_features
 
+from splatsim.utils.data.action_space import action_space_of
 from splatsim.utils.data.relative_actions import to_relative
 from splatsim.utils.render.camera_setup import arrangement_cameras
 from splatsim.utils.paths import expand
@@ -510,6 +511,9 @@ def main(cfg: TrainConfig):
     print(f"Cameras: {list(policy_cfg.image_features)}")
     policy = DiffusionPolicy(policy_cfg)
     stats = dataset_metadata.stats
+    print(f"Estado y acción: {action_space_of(dataset_metadata.features)}")
+    if cfg.relative_actions and action_space_of(dataset_metadata.features) == "joints":
+        raise SystemExit("relative_actions es para la pose de link_eef (pos y Euler), no para articulaciones")
     if cfg.relative_actions:
         from splatsim.utils.data.relative_actions import relative_action_stats, save_stats
         ref = policy_cfg.n_obs_steps - 1     # índice del frame de referencia en observation.state

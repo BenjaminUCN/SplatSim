@@ -13,6 +13,7 @@ from lerobot.policies.utils import build_inference_frame
 from torchvision import transforms
 
 from splatsim.image_classifier import SimpleCNN
+from splatsim.utils.data.action_space import action_space_of
 from splatsim.utils.data.registry import dataset_source_for_checkpoint, hub_repo_id
 
 _N_OBS_STEPS = 2   # temporal window size
@@ -166,8 +167,13 @@ class LeRobotDiffusionAgent:
         # acciones = pose del efector - pose del estado con que se predijo el chunk (pos y euler)
         self.relative_actions = checkpoint_relative_actions(checkpoint)
         self._chunk_reference: np.ndarray | None = None
-        print(f"[LeRobotDiffusionAgent] Acciones {'relativas' if self.relative_actions else 'absolutas'}, "
-              f"IK {self.ik_orientation}")
+        # pose: estado y acción = pose de link_eef, la acción pasa por la IK; joints: 5 articulaciones +
+        # pinza, la acción va directo al robot (splatsim/utils/data/action_space.py)
+        self.action_space = action_space_of(self.dataset_metadata.features)
+        if self.action_space == "joints" and (self.relative_actions or self.ik_orientation != "off"):
+            raise ValueError("un modelo en articulaciones no usa IK ni acciones relativas")
+        print(f"[LeRobotDiffusionAgent] Espacio {self.action_space}, acciones "
+              f"{'relativas' if self.relative_actions else 'absolutas'}, IK {self.ik_orientation}")
 
         self.make_new_prediction = True
     
@@ -288,7 +294,7 @@ class LeRobotDiffusionAgent:
     def _build_obs(self, obs):
         # joint_positions = obs["joint_positions"]
         # state = self.safe_to_numpy(joint_positions).astype(np.float32).flatten()
-        state = obs["state"]
+        state = obs["joint_positions" if self.action_space == "joints" else "state"]
         state = self.safe_to_numpy(state).astype(np.float32).flatten()
         
         # una imagen por cada cámara que usa la política (puede ser un subconjunto de las
@@ -481,27 +487,33 @@ class LeRobotDiffusionAgent:
                 action_np[3:6] = wrap_angles(action_np[3:6] + self._chunk_reference[3:6])
             self.action_prediction = action_np
             print(f"New action prediction: {self.action_prediction}")
-            
-            self.ee_pose = self.action_prediction[:3]
-            self.ee_rot = self.action_prediction[3:6]
-            self.ee_gripper = self.action_prediction[6]
-                
+
+            if self.action_space == "joints":
+                self.target_joints = np.asarray(self.action_prediction[:5], dtype=float)
+                self.ee_gripper = self.action_prediction[5]
+            else:
+                self.ee_pose = self.action_prediction[:3]
+                self.ee_rot = self.action_prediction[3:6]
+                self.ee_gripper = self.action_prediction[6]
+
             self.make_new_prediction = False
             self._held = 0
 
-        ee_pose = self.ee_pose
-        ee_rot = self.ee_rot
-        
-        ee_quat = p.getQuaternionFromEuler(ee_rot)
-        print(f"ee_pose: ({ee_pose[0]:.3f}, {ee_pose[1]:.3f}, {ee_pose[2]:.3f})")
-        print(f"ee_rot: ({ee_rot[0]:.3f}, {ee_rot[1]:.3f}, {ee_rot[2]:.3f})")
-        
         joints_n = 5
+        if self.action_space == "joints":
+            dummy_joint_pos = self.target_joints        # sin IK
+        else:
+            ee_pose = self.ee_pose
+            ee_rot = self.ee_rot
 
-        self.draw_pose(ee_pose, ee_quat, life_time=1)
+            ee_quat = p.getQuaternionFromEuler(ee_rot)
+            print(f"ee_pose: ({ee_pose[0]:.3f}, {ee_pose[1]:.3f}, {ee_pose[2]:.3f})")
+            print(f"ee_rot: ({ee_rot[0]:.3f}, {ee_rot[1]:.3f}, {ee_rot[2]:.3f})")
 
-        rest = obs_dict["joint_positions"][:len(self.joint_indices)]
-        dummy_joint_pos = self._solve_ik(ee_pose, ee_quat, rest)
+            self.draw_pose(ee_pose, ee_quat, life_time=1)
+
+            rest = obs_dict["joint_positions"][:len(self.joint_indices)]
+            dummy_joint_pos = self._solve_ik(ee_pose, ee_quat, rest)
 
         # calculate difference between current and target joint angles
         joint_diff = np.array(dummy_joint_pos)[:joints_n] - np.array(obs_dict['joint_positions'])[:joints_n]

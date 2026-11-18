@@ -38,6 +38,7 @@ def make_agent(tolerance, max_steps=10):
     agent = object.__new__(LeRobotDiffusionAgent)
     agent.policy = FakePolicy()
     agent.relative_actions = False
+    agent.action_space = "pose"
     agent.ik_orientation = "off"
     agent.waypoint_tolerance = tolerance
     agent.waypoint_max_steps = max_steps

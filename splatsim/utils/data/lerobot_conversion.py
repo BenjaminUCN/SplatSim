@@ -42,7 +42,11 @@ Usage
 -----
 python splatsim/utils/data/lerobot_conversion.py \
     --input_dir ~/data/bc_data/gello_3plants \
-    --output_dir ~/lerobot/splatsim_test_data [--fps 10] [--cameras base_rgb wrist_rgb]
+    --output_dir ~/lerobot/splatsim_test_data [--fps 10] [--cameras base_rgb wrist_rgb] \
+    [--action_space joints]
+
+--action_space joints guarda el estado y la acción en articulaciones (5 + pinza) en vez de la pose del
+efector; ver splatsim/utils/data/action_space.py. Solo para grabaciones de simulación.
 """
 
 from __future__ import annotations
@@ -69,6 +73,7 @@ from tqdm import tqdm
 
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 
+from splatsim.utils.data.action_space import ACTION_SPACES, feature_names, joint_state_action
 from splatsim.utils.data.dataset_sources import describe_folder, write_sources
 from splatsim.utils.data.episode_selection import load_discarded
 
@@ -90,6 +95,7 @@ class ConversionConfig:
     wrist_offset: int | None = None
     use_videos: bool = True
     push_to_hub: bool = True          # False: solo el dataset local (p.ej. para probar)
+    action_space: str = "pose"        # "pose" (link_eef) o "joints" (articulaciones), action_space.py
 
 
 # ============================================================
@@ -402,7 +408,7 @@ def build_action_from_pkl(pkl_data: dict, schema: str) -> np.ndarray:
     raise ValueError(f"Esquema desconocido: {schema}")
 
 
-def infer_state_action_dims(episode_dir: Path, schema: str) -> tuple[int, int]:
+def infer_state_action_dims(episode_dir: Path, schema: str, action_space: str = "pose") -> tuple[int, int]:
 
     pkl_path = sorted(
         episode_dir.glob("*.pkl"),
@@ -411,6 +417,9 @@ def infer_state_action_dims(episode_dir: Path, schema: str) -> tuple[int, int]:
 
     data = load_pickle(pkl_path)
 
+    if action_space == "joints":
+        state, action = joint_state_action(data)
+        return len(state), len(action)
     state = safe_to_numpy(data["state"]).flatten()
     action = build_action_from_pkl(data, schema)
 
@@ -428,6 +437,7 @@ def build_lerobot_features(
     state_dim: int,
     action_dim: int,
     frame_type: str = "video",
+    action_space: str = "pose",
 ):
 
     features = {}
@@ -447,13 +457,13 @@ def build_lerobot_features(
     features["observation.state"] = {
         "dtype": "float32",
         "shape": (state_dim,),
-        "names": [f"state_{i}" for i in range(state_dim)],
+        "names": feature_names(action_space, state_dim, "state"),
     }
 
     features["action"] = {
         "dtype": "float32",
         "shape": (action_dim,),
-        "names": [f"action_{i}" for i in range(action_dim)],
+        "names": feature_names(action_space, action_dim, "action"),
     }
 
     return features
@@ -479,6 +489,7 @@ def create_dataset(
         state_dim=state_dim,
         action_dim=action_dim,
         frame_type="video" if config.use_videos else "image",
+        action_space=config.action_space,
     )
 
     hf_user = "LuEduSoHu"
@@ -539,6 +550,7 @@ def build_frame(
     image_keys: list[str],
     schema: str,
     task: str = "",
+    action_space: str = "pose",
 ) -> dict:
     """
     Build a frame compatible with LeRobotDataset.add_frame().
@@ -549,11 +561,11 @@ def build_frame(
     - images            -> float32 CHW in [0, 1]
     """
 
-    state = safe_to_numpy(
-        pkl_data["state"]
-    ).astype(np.float32).flatten()
-
-    action = build_action_from_pkl(pkl_data, schema)
+    if action_space == "joints":
+        state, action = joint_state_action(pkl_data)
+    else:
+        state = safe_to_numpy(pkl_data["state"]).astype(np.float32).flatten()
+        action = build_action_from_pkl(pkl_data, schema)
 
     frame: dict = {
         "observation.state": state,
@@ -692,6 +704,7 @@ def process_episode(
                 list(images.keys()),
                 schema=schema,
                 task="aproach_apple",
+                action_space=config.action_space,
             )
             dataset.add_frame(frame)
         except Exception as e:
@@ -763,7 +776,9 @@ def run_conversion(config: ConversionConfig, repo_suffix: str):
         for k in image_keys
     }
 
-    state_dim, action_dim = infer_state_action_dims(reference_episode, schema)
+    if config.action_space == "joints" and schema != "sim":
+        raise ValueError("--action_space joints solo está implementado para grabaciones de simulación")
+    state_dim, action_dim = infer_state_action_dims(reference_episode, schema, config.action_space)
 
     print("\nDetected configuration:")
     print(f"Image keys : {image_keys}")
@@ -868,6 +883,8 @@ def build_parser():
     )
     p.add_argument("--use_images", action="store_true")
     p.add_argument("--no_push", action="store_true", help="No subir el dataset al Hugging Face Hub.")
+    p.add_argument("--action_space", choices=ACTION_SPACES, default="pose",
+                   help="pose: estado y acción = pose de link_eef (lo de siempre); joints: 5 articulaciones + pinza.")
     p.add_argument(
         "--ignore_selection",
         action="store_true",
@@ -904,6 +921,7 @@ def main():
         ignore_selection=args.ignore_selection,
         use_videos=not args.use_images,
         push_to_hub=not args.no_push,
+        action_space=args.action_space,
     )
 
     repo_suffix = args.repo_suffix or datetime.now().strftime("%y%m%d_%H%M")
