@@ -60,6 +60,13 @@ class TrialTableTest(unittest.TestCase):
         self.assertTrue(tt.is_success({"min_grasp_err": "0.2", "manual_success": "1"}))
         self.assertIsNone(tt.is_success({"min_grasp_err": ""}))
 
+    def test_cut_success_is_peduncle_held(self):
+        cut = {"min_grasp_err": "0.02", "min_cut_err": "0.027", "peduncle_cut": "1", "peduncle_held": "0"}
+        self.assertFalse(tt.is_success(cut))
+        self.assertTrue(tt.is_success({**cut, "min_grasp_err": "0.2", "peduncle_held": "1"}))
+        self.assertTrue(tt.short_label({**cut, "pos_idx": "3", "success": False}).startswith("✗ blade 2.7 cm"))
+        self.assertIn("peduncle cut 1, held 0", "\n".join(tt.details({**cut, "success": False})))
+
     def test_options_sorted_as_numbers(self):
         self.assertEqual(tt.options(self.rows, "occlusion_target"), ["all", "0", "25", "75"])
         self.assertEqual(tt.options(self.rows, "z"), ["all", "-0.02", "0.34"])

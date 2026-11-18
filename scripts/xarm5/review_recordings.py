@@ -24,9 +24,13 @@ punto por frame) y la carpeta Resampling compara ambas en el tiempo.
 
 Ensayos de scripts/xarm5/run_policy_trials.py (carpetas con trials.csv):
     python scripts/xarm5/review_recordings.py --root ~/data/policy_trials
-Las corridas aparecen como <modelo>/<fecha>. Cada episodio muestra su resultado (✓/✗, error mínimo,
-oclusión, posición) y la carpeta Trial filters filtra por éxito, nivel de oclusión, fila z y posición
-de la grilla.
+Las corridas aparecen como "<fecha hora> · <modelo> · <éxitos>/<ensayos>", la más reciente primero. Folder
+filters (splatsim/utils/trials/run_index.py) filtra el desplegable por fecha, tarea (agarre o corte), hoja,
+muestreador y texto (palabras de la ruta o de los parámetros, p. ej. "a4j s2 -n4"); debajo se muestran los
+parámetros de la corrida abierta (modelo, pasos de acción, IK, cámaras apagadas, umbral de la pinza, ...).
+Cada episodio muestra su resultado (✓/✗, error mínimo, oclusión, posición) y la carpeta Trial filters filtra
+por éxito, nivel de oclusión, fila z y posición de la grilla. En las corridas de corte, éxito = pedúnculo
+cortado y sujeto (peduncle_held).
 """
 import io
 import hashlib
@@ -68,7 +72,7 @@ from splatsim.utils.trials.grasp_point import (  # noqa: E402
     save_grasp_point,
     tomato_in_ee,
 )
-from splatsim.utils.trials import trial_table  # noqa: E402
+from splatsim.utils.trials import run_index, trial_table  # noqa: E402
 from splatsim.utils.data.stop_labels import (  # noqa: E402
     VALID_RADIUS,
     auto_valid_from,
@@ -288,6 +292,8 @@ class Reviewer:
         self.urdf_path = urdf_path
         self._robot = None            # RobotUrdfView, al marcar "Show robot (URDF)"
         self.folder: RecordingFolder | None = None
+        self._runs: dict[str, run_index.RunInfo] = {}   # carpeta (relativa a root) -> fecha y parámetros
+        self._folder_by_label: dict[str, str] = {}      # texto del desplegable -> carpeta
         self.episode: str | None = None
         self.trail_data: dict | None = None
         self.playing = False
@@ -312,14 +318,58 @@ class Reviewer:
         self._build_gui()
         self.v.gui.main_panel.dock_right()
         self.v.gui.main_panel.set_width(380)
-        folders = self._folders()
-        self.folder_select.options = folders or ["-"]
-        if folders:
-            self.open_folder(folders[0])
+        shown = self._reindex()
+        if shown:
+            self.open_folder(shown[0])
         print(f"[Review] http://localhost:{port}")
 
-    def _folders(self) -> list[str]:
-        return recording_folders(self.root)
+    def _reindex(self) -> list[str]:
+        """Vuelve a leer las carpetas (fecha y parámetros de cada corrida) y actualiza los filtros y el
+        desplegable. Devuelve las carpetas que pasan los filtros, en el orden elegido."""
+        t0 = time.monotonic()
+        self._runs = {n: run_index.describe(self.root, n) for n in recording_folders(self.root)}
+        infos = list(self._runs.values())
+        for widget, options in ((self.run_date, run_index.date_options(infos)),
+                                (self.run_sampler, run_index.sampler_options(infos))):
+            value = widget.value
+            widget.options = options
+            widget.value = value if value in options else run_index.ALL
+        has_runs = any(i.is_run for i in infos)
+        for widget in (self.run_task, self.run_leaf, self.run_sampler):
+            widget.visible = has_runs
+        if time.monotonic() - t0 > 1.0:
+            print(f"[Review] {len(infos)} carpetas indexadas en {time.monotonic() - t0:.1f} s")
+        return self._update_folder_options()
+
+    def _shown_folders(self) -> list[str]:
+        infos = [i for i in self._runs.values() if run_index.matches(
+            i, self.run_date.value, self.run_search.value, self.run_task.value, self.run_leaf.value,
+            self.run_sampler.value)]
+        return [i.path for i in run_index.ordered(infos, self.run_sort.value)]
+
+    def _update_folder_options(self) -> list[str]:
+        """Desplegable de carpetas con los filtros; la carpeta abierta queda arriba aunque no pase."""
+        shown = self._shown_folders()
+        current = self._folder_name()
+        listed = shown if current is None or current in shown or current not in self._runs else [current, *shown]
+        labels = [run_index.label(self._runs[n]) for n in listed]
+        dup = {t for t in labels if labels.count(t) > 1}
+        labels = [run_index.label(self._runs[n], short=False) if t in dup else t for n, t in zip(listed, labels)]
+        if current is not None and current not in shown and current in listed:
+            labels[0] = "(filtered out) " + labels[0]
+        self._folder_by_label = dict(zip(labels, listed))
+        self.folder_select.options = labels or ["-"]
+        if current in listed:
+            self.folder_select.value = labels[listed.index(current)]
+        total = len(self._runs)
+        self.run_count.content = (f"{len(shown)} of {total} folders" if len(shown) < total
+                                  else f"{total} folders")
+        return shown
+
+    def _select_folder_label(self, label: str):
+        name = self._folder_by_label.get(label)
+        if name is not None and name != self._folder_name():
+            self.open_folder(name)
 
     def _folder_name(self) -> str | None:
         """Nombre de la carpeta abierta en el desplegable (ruta relativa a --root)."""
@@ -329,7 +379,22 @@ class Reviewer:
     def _build_gui(self):
         gui = self.v.gui
         with gui.add_folder("Recordings"):
+            with gui.add_folder("Folder filters"):
+                self.run_search = gui.add_text(
+                    "Search", "", hint="Words that must all appear in the folder path or the run's parameters "
+                                       "(model, IK, blanked cameras...); -word excludes. E.g. a4j s2 -n4")
+                self.run_date = gui.add_dropdown("Date", [run_index.ALL], hint="Day the run started")
+                self.run_task = gui.add_dropdown(
+                    "Task", list(run_index.TASKS),
+                    hint="grasp / cut: policy trial runs (cut = scene with the peduncle); recordings: the rest")
+                self.run_leaf = gui.add_dropdown("Leaf", list(run_index.LEAF),
+                                                 hint="leaf: the run has trials with a leaf occluding the tomato")
+                self.run_sampler = gui.add_dropdown("Sampler", [run_index.ALL],
+                                                    hint="Diffusion sampler at evaluation (older runs didn't save it)")
+                self.run_sort = gui.add_dropdown("Sort", list(run_index.SORTS))
+                self.run_count = gui.add_markdown("")
             self.folder_select = gui.add_dropdown("Folder", ["-"])
+            self.run_info = gui.add_markdown("")
             refresh = gui.add_button("Refresh", icon=viser.Icon.REFRESH,
                                      hint="Re-read the folders and open the newest episode "
                                           "(e.g. the one just recorded, to delete it)")
@@ -342,7 +407,8 @@ class Reviewer:
             self.trials_folder = gui.add_folder("Trial filters")
             with self.trials_folder:
                 self.trial_result = gui.add_dropdown("Result", list(trial_table.RESULTS),
-                                                     hint=f"Success: min grasp error ≤ {SUCCESS_RADIUS * 100:.0f} cm")
+                                                     hint=f"Success: min grasp error ≤ {SUCCESS_RADIUS * 100:.0f} cm; "
+                                                          "cut runs: peduncle cut and held")
                 self.trial_occlusion = gui.add_dropdown("Occlusion (%)", ["all"], hint="Target occlusion level")
                 self.trial_z = gui.add_dropdown("Row z (m)", ["all"])
                 self.trial_position = gui.add_dropdown("Position", ["all"], hint="Index in the grid")
@@ -418,7 +484,9 @@ class Reviewer:
         cams.dock_left()
         cams.set_width(340)
 
-        self.folder_select.on_update(lambda e: e.client and self.open_folder(self.folder_select.value))
+        self.folder_select.on_update(lambda e: e.client and self._select_folder_label(self.folder_select.value))
+        for w in (self.run_search, self.run_date, self.run_task, self.run_leaf, self.run_sampler, self.run_sort):
+            w.on_update(lambda e: e.client and self._update_folder_options())
         refresh.on_click(lambda _: self._refresh())
         self.filter_select.on_update(lambda e: e.client and self._refresh_episode_list())
         for w in (self.trial_result, self.trial_occlusion, self.trial_z, self.trial_position):
@@ -575,9 +643,8 @@ class Reviewer:
         threading.Thread(target=run, daemon=True).start()
 
     def _open_new_folder(self, name: str):
-        folders = self._folders()
-        self.folder_select.options = folders or ["-"]
-        if name in folders:
+        self._reindex()
+        if name in self._runs:
             self.open_folder(name)
             self.job_status.content = f"**Rendered** into `{name}`, now open: review it and Convert"
 
@@ -585,11 +652,10 @@ class Reviewer:
     def _refresh(self):
         """Vuelve a leer las carpetas y la actual (episodios nuevos o borrados afuera) y abre el
         último episodio."""
-        folders = self._folders()
-        self.folder_select.options = folders or ["-"]
+        shown = self._reindex()
         name = self._folder_name()
-        if name not in folders:
-            name = folders[0] if folders else None
+        if name not in self._runs:
+            name = shown[0] if shown else None
         if name is None:
             self.episode_select.options = ["-"]
             return
@@ -602,7 +668,10 @@ class Reviewer:
             self.folder.grasp_point = self._edit_point
         elif self.folder.grasp_point is not None:
             self._show_point_fields(self.folder.grasp_point, load_point_source())
-        self.folder_select.value = name
+        if name not in self._runs:
+            self._runs[name] = run_index.describe(self.root, name)
+        self._update_folder_options()
+        self.run_info.content = run_index.details(self._runs[name])
         self._setup_trial_filters()
         self._refresh_episode_list()
         visible = self._visible_names()
@@ -753,7 +822,7 @@ class Reviewer:
         print(f"[Review] Borrados de {f.path}: {', '.join(names)}")
         self.delete_info.content = f"Deleted {len(names)} episode{'s' * (len(names) > 1)}: {', '.join(names[:12])}"
         if not f.names:
-            self.folder_select.options = self._folders() or ["-"]
+            self._reindex()
             self.episode, self.trail_data = None, None
             self.episode_select.options = ["-"]
             self.episode_info.content = f"`{f.path}` has no episodes left"

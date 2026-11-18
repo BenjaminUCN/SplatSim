@@ -20,13 +20,17 @@ def _number(value) -> float | None:
 
 
 def is_success(row: dict) -> bool | None:
-    """Lo que marcó el operador (robot real) o error mínimo de agarre ≤ SUCCESS_RADIUS, como
-    compare_trials.py. None si la fila no tiene ninguno de los dos."""
+    """Lo que marcó el operador (robot real); en la escena de corte, el pedúnculo cortado y sujeto
+    (peduncle_held); si no, error mínimo de agarre ≤ SUCCESS_RADIUS, como compare_trials.py. None si
+    la fila no tiene nada de eso."""
     manual = (row.get("manual_success") or "").strip().lower()
     if manual in ("1", "true", "success"):
         return True
     if manual in ("0", "false", "fail"):
         return False
+    held = _number(row.get("peduncle_held"))
+    if held is not None:
+        return held > 0
     err = _number(row.get("min_grasp_err"))
     return None if err is None else err <= SUCCESS_RADIUS
 
@@ -76,8 +80,9 @@ def matches(row: dict | None, result: str = ALL, occlusion: str = ALL, z: str = 
 def short_label(row: dict) -> str:
     """Para la lista de episodios: ✓/✗, error mínimo y oclusión."""
     mark = {True: "✓", False: "✗"}.get(row["success"], "?")
-    err = _number(row.get("min_grasp_err"))
-    parts = [mark + (f" {err * 100:.1f} cm" if err is not None else "")]
+    cut = _number(row.get("peduncle_held")) is not None
+    err = _number(row.get("min_cut_err" if cut else "min_grasp_err"))
+    parts = [mark + (f" {'blade ' if cut else ''}{err * 100:.1f} cm" if err is not None else "")]
     if level_text(row.get("occlusion_target")):
         parts.append(f"occ {level_text(row['occlusion_target'])} %")
     parts.append(f"pos {row.get('pos_idx', '?')}")
@@ -92,6 +97,11 @@ def details(row: dict) -> list[str]:
 
     result = {True: "**success**", False: "**fail**"}.get(row["success"], "no result")
     lines = [f"Trial: {result} — grasp error min {cm('min_grasp_err')}, final {cm('final_grasp_err')}"]
+    if _number(row.get("peduncle_held")) is not None:
+        t_cut = _number(row.get("time_to_cut"))
+        lines.append(f"Cut: blade to cut point min {cm('min_cut_err')}"
+                     + (f", closed at {t_cut:.1f} s" if t_cut is not None else "")
+                     + f" — peduncle cut {row.get('peduncle_cut')}, held {row.get('peduncle_held')}")
     where = f"position {row.get('pos_idx', '?')} (x {row.get('x')}, y {row.get('y')}, z {row.get('z')}), trial {row.get('trial')}"
     t = _number(row.get("time_to_success"))
     lines.append(where + (f", success at {t:.1f} s" if t is not None else ""))
