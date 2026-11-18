@@ -99,7 +99,9 @@ def details(row: dict) -> list[str]:
     lines = [f"Trial: {result} — grasp error min {cm('min_grasp_err')}, final {cm('final_grasp_err')}"]
     if _number(row.get("peduncle_held")) is not None:
         t_cut = _number(row.get("time_to_cut"))
-        lines.append(f"Cut: blade to cut point min {cm('min_cut_err')}"
+        at = (f", at close command {cm('cut_err_at_command')}, when closed {cm('cut_err_at_closed')}"
+              if _number(row.get("cut_err_at_command")) is not None else "")
+        lines.append(f"Cut: blade to cut point min {cm('min_cut_err')}{at}"
                      + (f", closed at {t_cut:.1f} s" if t_cut is not None else "")
                      + f" — peduncle cut {row.get('peduncle_cut')}, held {row.get('peduncle_held')}")
     where = f"position {row.get('pos_idx', '?')} (x {row.get('x')}, y {row.get('y')}, z {row.get('z')}), trial {row.get('trial')}"
