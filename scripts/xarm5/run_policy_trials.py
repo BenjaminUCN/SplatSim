@@ -14,6 +14,9 @@ la grabación (trial_seconds de tiempo simulado). La política se carga una sola
 
 Salida en output_dir/<nombre del modelo>/<fecha>/: una carpeta por ensayo (000/, 001/, ... con meta.json)
 y trials.csv con un resumen (distancia final y mínima del efector al tomate).
+En una escena con cortadora y tallo (p. ej. --robot_name xarm5_lite_plant_v3_hand_held_down_cam_down en el
+servidor), trials.csv suma el corte: min_cut_err (distancia mínima del centro del filo al punto de corte antes
+de cortar), time_to_cut, y peduncle_cut / peduncle_held al final. Éxito del corte: peduncle_held = 1.
 
 Robot real (launch_nodes.py --robot xarm5): no hay posición del tomate, así que los ensayos se
 hacen con el operador, por el panel: antes de cada uno pide poner el tomate en la posición de la
@@ -225,6 +228,7 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     # vale 1/hz de tiempo simulado y no hace falta esperar
     period = 1 / obs["control_hz"] if "control_hz" in obs else 0.0
     frames, distances, grasp_errors = 0, [], []
+    cut_errors, time_to_cut = [], None   # escena con cortadora y tallo (peduncle_error en la observación)
     clock = (lambda o: o["sim_time"]) if "sim_time" in obs else (lambda o: time.monotonic())
     start, time_to_success, stopped = clock(obs), None, False
 
@@ -255,6 +259,11 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
                 call(robot, "stop_recording")
                 stopped = True
                 break
+        if "peduncle_error" in obs and obs["peduncle_error"] is not None:
+            if not obs["peduncle_cut"]:      # después del corte el tallo se mueve con la cortadora
+                cut_errors.append(float(obs["peduncle_error"]))
+            elif time_to_cut is None:
+                time_to_cut = round(clock(obs) - start, 3)
         if not obs["recording"]:   # el servidor cortó al llegar a trial_seconds
             break
 
@@ -278,6 +287,10 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     if distances:
         result.update(final_dist=distances[-1], min_dist=min(distances),
                       final_grasp_err=grasp_errors[-1], min_grasp_err=min(grasp_errors))
+    if "peduncle_error" in obs and obs["peduncle_error"] is not None:
+        # éxito del corte: cortado y con el tomate sujeto al final (cut-and-hold)
+        result.update(min_cut_err=min(cut_errors) if cut_errors else 0.0, time_to_cut=time_to_cut,
+                      peduncle_cut=int(bool(obs["peduncle_cut"])), peduncle_held=int(bool(obs["peduncle_held"])))
     return result
 
 
@@ -348,6 +361,8 @@ def main(args: Args) -> None:
               "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point", "trial_seconds",
               "time_to_success", "stopped_on_success", "success_extra_seconds", "n_action_steps",
               "noise_scheduler", "num_inference_steps", "chunk_latency_ms", "chunks"]
+    if first_obs.get("peduncle_error") is not None:   # escena con cortadora: métricas del corte
+        fields += ["min_cut_err", "time_to_cut", "peduncle_cut", "peduncle_held"]
     if targets != [None]:
         fields += ["occlusion_target", "leaf_status", "leaf", "leaf_camera", "occlusion_fit"]
     elif not manual:
