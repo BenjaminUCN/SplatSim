@@ -102,6 +102,8 @@ class Args:
     gripper_threshold: float | None = None
     # al ordenar cerrar la pinza, el brazo se queda quieto hasta que cierra (como en las demos del planificador)
     hold_while_closing: bool = False
+    # una vez cerrada la pinza (>= 0.8), queda cerrada hasta el final del ensayo (como en las demos de cortar y sujetar)
+    latch_closed: bool = False
     # termina el ensayo success_extra_seconds después de que el error de agarre baja de
     # SUCCESS_RADIUS (4 cm): ahorra tiempo y no cambia la tasa de éxito; en esos segundos el brazo
     # sigue acercándose, así el error mínimo no queda cortado en ~4 cm. time_to_success se anota
@@ -359,7 +361,8 @@ def main(args: Args) -> None:
                                   noise_scheduler=args.noise_scheduler,
                                   num_inference_steps=args.num_inference_steps,
                                   gripper_threshold=args.gripper_threshold,
-                                  hold_while_closing=args.hold_while_closing)
+                                  hold_while_closing=args.hold_while_closing,
+                                  latch_closed=args.latch_closed)
 
     first_obs = robot.get_observations()
     missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
@@ -470,6 +473,7 @@ def main(args: Args) -> None:
                                 "waypoint_tolerance": args.waypoint_tolerance,
                                 "gripper_threshold": args.gripper_threshold,
                                 "hold_while_closing": args.hold_while_closing,
+                                "latch_closed": args.latch_closed,
                                 "waypoint_max_steps": args.waypoint_max_steps if args.waypoint_tolerance else None,
                                 "checkpoint": checkpoint, "run_name": run_name,
                                 "blank_cameras": list(args.blank_cameras),

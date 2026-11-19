@@ -120,6 +120,7 @@ class JointAgentTest(unittest.TestCase):
         agent._held = 0
         agent.gripper_threshold = None
         agent.hold_while_closing = False
+        agent.latch_closed = False
         seen = []
         agent._build_obs = lambda obs: seen.append(obs) or {}
         agent.postprocess = lambda a: a
@@ -166,6 +167,17 @@ class JointAgentTest(unittest.TestCase):
         joints, _ = agent._hold_for_closing({"joint_positions": np.array([0, 0, 0, 0, 0, 0.9])},
                                             np.array([0.7] * 5), 0.7)   # sin gripper_position: joint_positions[5]
         np.testing.assert_allclose(joints, [0.7] * 5)
+
+    def test_latch_closed_keeps_the_gripper_closed_once_it_closes(self):
+        agent = object.__new__(LeRobotDiffusionAgent)
+        agent._latched = False
+        latch = lambda grip, closed: agent._latch({"gripper_position": [closed]}, 5, grip)  # noqa: E731
+        self.assertEqual(latch(0.6, 0.3), 0.6)    # cerrando: la orden de la política
+        self.assertEqual(latch(0.9, 0.85), 1.0)   # ya cerró: queda cerrada
+        self.assertEqual(latch(0.1, 0.85), 1.0)   # la política quiere abrir: no
+        self.assertEqual(latch(0.0, 0.4), 1.0)
+        agent._latched = False                    # reset() del ensayo siguiente
+        self.assertEqual(latch(0.0, 0.0), 0.0)
 
 
 if __name__ == "__main__":

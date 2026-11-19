@@ -121,6 +121,8 @@ class LeRobotDiffusionAgent:
             llega a CLOSED_FRACTION (0.8, cuando el simulador decide el corte); después sigue la política.
             Así cierran las demos del planificador, con el brazo quieto. Mientras tanto la política
             igual recibe las observaciones y saca acciones, que no se usan.
+        latch_closed: una vez que la pinza llega a CLOSED_FRACTION, la orden de la pinza queda en 1 (cerrar)
+            hasta el final del ensayo, como en las demos de cortar y sujetar; el brazo sigue a la política.
     """
 
     def __init__(
@@ -136,6 +138,7 @@ class LeRobotDiffusionAgent:
         num_inference_steps: int | None = None,
         gripper_threshold: float | None = None,
         hold_while_closing: bool = False,
+        latch_closed: bool = False,
     ):
         """checkpoint: carpeta del modelo o repo del Hub (None -> DEFAULT_CHECKPOINT).
         dataset_root: dataset con que se entrenó, carpeta o repo del Hub; None -> se busca en
@@ -152,6 +155,8 @@ class LeRobotDiffusionAgent:
         self.hold_while_closing = hold_while_closing
         self._hold_joints: np.ndarray | None = None   # hold_while_closing: brazo quieto aquí mientras cierra
         self.hold_count = 0                            # veces que se quedó quieto para cerrar
+        self.latch_closed = latch_closed
+        self._latched = False                          # latch_closed: ya cerró, la pinza queda cerrada
         self.waypoint_counts = {"reached": 0, "timeout": 0}   # acciones que terminaron así
         self._held = 0                                         # pasos que lleva la acción actual
         self._last_joints: np.ndarray | None = None            # último comando articular (5)
@@ -415,6 +420,7 @@ class LeRobotDiffusionAgent:
         self._held = 0
         self._last_joints = None
         self._hold_joints = None
+        self._latched = False
 
     def _observe_only(self, obs_frame: dict) -> None:
         """Mete la observación en la cola de la política sin sacar una acción (lo que hace
@@ -451,12 +457,22 @@ class LeRobotDiffusionAgent:
             self.dummy_robot, endEffectorLinkIndex=EE_LINK_INDEX, targetPosition=position,
             residualThreshold=0.00001, maxNumIterations=10000, restPoses=rest, **kwargs)
 
+    @staticmethod
+    def _gripper_closed(obs: dict, n_joints: int) -> float:
+        """Cuánto está cerrada la pinza en la observación (0 abierta, 1 cerrada)."""
+        if "gripper_position" in obs:
+            return float(np.ravel(obs["gripper_position"])[0])
+        return float(np.ravel(obs["joint_positions"])[n_joints])
+
+    def _latch(self, obs: dict, n_joints: int, gripper: float) -> float:
+        """latch_closed: la orden de la pinza en este paso."""
+        if not self._latched and self._gripper_closed(obs, n_joints) >= CLOSED_FRACTION:
+            self._latched = True
+        return 1.0 if self._latched else gripper
+
     def _hold_for_closing(self, obs: dict, joints: np.ndarray, gripper: float) -> tuple[np.ndarray, float]:
         """hold_while_closing: el comando del brazo y de la pinza en este paso."""
-        if "gripper_position" in obs:
-            closed = float(np.ravel(obs["gripper_position"])[0])
-        else:
-            closed = float(np.ravel(obs["joint_positions"])[joints.size])
+        closed = self._gripper_closed(obs, joints.size)
         if self._hold_joints is None and gripper >= CLOSE_COMMAND and closed < CLOSED_FRACTION:
             self._hold_joints = np.array(joints, dtype=float)
             self.hold_count += 1
@@ -570,6 +586,8 @@ class LeRobotDiffusionAgent:
         gripper = self.gripper_command()
         if self.hold_while_closing:
             joints, gripper = self._hold_for_closing(obs_dict, joints, gripper)
+        if self.latch_closed:
+            gripper = self._latch(obs_dict, joints.size, gripper)
         joints = np.append(joints, gripper)
         
         return joints
