@@ -346,6 +346,9 @@ plastic_apple_peduncle:
     top: [0.0016, -0.0013, 0.1153]
     cut: [0.0016, -0.0013, 0.0903]
     radius: 0.0025
+    # corte con la hoja real (splatsim/robots/xarm/peduncle.py): de la mitad del filo hacia el pivote, en mm
+    # desde el pivote real (19-nov); sin esta línea, la regla de antes (1.5 cm del centro del filo)
+    cut_range_mm: [17, 42]
 xarm5_lite_plant_v3_hand_held_down:
   urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down.urdf]
   base_position:

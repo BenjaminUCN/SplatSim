@@ -57,6 +57,38 @@ def real_blade_points_mm(z_mm: float, tip_radius_mm: float | None = None) -> dic
         a = np.radians(deg)
         out[name] = (REAL_PIVOT_MM[0] + r * np.cos(a), REAL_PIVOT_MM[1] + r * np.sin(a), z_mm)
     return out
+# apertura real entre hoja y yunque (grados) según la posición de la cortadora (0 abierta, 1 cerrada), del
+# mecanismo de dos etapas (lab-laptop, build_B2.py)
+REAL_OPENING_DEG = ((0.0, 53.7), (0.2, 40.8), (0.4, 28.4), (0.6, 17.2), (0.7, 12.2), (0.8, 7.6), (0.85, 5.5),
+                    (0.9, 3.5), (0.95, 1.7), (1.0, 0.0))
+
+
+def real_opening_deg(gripper: float) -> float:
+    """Ángulo entre la hoja real y el filo cerrado con la cortadora en `gripper`."""
+    g, deg = zip(*REAL_OPENING_DEG)
+    return float(np.interp(gripper, g, deg))
+
+
+def blade_edge_deg(r_mm: float) -> float:
+    """Dirección (grados, marco hand_held_base) del filo cerrado a r_mm del pivote real, entre talón, mitad y punta."""
+    r, deg = zip(BLADE_HEEL, BLADE_MID, BLADE_TIP)
+    return float(np.interp(r_mm, r, deg))
+
+
+def blade_polar_mm(xy_mm) -> tuple[float, float]:
+    """(r, dtheta) de un punto del plano de la hoja (mm, hand_held_base): r desde el pivote real y dtheta los
+    grados respecto del filo cerrado, positivo hacia el lado por donde abre la hoja (gira en -z)."""
+    d = np.asarray(xy_mm, float)[:2] - np.asarray(REAL_PIVOT_MM)
+    r = float(np.linalg.norm(d))
+    return r, blade_edge_deg(r) - float(np.degrees(np.arctan2(d[1], d[0])))
+
+
+def real_blade_point_mm(r_mm: float, dtheta_deg: float = 0.0, z_mm: float = 0.0) -> np.ndarray:
+    """Punto a r_mm del pivote real y dtheta_deg del filo cerrado hacia el lado abierto, en hand_held_base (mm)."""
+    a = np.radians(blade_edge_deg(r_mm) - dtheta_deg)
+    return np.array([REAL_PIVOT_MM[0] + r_mm * np.cos(a), REAL_PIVOT_MM[1] + r_mm * np.sin(a), z_mm])
+
+
 # ensamble -> marco del gripper viejo: la punta sobre z (herramienta) y la z del ensamble sobre x, que apunta
 # hacia arriba con la herramienta horizontal y joint5 = 0
 R_FLANGE_ASSEMBLY = np.array([[0.0, 0, 1], [1, 0, 0], [0, 1, 0]])

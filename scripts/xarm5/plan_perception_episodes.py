@@ -62,7 +62,9 @@ from splatsim.robots.station.recorder import save_frame  # noqa: E402
 from splatsim.robots.xarm.config import APPLE_HEMISPHERE, BASE_CAM_FOV, IMAGE_H, IMAGE_W  # noqa: E402
 from splatsim.utils.render.camera_view import CameraView, mask_stats  # noqa: E402
 from splatsim.utils.scene.apple_grid import load_random_shape, sample_hemisphere  # noqa: E402
+from splatsim.utils.scene.hand_held import real_blade_point_mm  # noqa: E402
 from splatsim.utils.scene.leaf_variation import EpisodeDraw, arm_points, place_episode_leaf  # noqa: E402
+from splatsim.utils.scene.peduncle import cut_target_dtheta  # noqa: E402
 from splatsim.utils.scene.perception_design import (  # noqa: E402
     ARM_CONFIGS,
     TOMATO_CATEGORIES,
@@ -71,7 +73,7 @@ from splatsim.utils.scene.perception_design import (  # noqa: E402
     check_tomato,
     farthest_points,
 )
-from splatsim.utils.trials.grasp_point import grasp_error, gripper_center, load_grasp_point  # noqa: E402
+from splatsim.utils.trials.grasp_point import grasp_error, gripper_center, link_in_ee, load_grasp_point  # noqa: E402
 
 POSITIONS_FILE = "positions.yaml"
 EPISODES_CSV = "perception_episodes.csv"
@@ -145,6 +147,9 @@ class Args:
     """peduncle: corta el pedúnculo en vez de agarrar el tomate (ver arriba y plan_trajectories.py)"""
     peduncle_pitch_deg: tuple[float, float] = (-25.0, 0.0)
     """inclinación con --target peduncle (reemplaza --pitch-deg)"""
+    cut_radius_mm: tuple[float, float] = (26.0, 34.0)
+    """--target peduncle en una escena con cut_range_mm: el punto del filo real al que apunta cada episodio, a
+    esta distancia del pivote real (mm, uniforme)"""
 
     def plan_args(self) -> PlanArgs:
         keys = ("robot_name", "control_hz", "pitch_deg", "pregrasp", "joint_speed", "approach_speed",
@@ -162,8 +167,10 @@ class Arm:
     """Pone el brazo del servidor en una pose (sin física) y mide cómo se ve desde la cámara."""
 
     def __init__(self, server, kin: Kinematics, view: CameraView, point: np.ndarray, q_reset,
-                 aim_offset=(0.0, 0.0, 0.0)):
+                 aim_offset=(0.0, 0.0, 0.0), cut_point=None, cut_radius_mm=None):
         self.s, self.kin, self.view, self.point = server, kin, view, point
+        # cut_point(r_mm) -> punto del filo real en el marco del efector; None: siempre `point`
+        self.cut_point, self.cut_radius_mm = cut_point, cut_radius_mm
         self.q_reset = np.asarray(q_reset, float)
         # del centro del tomate a donde va `point` (el punto de corte con --target peduncle; el tomate no gira)
         self.aim_offset = np.asarray(aim_offset, float)
@@ -188,6 +195,13 @@ class Arm:
         st = self.stats(q)
         return {"arm_fraction": st["fraction"], "arm": st, "ee_uv": self.view.uv_fraction(pos),
                 "grasp_distance": round(float(np.linalg.norm(pos + rot @ self.point - self.aim(tomato))), 4)}
+
+    def episode_point(self, rng) -> tuple[np.ndarray, float | None]:
+        """El punto de la herramienta que va al objetivo en un episodio, y su radio en el filo real (o None)."""
+        if self.cut_point is None:
+            return self.point, None
+        r = float(rng.uniform(*self.cut_radius_mm))
+        return self.cut_point(r), r
 
     def aim(self, tomato) -> np.ndarray:
         """Adonde tiene que llegar `point` con el tomate en `tomato`."""
@@ -420,7 +434,8 @@ def run_set(server, arm: Arm, probe: Probe, args: Args, k: int, positions: dict,
             episodes: Episodes, writer, left: float) -> tuple[int, int]:
     """Los 20 episodios de un set. Devuelve (guardados, válidos)."""
     rng = np.random.default_rng([args.seed, 1000 + k])
-    plan_args, point, t = args.plan_args(), arm.point, args.thresholds
+    plan_args, t = args.plan_args(), args.thresholds
+    cut_rng = np.random.default_rng([args.seed, 2000 + k])   # aparte: no cambia lo demás del set
     sides = {"A1": arm.side_start(left, args, rng), "A2": arm.side_start(-left, args, rng)}
     set_info = {"set": k, "camera": args.camera, "positions": positions, "categories": {}}
     saved = valid_count = 0
@@ -429,11 +444,11 @@ def run_set(server, arm: Arm, probe: Probe, args: Args, k: int, positions: dict,
         starts = {**sides, "A3": (arm.q_reset, {}),
                   "A4": arm.in_view_start(tomato, args.far_distance, args, rng),
                   "A5": arm.in_view_start(tomato, args.near_distance, args, rng)}
-        plans = {}
+        plans, points = {}, {a: arm.episode_point(cut_rng) for a in args.arm_configs}
         for a in args.arm_configs:
             if starts[a] is not None:
                 for _ in range(args.plan_attempts):
-                    plan = plan_episode(arm.kin, starts[a][0], arm.aim(tomato), point, plan_args, rng)
+                    plan = plan_episode(arm.kin, starts[a][0], arm.aim(tomato), points[a][0], plan_args, rng)
                     if plan is not None:
                         plans.setdefault(a, []).append(plan)
                         break
@@ -467,6 +482,7 @@ def run_set(server, arm: Arm, probe: Probe, args: Args, k: int, positions: dict,
                 continue
 
             name, folder, states, plan, final_err, held = None, None, None, None, None, None
+            point, cut_radius = points[a]
             for attempt in range(args.plan_attempts if a in plans else 0):
                 plan = plans[a][0] if attempt == 0 else plan_episode(arm.kin, starts[a][0], arm.aim(tomato),
                                                                      point, plan_args, rng)
@@ -499,6 +515,7 @@ def run_set(server, arm: Arm, probe: Probe, args: Args, k: int, positions: dict,
                         "pitch_deg": round(plan["pitch_deg"], 2), "pregrasp": round(plan["pregrasp"], 4),
                         "phases": plan["phases"], "final_grasp_error": round(final_err, 4),
                         "seed": args.seed, "target": args.target,
+                        **({"cut_radius_mm": round(cut_radius, 2)} if cut_radius is not None else {}),
                         **({"peduncle_cut": server.peduncle.cut, "peduncle_held": held}
                            if args.target == "peduncle" else {})}
                 (folder / "meta.json").write_text(json.dumps(meta, indent=2))
@@ -536,13 +553,22 @@ def main(args: Args):
     view = CameraView(tuple(cam.xyz), tuple(cam.rpy), BASE_CAM_FOV, IMAGE_W, IMAGE_H)
     server.reset_robot()
     q_reset = np.asarray(server.state_observation()["joint_positions"][:ARM_JOINTS], float)
-    point, aim_offset = load_grasp_point(), np.zeros(3)
+    point, aim_offset, cut_point = load_grasp_point(), np.zeros(3), None
     if args.target == "peduncle":
         if server.peduncle is None or server.peduncle.blade_link is None:
             raise SystemExit(f"--target peduncle necesita una escena con cortadora y tallo: {args.robot_name} no lo es")
         point = gripper_center(server.urdf_path)                 # el centro del filo
         aim_offset = np.asarray(server.peduncle.stem["cut"])     # del centro del tomate al punto de corte
-    arm = Arm(server, Kinematics(server.urdf_path), view, point, q_reset, aim_offset)
+        if server.peduncle.cut_range_mm is not None:             # hoja real: un punto del filo por episodio
+            base_pos, base_rot = link_in_ee(server.urdf_path, "hand_held_base")
+            z_mm, dtheta = server.peduncle.plane_z_mm(), cut_target_dtheta()
+
+            def cut_point(r_mm):
+                return base_pos + base_rot @ real_blade_point_mm(r_mm, dtheta, z_mm) / 1000
+
+            point = cut_point(float(np.mean(args.cut_radius_mm)))
+    arm = Arm(server, Kinematics(server.urdf_path), view, point, q_reset, aim_offset,
+              cut_point=cut_point, cut_radius_mm=args.cut_radius_mm)
     probe = Probe(server, arm, args)
     left = arm.left_sign(args.side_joints)
     sets = load_or_choose_positions(args, out, view, probe)

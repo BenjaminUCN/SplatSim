@@ -199,7 +199,11 @@ cp data/labels_path/xarm5_lite_plant_v3_hand_held_down_labels.npy data/labels_pa
 
 With `--target peduncle` the planner puts the middle of the blade edge on the `cut` point, arrives open, closes at the start of the hold, and then backs away still closed. Episodes that don't end with the tomato held are discarded, and `meta.json` records `peduncle_cut` and `peduncle_held`. Frames record `peduncle_error` (m, blade to `cut` point), `peduncle_cut` and `peduncle_held`, and the panel's *Tomato* folder shows them.
 
-The pruner is cut-and-hold. A cut happens when the jaw finishes closing (gripper at 0.8) with the stem crossing the blade plane, within 15 mm of the middle of the edge and at most 45° from the pivot axis. Arriving already closed doesn't cut. The tomato then moves rigidly with the pruner until the gripper opens below 0.6, when it falls. Placing it again restores it.
+The pruner is cut-and-hold. A cut happens when the jaw finishes closing (gripper at 0.8) with the stem crossing the blade plane, within 15 mm of the middle of the edge and at most 45° from the pivot axis. Arriving already closed doesn't cut.
+
+With `cut_range_mm` in the peduncle entry of `objects.yaml` (`[17, 42]` for `plastic_apple_peduncle`, from the middle of the edge towards the pivot), the cut uses the measured pruner instead (`real_cut_check` in `splatsim/utils/scene/peduncle.py`, geometry in `hand_held.py`: `REAL_PIVOT_MM`, `BLADE_HEEL/MID/TIP`). When the jaw reaches 0.8, the stem must cross the blade plane at most 45° from the pivot axis, 17–42 mm from the real pivot, and between the anvil and the blade, which is then 7.6° open in the real two-stage mechanism. The stem's radius gives some margin. `peduncle_error` is then measured from the middle of that range, 3.8° towards the open side. `plan_perception_episodes.py --target peduncle` aims each episode at a random point of the real edge, `--cut-radius-mm 26 34` mm from the pivot, and records it as `cut_radius_mm` in `meta.json`. `plan_trajectories.py` still aims at the middle of the CAD blade, which is outside that range. Without `cut_range_mm`, the old rule applies.
+
+The tomato then moves rigidly with the pruner until the gripper opens below 0.6, when it falls. Placing it again restores it.
 
 **Limits:**
 

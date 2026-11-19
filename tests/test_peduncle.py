@@ -8,15 +8,18 @@ from pathlib import Path
 
 import numpy as np
 
-from splatsim.utils.scene.hand_held import MESH_DIR, flange_from_assembly, read_stl
+from splatsim.utils.scene.hand_held import (MESH_DIR, blade_polar_mm, flange_from_assembly, read_stl,
+                                           real_blade_point_mm, real_opening_deg)
 from splatsim.utils.scene.peduncle import (
     DROPPED,
     EMBED,
     HELD,
     INTACT,
     cut_check,
+    cut_target_dtheta,
     cylinder_points,
     next_stem_state,
+    real_cut_check,
     stem_from_tomato,
     to_world,
 )
@@ -132,6 +135,51 @@ class ObjectsYamlTest(unittest.TestCase):
         text = "plastic_apple:\n  x: 1\nplastic_apple_peduncle:\n  y: 2\n"
         self.assertEqual(self.module.replace_block(text, "plastic_apple_peduncle", "plastic_apple_peduncle: 3\n"),
                          "plastic_apple:\n  x: 1\nplastic_apple_peduncle: 3\n")
+
+
+class RealBladeTest(unittest.TestCase):
+    Z = -10.9
+
+    def stem_through(self, xy_mm, tilt_deg=0.0):
+        """Tallo de 40 mm que cruza el plano de la hoja en xy_mm."""
+        x = np.array([*xy_mm[:2], self.Z])
+        d = np.array([np.sin(np.radians(tilt_deg)), 0, np.cos(np.radians(tilt_deg))]) * 20
+        return x - d, x + d
+
+    def check(self, r, dtheta, **kw):
+        return real_cut_check(*self.stem_through(real_blade_point_mm(r, dtheta, self.Z)), self.Z, (17, 42), **kw)
+
+    def test_polar_round_trip(self):
+        r, dth = blade_polar_mm(real_blade_point_mm(30, 3.8))
+        self.assertAlmostEqual(r, 30)
+        self.assertAlmostEqual(dth, 3.8)
+
+    def test_opening(self):
+        self.assertAlmostEqual(real_opening_deg(0.0), 53.7)
+        self.assertAlmostEqual(real_opening_deg(0.8), 7.6)
+        self.assertAlmostEqual(real_opening_deg(1.0), 0.0)
+        self.assertAlmostEqual(cut_target_dtheta(), 3.8)
+
+    def test_inside_the_range_between_blade_and_anvil(self):
+        self.assertEqual(self.check(30, 3.8), "ok")
+        self.assertEqual(self.check(17.5, 0), "ok")
+        self.assertEqual(self.check(41.5, 7), "ok")
+
+    def test_along_the_edge(self):
+        self.assertEqual(self.check(15, 3.8), "near_pivot")
+        self.assertEqual(self.check(45, 3.8), "past_range")
+
+    def test_across_the_edge(self):
+        self.assertEqual(self.check(30, -10), "anvil_side")
+        self.assertEqual(self.check(30, 20), "open_side")
+        self.assertEqual(self.check(30, 20, gripper=0.0), "ok")   # abierta, la hoja todavía está más allá
+        self.assertEqual(self.check(30, -3), "ok")               # el grosor del tallo da margen
+
+    def test_tilt_and_plane(self):
+        tilted = self.stem_through(real_blade_point_mm(30, 3.8, self.Z), tilt_deg=50)
+        self.assertEqual(real_cut_check(*tilted, self.Z, (17, 42)), "tilted")
+        b, t = self.stem_through(real_blade_point_mm(30, 3.8, self.Z))
+        self.assertEqual(real_cut_check(b + [0, 0, 30], t + [0, 0, 30], self.Z, (17, 42)), "misses_plane")
 
 
 if __name__ == "__main__":
