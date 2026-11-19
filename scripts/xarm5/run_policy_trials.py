@@ -87,6 +87,7 @@ class Args:
     # muestreador de la difusión (None: el del modelo, DDPM) y sus pasos (None: los del modelo, 100). DDIM
     # muestrea los mismos modelos entrenados con DDPM, sin reentrenar; p. ej. --noise_scheduler DDIM
     # --num_inference_steps 16
+    # (políticas de flujo: nada o flow, y --num_inference_steps son los pasos de Euler)
     noise_scheduler: str | None = None
     num_inference_steps: int | None = None
     # acciones que se ejecutan por cada predicción de la política (None: las del modelo, 32 en todos los

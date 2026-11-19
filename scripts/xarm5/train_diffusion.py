@@ -42,6 +42,7 @@ from lerobot.transforms import (
 )
 from lerobot.utils.feature_utils import dataset_to_policy_features
 
+from splatsim.policies.flow_matching import OBJECTIVES, use_flow
 from splatsim.utils.data.action_space import action_space_of
 from splatsim.utils.data.relative_actions import to_relative
 from splatsim.utils.render.camera_setup import arrangement_cameras
@@ -107,6 +108,10 @@ class TrainConfig:
     # queda absoluto). Ver splatsim/utils/data/relative_actions.py
     relative_actions: bool = False
     torch_compile: bool = False         # compila la U-Net y los encoders (no cambia el modelo guardado)
+    # diffusion: DDPM (lo de siempre); flow: política de flujo con la misma red (splatsim/policies/flow_matching.py),
+    # que muestrea con flow_steps pasos de Euler
+    objective: str = "diffusion"
+    flow_steps: int = 10
     # logging / guardado
     log_freq: int = 1
     # cada resume_every pasos guarda el estado completo (pesos, EMA, optimizador, LR, escalador, paso y
@@ -505,11 +510,16 @@ def main(cfg: TrainConfig):
         pretrained_backbone_weights=cfg.pretrained_backbone,
         use_group_norm=cfg.group_norm,
         scheduler_warmup_steps=cfg.lr_warmup_steps,
+        device=cfg.device,                      # también el del preprocesador
     )
     print(f"Encoder: {cfg.pretrained_backbone or 'desde cero'}, "
           f"{'GroupNorm' if cfg.group_norm else 'BatchNorm'}")
     print(f"Cameras: {list(policy_cfg.image_features)}")
     policy = DiffusionPolicy(policy_cfg)
+    if cfg.objective not in OBJECTIVES:
+        raise SystemExit(f"objective debe ser uno de {OBJECTIVES}")
+    if cfg.objective == "flow":
+        print(f"Política de flujo: {use_flow(policy, cfg.flow_steps)} pasos de Euler al muestrear")
     stats = dataset_metadata.stats
     print(f"Estado y acción: {action_space_of(dataset_metadata.features)}")
     if cfg.relative_actions and action_space_of(dataset_metadata.features) == "joints":
@@ -620,7 +630,7 @@ def main(cfg: TrainConfig):
                 release_step_inputs(preprocessor)
 
                 # Mixed precision con bfloat16 (óptimo para RTX 50xx)
-                with autocast(device_type="cuda", dtype=torch.bfloat16):
+                with autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
                     micro_loss, _ = policy.forward(batch)
                 scaler.scale(micro_loss / len(group)).backward()
                 loss = loss + micro_loss.detach() / len(group)

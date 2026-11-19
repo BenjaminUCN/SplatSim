@@ -13,6 +13,7 @@ from lerobot.policies.utils import build_inference_frame
 from torchvision import transforms
 
 from splatsim.image_classifier import SimpleCNN
+from splatsim.policies.flow_matching import checkpoint_objective, use_flow
 from splatsim.utils.data.action_space import action_space_of
 from splatsim.utils.data.registry import dataset_source_for_checkpoint, hub_repo_id
 from splatsim.utils.scene.peduncle import CLOSED_FRACTION
@@ -45,7 +46,7 @@ def checkpoint_relative_actions(checkpoint: str) -> bool:
         return bool((yaml.safe_load(f) or {}).get("relative_actions", False))
 
 
-SAMPLERS = ("DDPM", "DDIM")
+SAMPLERS = ("DDPM", "DDIM")   # de difusión; las políticas de flujo usan "flow" (Euler)
 
 
 def set_sampler(policy, name: str | None = None, steps: int | None = None) -> tuple[str, int]:
@@ -226,7 +227,16 @@ class LeRobotDiffusionAgent:
             cfg.n_action_steps = n_action_steps
             self.policy.reset()                  # la cola de acciones se crea con maxlen n_action_steps
         self._n_act_steps = self.policy.config.n_action_steps
-        self.sampler = set_sampler(self.policy, *self._requested_sampler)
+        if checkpoint_objective(checkpoint) == "flow":
+            # política de flujo (train_diffusion.py --objective flow): Euler con num_inference_steps pasos
+            name, steps = self._requested_sampler
+            if name not in (None, "flow"):
+                raise ValueError(f"{checkpoint} es una política de flujo: noise_scheduler debe ser flow o nada")
+            self.sampler = ("flow", use_flow(self.policy, steps))
+        else:
+            if self._requested_sampler[0] == "flow":
+                raise ValueError(f"{checkpoint} es de difusión: noise_scheduler flow es solo para políticas de flujo")
+            self.sampler = set_sampler(self.policy, *self._requested_sampler)
         print(f"[LeRobotDiffusionAgent] Muestreador {self.sampler[0]}, {self.sampler[1]} pasos")
         time_chunks(self.policy, self.chunk_latencies_ms)
         
