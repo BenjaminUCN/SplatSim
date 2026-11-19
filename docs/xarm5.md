@@ -213,6 +213,23 @@ The tomato then moves rigidly with the pruner until the gripper opens below 0.6,
 - The stem is straight and vertical, and the tomato doesn't turn. With `joint5` at 0, the tool's pitch is the angle between the stem and the pivot axis, which is why the planner keeps it between -25° and 0°.
 - `run_policy_trials.py` still measures against the grasp point, not the cut point.
 
+### Splat of a real tomato on a white background
+
+For a single object, train the splat on photos without background. COLMAP still runs on the original photos: a smooth, shiny tomato has very few features to match, and without the background COLMAP can't place the cameras. Only the photos used for training lose the background:
+
+```bash
+# all steps: photos or video → COLMAP → masks → train
+python scripts/xarm5/splat_from_video.py ~/Videos/tomate.mp4 --out ~/data/tomate --white-background
+# or after convert.py, which leaves images/ and sparse/0 in ~/data/tomate
+python scripts/xarm5/splat_from_video.py ~/data/tomate --out ~/data/tomate --white-background --steps mask train
+```
+
+The `mask` step (`splatsim/utils/scene/white_background.py`) makes one mask per photo of `images/` with rembg (`--mask-model`, `isnet-general-use` by default) in `masks/<photo>.png` (255 = object). It composites each photo on white in `images_white/`, with the same name, extension and size, because `train.py` looks photos up by the name COLMAP saved and the cameras in `sparse/0` belong to `images/`. Then `train.py` runs with `--images images_white --white_background`. With a white background in the photos and in the render, the background counts in the loss and training leaves empty space empty. An RGBA photo would do the opposite: `train.py` multiplies the render by the alpha, so the background would be left out of the loss and floaters wouldn't be penalized. The log gives the median fraction of each photo covered by the object and warns about photos with an empty mask.
+
+Check `masks/` before training. rembg tends to cut off the thin peduncle and to keep the stand or the table under the tomato. Fix the masks you need, by hand or with another tool, and rerun with `--reuse-masks --steps mask train`: masks already in `masks/` are kept and only missing ones are computed. Even so, crop the splat with an `aabb` in `objects.yaml`, as for `plastic_apple`, to remove what is left of the background points COLMAP started from.
+
+rembg is installed in the `fork-splatsim` env without its `opencv-python-headless` dependency, because it would overwrite `opencv-python`'s `cv2`. It uses `onnxruntime-gpu==1.23.2`, the CUDA 12 build that matches torch's libraries: 1.32 asks for CUDA 13 and falls back to the CPU. On the RTX 5080 the first mask takes about a minute while CUDA compiles, then about 0.1 s per photo; on the CPU, about 0.7 s. The render image for pods doesn't have rembg, so the cloud *Scene* job doesn't have this option.
+
 ## Replay recordings in each control mode
 
 To compare `position`, `interp` and `velocity` on the same motion (e.g. on the real arm), record one GELLO demonstration and replay it in each mode:

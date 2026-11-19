@@ -9,6 +9,12 @@ Deja lo mismo que el flujo del README (ffmpeg, convert.py y train.py del submód
     <out>/sparse/0/        cámaras de COLMAP
     <out>/output/          el splat (point_cloud/iteration_<n>/point_cloud.ply) ← model_path
 
+Para un objeto suelto (un tomate), --white-background agrega el paso mask: COLMAP corre con el fondo,
+pero se entrena con las fotos sin fondo, sobre blanco (<out>/images_white/, máscaras en <out>/masks/)
+y con train.py -w, así que el espacio vacío queda vacío (splatsim/utils/scene/white_background.py).
+Con el COLMAP de convert.py, solo los pasos que siguen:
+    python scripts/xarm5/splat_from_video.py ~/data/tomate --out ~/data/tomate --white-background --steps mask train
+
 COLMAP corre con pycolmap-cuda12, que trae su propio CUDA: la de apt (la del lab) no lo usa, y emparejar
 1300 fotos en la CPU tarda horas. Los pasos de convert.py son los mismos, con sus mismas opciones.
 Después falta alinear el splat con el URDF en CloudCompare: eso es a mano (README, "Align the simulator
@@ -24,10 +30,18 @@ from pathlib import Path
 
 import tyro
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
+from splatsim.utils.scene.white_background import (  # noqa: E402
+    DEFAULT_MODEL,
+    WHITE_FOLDER,
+    rembg_masker,
+    whiten_folder,
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 TRAIN_SCRIPT = ROOT / "submodules/gaussian-splatting-wrapper/gaussian_splatting/train.py"
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
-STEPS = ("frames", "colmap", "train")
+STEPS = ("frames", "colmap", "mask", "train")
 TQDM = re.compile(r"Training progress:.*?(\d+)/(\d+) \[")
 WARN_REGISTERED = 0.8         # menos fotos con pose que esto suele ser un modelo partido en dos
 MIN_REGISTERED = 0.5          # menos, y entrenar el splat es pagar por una escena que no sirve
@@ -46,10 +60,17 @@ class Args:
     iterations: int = 30_000
     data_device: str = "cpu"
     """Dónde guarda train.py las fotos: 1300 fotos de 1600 px son ~20 GB, más que la GPU de muchos pods."""
+    white_background: bool = False
+    """Objeto suelto: entrenar con las fotos sin fondo, sobre blanco, y train.py -w (paso mask)."""
+    mask_model: str = DEFAULT_MODEL
+    """Modelo de rembg para las máscaras (isnet-general-use, u2net, birefnet-general, ...)."""
+    reuse_masks: bool = False
+    """Usar las máscaras que ya estén en <out>/masks/ (p.ej. corregidas a mano) y calcular solo las que falten."""
     steps: list[str] = field(default_factory=lambda: list(STEPS))
-    """Pasos a correr, para repetir uno: frames, colmap, train."""
+    """Pasos a correr, para repetir uno: frames, colmap, mask (solo con --white-background), train."""
     clean: bool = False
-    """Al terminar, borrar input/ y distorted/: el renderizador solo usa images/, sparse/ y output/."""
+    """Al terminar, borrar input/, distorted/ e images_white/ (se rehace con --reuse-masks --steps mask):
+    el renderizador solo usa images/, sparse/ y output/."""
     python: str = sys.executable
     """Intérprete para train.py (necesita diff_gaussian_rasterization y simple_knn)."""
 
@@ -134,14 +155,18 @@ def run_colmap(scene: Path, matcher: str) -> None:
             shutil.move(item, sparse / "0" / item.name)
 
 
-def train_splat(scene: Path, iterations: int, data_device: str, python: str) -> None:
+def train_splat(scene: Path, iterations: int, data_device: str, python: str, white_background: bool = False) -> None:
     """train.py del submódulo. Su barra (tqdm, con \\r) se reescribe como [hecho/total] para el runner."""
+    if white_background and not (scene / WHITE_FOLDER).is_dir():
+        raise SystemExit(f"No está {scene / WHITE_FOLDER}: corre antes el paso mask")
     output = scene / "output"
     shutil.rmtree(output, ignore_errors=True)
     command = [python, "-u", str(TRAIN_SCRIPT), "-s", str(scene), "-m", str(output), "--iterations", str(iterations),
                "--save_iterations", str(iterations), "--test_iterations", str(iterations),
                "--data_device", data_device, "--disable_viewer"]
-    log(f"train.py: {iterations} iteraciones")
+    if white_background:
+        command += ["--images", WHITE_FOLDER, "--white_background"]
+    log(f"train.py: {iterations} iteraciones" + (", fondo blanco" if white_background else ""))
     proc = subprocess.Popen(command, cwd=TRAIN_SCRIPT.parent, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     shown, buffer = -1, b""
     while chunk := proc.stdout.read1(65536):
@@ -174,10 +199,13 @@ def main(args: Args) -> None:
         log(f"{extract_frames(source, scene / 'input', args.fps)} fotos de {source.name}")
     if "colmap" in args.steps:
         run_colmap(scene, args.matcher)
+    if "mask" in args.steps and args.white_background:
+        log(f"máscaras con rembg ({args.mask_model})")
+        whiten_folder(scene, rembg_masker(args.mask_model), args.reuse_masks, log)
     if "train" in args.steps:
-        train_splat(scene, args.iterations, args.data_device, args.python)
+        train_splat(scene, args.iterations, args.data_device, args.python, args.white_background)
     if args.clean:
-        for name in ("input", "distorted", "stereo"):
+        for name in ("input", "distorted", "stereo", WHITE_FOLDER):
             shutil.rmtree(scene / name, ignore_errors=True)
         for script in scene.glob("run-colmap-*.sh"):
             script.unlink()
