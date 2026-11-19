@@ -60,6 +60,7 @@ from splatsim.robots.station.urdf_view import xarm5_urdf_joints  # noqa: E402
 from splatsim.utils.render.camera_setup import load_camera_setup  # noqa: E402
 from splatsim.utils.paths import load_yaml  # noqa: E402
 from splatsim.utils.data.episode_selection import load_discarded, save_discarded  # noqa: E402
+from splatsim.utils.data.frame_video import open_frame, video_cameras  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
 from splatsim.utils.trials.grasp_point import (  # noqa: E402
     GRASP_POINT_PATH,
@@ -236,7 +237,8 @@ class RecordingFolder:
         return entry["joints"]
 
     def images(self, name: str) -> dict[str, list[Path]]:
-        """Cámara -> imágenes del episodio en orden (una por frame, sirve para ambas numeraciones)."""
+        """Cámara -> imágenes del episodio en orden (una por frame, sirve para ambas numeraciones): rutas de PNG
+        o, si la cámara está en video, un VideoFrames (splatsim/utils/data/frame_video.py)."""
         if name not in self._images:
             image_dir = next((self.path / name / d for d in ("image_1", "images")
                               if (self.path / name / d).is_dir()), None)
@@ -245,7 +247,10 @@ class RecordingFolder:
                 for f in os.scandir(image_dir):
                     if m := _IMG.match(f.name):
                         per_cam.setdefault(m.group(1), []).append((int(m.group(2)), Path(f.path)))
-            self._images[name] = {cam: [p for _, p in sorted(files)] for cam, files in sorted(per_cam.items())}
+            images = {cam: [p for _, p in sorted(files)] for cam, files in per_cam.items()}
+            if image_dir is not None:             # cámaras empaquetadas en video (scripts/xarm5/pack_trial_images.py)
+                images.update(video_cameras(image_dir))
+            self._images[name] = dict(sorted(images.items()))
         return self._images[name]
 
     def grasp_err(self, entry: dict) -> np.ndarray | None:
@@ -1141,7 +1146,7 @@ class Reviewer:
                 self._robot.update(xarm5_urdf_joints(q[k]))
         for cam, files in self.folder.images(self.episode).items():
             if cam in self.images and k < len(files):
-                img = Image.open(files[k]).convert("RGB")
+                img = open_frame(files[k]).convert("RGB")
                 self.images[cam].image = np.asarray(img.resize((img.width // 2, img.height // 2)))
 
     def _toggle_robot(self):
