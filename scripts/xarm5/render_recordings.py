@@ -66,6 +66,11 @@ class Args:
     """porcentajes objetivo que se sortean por episodio; 0 = sin hoja"""
     leaf_cameras: tuple[str, ...] = ()
     """cámaras en que se ajusta la hoja (por defecto las que no son de muñeca)"""
+    leaf_reference: str = "start"
+    """start: la hoja se ajusta con la escena en el primer frame y lejos del recorrido del brazo (lo de siempre).
+    pregrasp: con el brazo en el pregrasp del planificador (fin de las fases start_pause + reach + settle del
+    meta.json) y sin alejarla del recorrido, como run_policy_trials.py --leaf_camera wrist_rgb; para la cámara
+    de muñeca, que en el primer frame no ve el tomate"""
     seed: int = 0
     """semilla del sorteo de hojas"""
     episodes: tuple[str, ...] = ()
@@ -157,6 +162,15 @@ def write_leaf_meta(path: Path, entries: list[dict], leaf_fit: dict) -> None:
     path.write_text(json.dumps({**meta, "occluders": entries, "leaf_fit": leaf_fit}, indent=2))
 
 
+def pregrasp_frame(meta: dict, times: np.ndarray) -> int:
+    """El frame grabado más cercano al pregrasp del planificador: fin de start_pause + reach + settle."""
+    phases = meta.get("phases") or {}
+    if not all(k in phases for k in ("start_pause", "reach", "settle")):
+        raise ValueError("el meta.json no trae las fases del planificador (start_pause, reach, settle)")
+    t = phases["start_pause"] + phases["reach"] + phases["settle"]
+    return int(np.argmin(np.abs(np.asarray(times) - times[0] - t)))
+
+
 def main(args: Args):
     folder = Path(args.folder).expanduser()
     out_root = Path(args.out).expanduser() if args.out else folder.with_name(f"{folder.name}_{args.fps}hz")
@@ -169,6 +183,8 @@ def main(args: Args):
     if args.leaf_dir and not leaves:
         raise SystemExit(f"No hay hojas en {args.leaf_dir}: recorta alguna con segment_leaf.py")
     leaf_cameras = list(args.leaf_cameras) or [c for c in cameras if "wrist" not in c]
+    if args.leaf_reference not in ("start", "pregrasp"):
+        raise SystemExit("--leaf_reference: start o pregrasp")
     out_root.mkdir(parents=True, exist_ok=True)
     if (folder / SELECTION_FILE).exists():
         shutil.copy(folder / SELECTION_FILE, out_root / SELECTION_FILE)
@@ -177,7 +193,8 @@ def main(args: Args):
                         "occluders": load_occluder_config(args.occluders) if args.occluders else [],
                         "leaf_variation": {"leaves": [str(p) for p in leaves],
                                            "targets": list(args.occlusion_targets),
-                                           "cameras": leaf_cameras, "seed": args.seed} if leaves else None,
+                                           "cameras": leaf_cameras, "seed": args.seed,
+                                           "reference": args.leaf_reference} if leaves else None,
                         "rendered": datetime.now().strftime("%Y-%m-%d %H:%M")}, f, sort_keys=False)
     print(f"{len(episodes)} episodios → {out_root} a {args.fps} fps, cámaras {cameras}")
     if args.workers > 1:
@@ -208,10 +225,19 @@ def main(args: Args):
             shutil.copy(episode / "meta.json", tmp / "meta.json")
         entries, leaf_fit = [], None
         if leaves:
-            path = arm_path(server, frames)
-            server.restore_state(frames[0])
+            if args.leaf_reference == "pregrasp":
+                meta = json.loads((episode / "meta.json").read_text()) if (episode / "meta.json").exists() else {}
+                reference = pregrasp_frame(meta, times)
+                server.restore_state(frames[reference])
+                path = None
+            else:
+                path = arm_path(server, frames)
+                server.restore_state(frames[0])
             draw = draw_episode(episode.name, leaves, args.occlusion_targets, args.seed)
             entries, leaf_fit = place_episode_leaf(server, draw, leaf_cameras, path)
+            if args.leaf_reference == "pregrasp":
+                leaf_fit["reference_frame"] = reference
+                server.restore_state(frames[0])
         else:   # la hoja que trae el episodio (B2 de plan_perception_episodes.py), o ninguna
             server.set_episode_occluders(episode_leaves(episode))
         for k, point in enumerate(points, 1):
