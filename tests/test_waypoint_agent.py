@@ -45,6 +45,7 @@ def make_agent(tolerance, max_steps=10):
     agent.gripper_threshold = None
     agent.hold_while_closing = False
     agent.latch_closed = False
+    agent.close_when_cuttable = False
     agent.waypoint_counts = {"reached": 0, "timeout": 0}
     agent._held = 0
     agent._last_joints = None

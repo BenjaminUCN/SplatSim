@@ -124,6 +124,10 @@ class LeRobotDiffusionAgent:
             igual recibe las observaciones y saca acciones, que no se usan.
         latch_closed: una vez que la pinza llega a CLOSED_FRACTION, la orden de la pinza queda en 1 (cerrar)
             hasta el final del ensayo, como en las demos de cortar y sujetar; el brazo sigue a la política.
+        close_when_cuttable: oráculo de la simulación para la cortadora. Ignora la orden de la pinza que
+            predice la política: manda abrir hasta que la observación trae peduncle_cuttable (cerrar ahora
+            cortaría) y entonces manda cerrar. La política solo aproxima; con hold_while_closing el brazo queda
+            quieto mientras cierra. Da la cota de lo que se gana si el cierre lo decide una regla.
     """
 
     def __init__(
@@ -140,6 +144,7 @@ class LeRobotDiffusionAgent:
         gripper_threshold: float | None = None,
         hold_while_closing: bool = False,
         latch_closed: bool = False,
+        close_when_cuttable: bool = False,
     ):
         """checkpoint: carpeta del modelo o repo del Hub (None -> DEFAULT_CHECKPOINT).
         dataset_root: dataset con que se entrenó, carpeta o repo del Hub; None -> se busca en
@@ -158,6 +163,7 @@ class LeRobotDiffusionAgent:
         self.hold_count = 0                            # veces que se quedó quieto para cerrar
         self.latch_closed = latch_closed
         self._latched = False                          # latch_closed: ya cerró, la pinza queda cerrada
+        self.close_when_cuttable = close_when_cuttable
         self.waypoint_counts = {"reached": 0, "timeout": 0}   # acciones que terminaron así
         self._held = 0                                         # pasos que lleva la acción actual
         self._last_joints: np.ndarray | None = None            # último comando articular (5)
@@ -492,6 +498,11 @@ class LeRobotDiffusionAgent:
             self._hold_joints = None   # ya cerró: la política sigue
         return joints, gripper
 
+    @staticmethod
+    def _cuttable_command(obs: dict) -> float:
+        """close_when_cuttable: cerrar (1) si cerrar ahora cortaría el tallo, si no abrir (0)."""
+        return 1.0 if obs.get("peduncle_cuttable") else 0.0
+
     def gripper_command(self) -> float:
         """Orden de la pinza: la predicha o, con gripper_threshold, 0/1."""
         g = float(self.ee_gripper)
@@ -594,6 +605,8 @@ class LeRobotDiffusionAgent:
 
         joints = np.array(dummy_joint_pos)[:joints_n]
         gripper = self.gripper_command()
+        if self.close_when_cuttable:
+            gripper = self._cuttable_command(obs_dict)
         if self.hold_while_closing:
             joints, gripper = self._hold_for_closing(obs_dict, joints, gripper)
         if self.latch_closed:

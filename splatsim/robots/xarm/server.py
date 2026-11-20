@@ -488,6 +488,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
             obs["peduncle_error"] = self.peduncle.error()
             obs["peduncle_cut"] = self.peduncle.cut
             obs["peduncle_held"] = self.peduncle.held
+            obs["peduncle_cuttable"] = self.peduncle.would_cut()
 
     def active_camera_names(self) -> list[str]:
         return self.recorder.cameras_to_capture(self.camera_names)

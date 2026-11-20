@@ -97,6 +97,19 @@ class PeduncleCutter:
             return float(np.linalg.norm(pos + rot @ self.target_mm() / 1000 - self._stem_world()[2]))
         return float(np.linalg.norm(self._blade()[0] - self._stem_world()[2]))
 
+    def would_cut(self) -> bool | None:
+        """Si la cortadora cortara al cerrar ahora, con el brazo quieto: la misma regla que update() aplica al
+        llegar a CLOSED_FRACTION, sobre la posición actual del tallo. None sin cortadora o con el tallo ya cortado.
+        Es información de la simulación, que la política no ve (--close_when_cuttable la usa como oráculo)."""
+        if self.blade_link is None or self.state != INTACT:
+            return None
+        bottom, top, _ = self._stem_world()
+        if self.cut_range_mm is not None:
+            b, t = self._to_base_mm([bottom, top])
+            return real_cut_check(b, t, self.plane_z_mm(), self.cut_range_mm,
+                                  radius_mm=self.stem.get("radius", 0.0025) * 1000) == "ok"
+        return cut_check(bottom, top, *self._blade()) == "ok"
+
     def reset(self) -> None:
         """El tomate volvió a su lugar: tiene el tallo entero."""
         self.state = INTACT

@@ -105,6 +105,9 @@ class Args:
     hold_while_closing: bool = False
     # una vez cerrada la pinza (>= 0.8), queda cerrada hasta el final del ensayo (como en las demos de cortar y sujetar)
     latch_closed: bool = False
+    # oráculo de la simulación: la cortadora cierra cuando cerrar en ese momento cortaría (peduncle_cuttable del
+    # servidor), sin importar lo que predice la política; usar con --hold_while_closing --latch_closed
+    close_when_cuttable: bool = False
     # termina el ensayo success_extra_seconds después de que el error de agarre baja de
     # SUCCESS_RADIUS (4 cm): ahorra tiempo y no cambia la tasa de éxito; en esos segundos el brazo
     # sigue acercándose, así el error mínimo no queda cortado en ~4 cm. time_to_success se anota
@@ -363,7 +366,8 @@ def main(args: Args) -> None:
                                   num_inference_steps=args.num_inference_steps,
                                   gripper_threshold=args.gripper_threshold,
                                   hold_while_closing=args.hold_while_closing,
-                                  latch_closed=args.latch_closed)
+                                  latch_closed=args.latch_closed,
+                                  close_when_cuttable=args.close_when_cuttable)
 
     first_obs = robot.get_observations()
     missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
@@ -475,6 +479,7 @@ def main(args: Args) -> None:
                                 "gripper_threshold": args.gripper_threshold,
                                 "hold_while_closing": args.hold_while_closing,
                                 "latch_closed": args.latch_closed,
+                                "close_when_cuttable": args.close_when_cuttable,
                                 "waypoint_max_steps": args.waypoint_max_steps if args.waypoint_tolerance else None,
                                 "checkpoint": checkpoint, "run_name": run_name,
                                 "blank_cameras": list(args.blank_cameras),

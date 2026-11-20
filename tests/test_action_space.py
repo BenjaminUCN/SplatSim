@@ -121,6 +121,7 @@ class JointAgentTest(unittest.TestCase):
         agent.gripper_threshold = None
         agent.hold_while_closing = False
         agent.latch_closed = False
+        agent.close_when_cuttable = False
         seen = []
         agent._build_obs = lambda obs: seen.append(obs) or {}
         agent.postprocess = lambda a: a
@@ -140,6 +141,13 @@ class JointAgentTest(unittest.TestCase):
         self.assertEqual(agent.gripper_command(), 1.0)
         agent.ee_gripper = 0.31
         self.assertEqual(agent.gripper_command(), 0.0)
+
+    def test_close_when_cuttable_ignores_the_predicted_command(self):
+        cmd = LeRobotDiffusionAgent._cuttable_command
+        self.assertEqual(cmd({"peduncle_cuttable": False}), 0.0)
+        self.assertEqual(cmd({"peduncle_cuttable": None}), 0.0)   # sin cortadora o ya cortado
+        self.assertEqual(cmd({}), 0.0)
+        self.assertEqual(cmd({"peduncle_cuttable": True}), 1.0)
 
     def test_hold_while_closing_keeps_the_arm_still_until_closed(self):
         agent = object.__new__(LeRobotDiffusionAgent)

@@ -182,5 +182,34 @@ class RealBladeTest(unittest.TestCase):
         self.assertEqual(real_cut_check(b + [0, 0, 30], t + [0, 0, 30], self.Z, (17, 42)), "misses_plane")
 
 
+class WouldCutTest(unittest.TestCase):
+    """PeduncleCutter.would_cut, el oráculo de --close_when_cuttable: la misma regla que el corte, ahora."""
+    Z = RealBladeTest.Z
+
+    def cutter(self, stem_mm, state=INTACT, blade_link=7):
+        from splatsim.robots.xarm.peduncle import PeduncleCutter
+        c = object.__new__(PeduncleCutter)
+        c.blade_link, c.state, c.cut_range_mm, c.stem = blade_link, state, (17, 67), {"radius": 0.0025}
+        c._stem_world = lambda: (None, None, None)
+        c._to_base_mm = lambda points: list(stem_mm)
+        c.plane_z_mm = lambda: self.Z
+        return c
+
+    def stem(self, r, dtheta):
+        return RealBladeTest.stem_through(self, real_blade_point_mm(r, dtheta, self.Z))
+
+    def test_stem_in_the_cutting_zone(self):
+        self.assertTrue(self.cutter(self.stem(42, 3.8)).would_cut())
+        self.assertTrue(self.cutter(self.stem(60, 3.8)).would_cut())   # cerca de la punta, dentro de 17–67
+
+    def test_stem_outside(self):
+        self.assertFalse(self.cutter(self.stem(42, 20)).would_cut())   # lado abierto
+        self.assertFalse(self.cutter(self.stem(70, 3.8)).would_cut())  # más allá de la punta
+
+    def test_none_without_pruner_or_after_the_cut(self):
+        self.assertIsNone(self.cutter(self.stem(42, 3.8), blade_link=None).would_cut())
+        self.assertIsNone(self.cutter(self.stem(42, 3.8), state=HELD).would_cut())
+
+
 if __name__ == "__main__":
     unittest.main()

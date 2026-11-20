@@ -87,7 +87,7 @@ def _params(rows: list[dict], meta: dict) -> dict:
         value = first.get(key) or meta.get(key)
         if value not in (None, ""):
             out[key.replace("_", " ")] = value
-    for key in ("hold_while_closing", "latch_closed"):
+    for key in ("hold_while_closing", "latch_closed", "close_when_cuttable"):
         if meta.get(key):
             out[key.replace("_", " ")] = "yes"
     if meta.get("relative_actions"):
