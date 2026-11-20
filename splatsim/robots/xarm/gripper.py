@@ -3,7 +3,8 @@ import numpy as np
 
 from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 
-from splatsim.utils.scene.hand_held import JAW_JOINT
+from splatsim.utils.scene.hand_held import JAW_JOINT, load_design
+from splatsim.utils.scene.hand_held_linkage import ROD_JOINT, Linkage
 
 from .config import (
     GRIPPER_RANGE, GRIPPER_MAX_ANGLE, SPLAT_GRIPPER_POSE,
@@ -77,6 +78,9 @@ class XArm5Gripper:
             return 0.0
         angle = s.pybullet_client.getJointState(s.dummy_robot, self.parent_id)[0]
         return float(np.clip(angle / GRIPPER_MAX_ANGLE, 0.0, 1.0))
+
+    def follow(self) -> None:
+        """Tras cada paso de la física: los joints que dependen del de mando (solo el gripper v4)."""
 
     def base_state(self) -> float:
         """Lo que get_observations divide por 0.8 para obs["state"] (get_current_gripper_state)."""
@@ -173,4 +177,42 @@ class HandHeldGripper(XArm5Gripper):
         return self.get_state() * 0.8
 
 
-GRIPPERS = {"xarm": XArm5Gripper, "hand_held_xl330": HandHeldGripper}
+class HandHeldLinkageGripper(HandHeldGripper):
+    """hand_held_XL330 v4: el horn mueve la mandíbula por un cuatro barras (bastón), no en proporción.
+    Solo el horn tiene motor; la mandíbula y el bastón se ponen desde su ángulo tras cada paso (follow)."""
+    MESH_DIR = "splatsim/robot_definitions/meshes/hand_held_xl330_v4"
+
+    def setup(self) -> None:
+        super().setup()
+        s, c = self.s, self.s.pybullet_client
+        self.linkage = Linkage.from_manifest(load_design(self.MESH_DIR)["linkage"])
+        rods = [j for j in s.joints if j.name == ROD_JOINT]
+        if self.jaw_id is None or not rods:
+            raise ValueError(f"{s.robot_name}: the v4 gripper needs {JAW_JOINT} and {ROD_JOINT} in the URDF")
+        self.rod_id = rods[0].id
+        for jid in (self.jaw_id, self.rod_id):     # sin motor: los mueve follow()
+            c.setJointMotorControl2(s.dummy_robot, jid, c.VELOCITY_CONTROL, force=0)
+
+    def move(self, open_length: float, velocity: float = HandHeldGripper.SPEED) -> None:
+        s = self.s
+        if not s.use_gripper:
+            return
+        fraction = np.clip(open_length / GRIPPER_RANGE[1], 0.0, 1.0)
+        s.pybullet_client.setJointMotorControl2(
+            s.dummy_robot, self.parent_id, s.pybullet_client.POSITION_CONTROL,
+            targetPosition=fraction * self.travel, force=s.joints[self.parent_id].maxForce,
+            maxVelocity=self.SPEED)
+
+    def follow(self) -> None:
+        s, c = self.s, self.s.pybullet_client
+        jaw, rod = self.linkage.jaw_and_rod(c.getJointState(s.dummy_robot, self.parent_id)[0])
+        c.resetJointState(s.dummy_robot, self.jaw_id, jaw)
+        c.resetJointState(s.dummy_robot, self.rod_id, rod)
+
+    def _splat_poses(self) -> dict:
+        jaw, rod = self.linkage.jaw_and_rod(self.splat_pose)
+        return {self.parent_id: self.splat_pose, self.jaw_id: jaw, self.rod_id: rod}
+
+
+GRIPPERS = {"xarm": XArm5Gripper, "hand_held_xl330": HandHeldGripper,
+            "hand_held_xl330_v4": HandHeldLinkageGripper}

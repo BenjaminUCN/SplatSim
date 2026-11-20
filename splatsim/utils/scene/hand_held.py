@@ -13,6 +13,8 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
+from .hand_held_linkage import ROD_JOINT, Linkage
+
 MESH_DIR = "splatsim/robot_definitions/meshes/hand_held_xl330"
 GRIPPER_BASE_LINK = "xarm_gripper_base_link"
 KEEP_LINKS = ("wrist_camera_link",)
@@ -24,12 +26,128 @@ JAW_JOINT = "hand_held_jaw_joint"
 JAW_TRAVEL_RAD = 0.615          # 35.3°, medido entre las fotos abierta y cerrada
 # mitad del borde dentado del yunque, a media altura de la mandíbula
 GRIPPER_CENTER_MM = (-9.9, 97.0, -10.9)
+# Cortadora real, medida con calibre (2026-11-16), en mm y en el marco hand_held_base. El pruner de las mallas
+# (PIVOT_MM, JAW_TRAVEL_RAD) está ~10 mm corrido respecto a la pieza real; no se toca porque los splats de las
+# escenas se generaron con él. Medido: pivote -> eje del sector (-17.6, -11.6) 65.8; pivote -> agujero del
+# tensor 18.3; eje del sector -> agujero del tensor 53.4 cerrada y 69.78 abierta; punta-yunque abierta 40.0.
+# La dirección del pivote (71.5° desde el eje del sector) y la forma del filo salen de fotos con regla (±1-2 mm).
+REAL_PIVOT_MM = (3.28, 50.80)
+REAL_JAW_TRAVEL_RAD = 0.937          # 53.7°, de cerrada a abierta del todo
+# filo de la hoja móvil con la mandíbula cerrada: (radio desde el pivote real en mm, dirección en grados)
+BLADE_HEEL = (17.0, 124.3)           # donde empieza el filo, junto al pivote
+BLADE_MID = (42.0, 117.5)            # mitad del filo
+BLADE_TIP = (67.0, 105.9)            # punta: falta la medida directa pivote -> punta (fotos 65-71, CAD 67)
+REAL_BLADE_LINKS = {"blade_pivot_link": None, "blade_heel_link": BLADE_HEEL, "blade_mid_link": BLADE_MID,
+                    "blade_tip_link": BLADE_TIP}
+
+
+def real_blade_points_mm(z_mm: float, tip_radius_mm: float | None = None) -> dict:
+    """Pivote real y puntos del filo (cerrada) en hand_held_base, en mm. tip_radius_mm cambia el radio de la
+    punta y corre la mitad del filo con ella (el talón queda fijo)."""
+    out = {}
+    for name, polar in REAL_BLADE_LINKS.items():
+        if polar is None:
+            out[name] = (*REAL_PIVOT_MM, z_mm)
+            continue
+        r, deg = polar
+        if tip_radius_mm is not None and name == "blade_tip_link":
+            r = tip_radius_mm
+        elif tip_radius_mm is not None and name == "blade_mid_link":
+            r += (tip_radius_mm - BLADE_TIP[0]) / 2
+        a = np.radians(deg)
+        out[name] = (REAL_PIVOT_MM[0] + r * np.cos(a), REAL_PIVOT_MM[1] + r * np.sin(a), z_mm)
+    return out
+# apertura real entre hoja y yunque (grados) según la posición de la cortadora (0 abierta, 1 cerrada), del
+# mecanismo de dos etapas (lab-laptop, build_B2.py)
+REAL_OPENING_DEG = ((0.0, 53.7), (0.2, 40.8), (0.4, 28.4), (0.6, 17.2), (0.7, 12.2), (0.8, 7.6), (0.85, 5.5),
+                    (0.9, 3.5), (0.95, 1.7), (1.0, 0.0))
+
+
+def real_opening_deg(gripper: float) -> float:
+    """Ángulo entre la hoja real y el filo cerrado con la cortadora en `gripper`."""
+    g, deg = zip(*REAL_OPENING_DEG)
+    return float(np.interp(gripper, g, deg))
+
+
+def blade_edge_deg(r_mm: float) -> float:
+    """Dirección (grados, marco hand_held_base) del filo cerrado a r_mm del pivote real, entre talón, mitad y punta."""
+    r, deg = zip(BLADE_HEEL, BLADE_MID, BLADE_TIP)
+    return float(np.interp(r_mm, r, deg))
+
+
+def blade_polar_mm(xy_mm) -> tuple[float, float]:
+    """(r, dtheta) de un punto del plano de la hoja (mm, hand_held_base): r desde el pivote real y dtheta los
+    grados respecto del filo cerrado, positivo hacia el lado por donde abre la hoja (gira en -z)."""
+    d = np.asarray(xy_mm, float)[:2] - np.asarray(REAL_PIVOT_MM)
+    r = float(np.linalg.norm(d))
+    return r, blade_edge_deg(r) - float(np.degrees(np.arctan2(d[1], d[0])))
+
+
+def real_blade_point_mm(r_mm: float, dtheta_deg: float = 0.0, z_mm: float = 0.0) -> np.ndarray:
+    """Punto a r_mm del pivote real y dtheta_deg del filo cerrado hacia el lado abierto, en hand_held_base (mm)."""
+    a = np.radians(blade_edge_deg(r_mm) - dtheta_deg)
+    return np.array([REAL_PIVOT_MM[0] + r_mm * np.cos(a), REAL_PIVOT_MM[1] + r_mm * np.sin(a), z_mm])
+
+
 # ensamble -> marco del gripper viejo: la punta sobre z (herramienta) y la z del ensamble sobre x, que apunta
 # hacia arriba con la herramienta horizontal y joint5 = 0
 R_FLANGE_ASSEMBLY = np.array([[0.0, 0, 1], [1, 0, 0], [0, 1, 0]])
 PLASTIC_KG_PER_MM3 = 1.24e-6                # PLA macizo: estimación, sin pesar la pieza
 PART_MASS_KG = {"fixed_steel": 0.078, "moving_plate": 0.032, "moving_jaw": 0.035, "pivot_bolt": 0.008,
                 "xl330": 0.018, "horn": 0.003, "tornillos_m2": 0.002}
+
+# Soporte de la cámara de muñeca (Camera Stand_1300, placa de 3 mm en mm): el disco de r 37.5 centrado en el
+# eje de la brida y la pestaña hacia +x de link_eef, con sus dos M3 a 45 mm (los de la espalda de la D435i).
+CAMERA_MESH_DIR = "splatsim/robot_definitions/meshes/wrist_camera"
+CAMERA_LINK = "wrist_camera_link"
+STAND_MESH = "camera_stand_1300.stl"
+# STL -> link_eef: x igual, el espesor (y del STL) sobre +z (hacia la herramienta), cara en la brida
+T_EEF_STAND = np.array([[1.0, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
+# la placa va entre la brida y mount_xarm5: el gripper queda 3 mm más allá de la brida, sobre +z de link_eef
+STAND_THICKNESS_M = 0.003
+# mallas de scripts/xarm5/build_d435i_mesh.py, en el marco óptico de la RGB: (archivo, rgba)
+D435I_MESHES = (("d435i_body.stl", "0.62 0.63 0.66 1"), ("d435i_front.stl", "0.03 0.03 0.04 1"))
+D435I_DEPTH_M = 0.0251
+# centro de la carcasa en el marco óptico de la RGB (la RGB está a 32.5 mm del centro, hacia un extremo)
+D435I_CENTER_IN_RGB_M = (0.03245, 0.0, -0.00825)
+# centro de la D435i en link_eef: entre los agujeros M3 (x = 67.5 mm) y con la espalda sobre la placa
+D435I_CENTER_EEF_M = (0.0675, 0.0, STAND_THICKNESS_M + D435I_DEPTH_M / 2)
+# ejes de la cámara en link_eef, los mismos de wrist_camera_link: x de la imagen sobre +y, mira hacia +z.
+# Si la cámara está atornillada al revés (RGB del otro lado), es este giro más 180° en z
+R_EEF_D435I = np.array([[0.0, -1, 0], [1, 0, 0], [0, 0, 1]])
+
+
+# camera_down: el soporte girado 180° en la brida (pestaña hacia -x de link_eef, el lado de la tapa azul en
+# xarm5_hand_held_down) y la cámara vuelta a atornillar girada 180° sobre su eje, para que la imagen no
+# quede de cabeza: el centro de la cámara pasa al otro lado y sus ejes no cambian
+R_FLIP = np.diag([-1.0, -1.0, 1.0, 1.0])
+
+
+def physical_wrist_camera_pose(camera_down: bool = False) -> np.ndarray:
+    """Marco óptico de la RGB de la D435i montada en el soporte, en link_eef (4x4). wrist_camera_link
+    (el marco que renderiza el sim) está en (0.08, 0, 0), o (-0.08, 0, 0) con camera_down: esta es la pose
+    donde queda la lente real."""
+    center = np.array(D435I_CENTER_EEF_M)
+    if camera_down:
+        center = R_FLIP[:3, :3] @ center
+    T = np.eye(4)
+    T[:3, :3] = R_EEF_D435I
+    T[:3, 3] = center - R_EEF_D435I @ np.array(D435I_CENTER_IN_RGB_M)
+    return T
+
+
+def flip_camera_frame(T_eef_camera: np.ndarray) -> np.ndarray:
+    """El marco de wrist_camera_link al otro lado de la brida, con la imagen derecha (ver R_FLIP)."""
+    T = R_FLIP @ T_eef_camera
+    T[:3, :3] = T_eef_camera[:3, :3]
+    return T
+
+
+def gripper_offset() -> np.ndarray:
+    """La placa del soporte entre la brida y el gripper, en link_eef."""
+    T = np.eye(4)
+    T[2, 3] = STAND_THICKNESS_M
+    return T
 
 
 def _rot_rpy(rpy) -> np.ndarray:
@@ -79,6 +197,19 @@ def load_manifest(mesh_dir: str = MESH_DIR) -> list[dict]:
         return json.load(f)["parts"]
 
 
+def load_design(mesh_dir: str = MESH_DIR) -> dict:
+    """Geometría del gripper de una carpeta de mallas: la del v3 (estas constantes) salvo lo que diga su
+    manifest.json (el v4 trae otro eje del horn, otro centro del filo y el cuatro barras en "linkage")."""
+    with open(os.path.join(mesh_dir, "manifest.json"), encoding="utf-8") as f:
+        manifest = json.load(f)
+    return {"gripper": manifest.get("gripper", "hand_held_xl330"),
+            "horn_axis_mm": tuple(manifest.get("horn_axis_mm", HORN_AXIS_MM)),
+            "pivot_mm": tuple(manifest.get("pivot_mm", PIVOT_MM)),
+            "jaw_travel_rad": float(manifest.get("jaw_travel_rad", JAW_TRAVEL_RAD)),
+            "gripper_center_mm": tuple(manifest.get("gripper_center_mm", GRIPPER_CENTER_MM)),
+            "linkage": manifest.get("linkage")}
+
+
 def _inertial(link, mass: float, com_m, inertia: float) -> None:
     inertial = ET.SubElement(link, "inertial")
     ET.SubElement(inertial, "origin", xyz=" ".join(f"{v:.6f}" for v in com_m), rpy="0 0 0")
@@ -101,12 +232,39 @@ def _add_part(link, part: dict, shift_m, mesh_prefix: str) -> None:
         geometry(ET.SubElement(link, "collision", name=part["name"]))
 
 
+def _mesh_visual(link, name: str, T: np.ndarray, filename: str, scale: str, rgba: str) -> None:
+    visual = ET.SubElement(link, "visual", name=name)
+    _set_origin(visual, T)
+    ET.SubElement(ET.SubElement(visual, "geometry"), "mesh", filename=filename, scale=scale)
+    ET.SubElement(ET.SubElement(visual, "material", name="wrist_camera_" + name), "color", rgba=rgba)
+
+
+def add_wrist_camera_model(root, camera_parent: str, T_parent_camera: np.ndarray, mesh_prefix: str,
+                           camera_down: bool = False) -> None:
+    """Cambia el prisma de wrist_camera_link por el soporte y una D435i, como visuales del mismo link: ni el
+    marco de la cámara ni los índices de los links de PyBullet cambian. Las piezas se ubican en link_eef."""
+    link = next(l for l in root.findall("link") if l.get("name") == CAMERA_LINK)
+    if camera_parent != "link_eef":
+        raise ValueError(f"{CAMERA_LINK} hangs from {camera_parent}; the stand is placed in link_eef")
+    for element in link.findall("visual") + link.findall("collision"):
+        link.remove(element)
+    T_camera_eef = np.linalg.inv(T_parent_camera)
+
+    T_eef_stand = R_FLIP @ T_EEF_STAND if camera_down else T_EEF_STAND
+    _mesh_visual(link, "camera_stand", T_camera_eef @ T_eef_stand, f"{mesh_prefix}/{STAND_MESH}",
+                 "0.001 0.001 0.001", "0.15 0.15 0.17 1")
+    T_d435i = T_camera_eef @ physical_wrist_camera_pose(camera_down)
+    for filename, rgba in D435I_MESHES:
+        _mesh_visual(link, filename.removesuffix(".stl"), T_d435i, f"{mesh_prefix}/{filename}", "1 1 1", rgba)
+
+
 def _part_mass(part: dict) -> float:
     return PART_MASS_KG.get(part["name"], part["volume_mm3"] * PLASTIC_KG_PER_MM3)
 
 
 def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, roll_deg: float = 0.0,
-               extra_horn_mesh: str | None = None, keep_links=KEEP_LINKS) -> dict:
+               extra_horn_mesh: str | None = None, keep_links=KEEP_LINKS, camera_down: bool = False,
+               real_blade: bool = True, blade_tip_radius_mm: float | None = None) -> dict:
     """Escribe dst: src sin el gripper del xArm y con el hand_held_XL330, y copia las mallas al lado.
     Los links de keep_links (y lo que cuelga de ellos) siguen en la misma pose. extra_horn_mesh: STL
     (mm, marco del ensamble) de lo que gira con el horn, p.ej. la hoja móvil."""
@@ -161,8 +319,9 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
             if any(f'"{n}"' in text or f">{n}<" in text for n in [*removed, *removed_joints]):
                 root.remove(element)
 
-    # mallas junto al URDF, con ruta relativa
-    prefix = "hand_held_xl330"
+    # mallas junto al URDF, con ruta relativa, en una carpeta con el nombre de la de origen (v3 y v4 no se pisan)
+    prefix = os.path.basename(os.path.normpath(mesh_dir))
+    design = load_design(mesh_dir)
     out_dir = os.path.join(os.path.dirname(os.path.abspath(dst)), prefix)
     os.makedirs(out_dir, exist_ok=True)
     parts = load_manifest(mesh_dir)
@@ -171,6 +330,7 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
     base_parts = [p for p in parts if p["link"] == "base"]
     horn_parts = [p for p in parts if p["link"] == "horn"]
     jaw_parts = [p for p in parts if p["link"] == "jaw"]
+    rod_parts = [p for p in parts if p["link"] == "rod"]
     if extra_horn_mesh:
         shutil.copy2(extra_horn_mesh, out_dir)
         horn_parts.append({"name": "horn_extra", "file": os.path.basename(extra_horn_mesh), "link": "horn",
@@ -183,7 +343,7 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
     com = sum(m * np.array(p["com_mm"]) for m, p in zip(masses, base_parts)) / masses.sum() / 1000
     _inertial(base, float(masses.sum()), com, 1e-3)
 
-    horn_origin_m = np.array([*HORN_AXIS_MM, 0.0]) / 1000
+    horn_origin_m = np.array([*design["horn_axis_mm"], 0.0]) / 1000
     horn = ET.SubElement(root, "link", name="hand_held_horn")
     for part in horn_parts:
         _add_part(horn, part, -horn_origin_m, prefix)
@@ -191,7 +351,8 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
 
     if jaw_parts:
         # las mallas están con la mandíbula cerrada; q = 0 es abierta, como el horn
-        pivot_m = np.array([*PIVOT_MM, 0.0]) / 1000
+        pivot_m = np.array([*design["pivot_mm"], 0.0]) / 1000
+        jaw_travel = design["jaw_travel_rad"]
         jaw = ET.SubElement(root, "link", name="hand_held_jaw")
         for part in jaw_parts:
             _add_part(jaw, part, -pivot_m, prefix)
@@ -199,17 +360,38 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
         jaw_com = sum(m * np.array(p["com_mm"]) for m, p in zip(jaw_masses, jaw_parts)) / jaw_masses.sum() / 1000
         _inertial(jaw, float(jaw_masses.sum()), jaw_com - pivot_m, 1e-4)
         jaw_joint = ET.SubElement(root, "joint", name=JAW_JOINT, type="revolute")
-        ET.SubElement(jaw_joint, "origin", xyz=" ".join(f"{v:.6f}" for v in pivot_m), rpy=f"0 0 {-JAW_TRAVEL_RAD:.5f}")
+        ET.SubElement(jaw_joint, "origin", xyz=" ".join(f"{v:.6f}" for v in pivot_m), rpy=f"0 0 {-jaw_travel:.5f}")
         ET.SubElement(jaw_joint, "parent", link="hand_held_base")
         ET.SubElement(jaw_joint, "child", link="hand_held_jaw")
         ET.SubElement(jaw_joint, "axis", xyz="0 0 1")
-        ET.SubElement(jaw_joint, "limit", lower="0", upper=f"{JAW_TRAVEL_RAD:.5f}", effort="5", velocity="5")
+        ET.SubElement(jaw_joint, "limit", lower="0", upper=f"{jaw_travel:.5f}", effort="5", velocity="5")
+
+    if rod_parts:
+        # bastón del cuatro barras: cuelga del horn en su pasador; mallas puestas con el gripper abierto (q = 0)
+        if not design["linkage"]:
+            raise ValueError(f"{mesh_dir} has rod parts but no linkage in its manifest")
+        linkage = Linkage.from_manifest(design["linkage"])
+        pin_m = np.array([*linkage.horn_pin(1.0), 0.0]) / 1000
+        rod = ET.SubElement(root, "link", name="hand_held_rod")
+        for part in rod_parts:
+            _add_part(rod, part, -pin_m, prefix)
+        rod_mass = sum(_part_mass(p) for p in rod_parts)
+        rod_com = sum(_part_mass(p) * np.array(p["com_mm"]) for p in rod_parts) / rod_mass / 1000
+        _inertial(rod, float(rod_mass), rod_com - pin_m, 1e-6)
+        angles = [linkage.joints_at(t)[2] for t in np.linspace(0, 1, 101)]
+        rod_joint = ET.SubElement(root, "joint", name=ROD_JOINT, type="revolute")
+        ET.SubElement(rod_joint, "origin", xyz=" ".join(f"{v:.6f}" for v in pin_m - horn_origin_m), rpy="0 0 0")
+        ET.SubElement(rod_joint, "parent", link="hand_held_horn")
+        ET.SubElement(rod_joint, "child", link="hand_held_rod")
+        ET.SubElement(rod_joint, "axis", xyz="0 0 1")
+        ET.SubElement(rod_joint, "limit", lower=f"{min(angles):.5f}", upper=f"{max(angles):.5f}", effort="5",
+                      velocity="20")
 
     center = ET.SubElement(root, "link", name="gripper_center_link")
     _inertial(center, 0.001, (0, 0, 0), 1e-8)
 
     fix = ET.SubElement(root, "joint", name="hand_held_fix", type="fixed")
-    _set_origin(fix, T_parent_flange @ flange_from_assembly(roll_deg))
+    _set_origin(fix, gripper_offset() @ T_parent_flange @ flange_from_assembly(roll_deg))
     ET.SubElement(fix, "parent", link=new_parent)
     ET.SubElement(fix, "child", link="hand_held_base")
 
@@ -222,9 +404,36 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
     ET.SubElement(drive, "limit", lower="0", upper=f"{travel_rad:.5f}", effort="0.52", velocity="10.8")
 
     center_joint = ET.SubElement(root, "joint", name="gripper_center_fix", type="fixed")
-    ET.SubElement(center_joint, "origin", xyz=" ".join(f"{v / 1000:.6f}" for v in GRIPPER_CENTER_MM), rpy="0 0 0")
+    ET.SubElement(center_joint, "origin", xyz=" ".join(f"{v / 1000:.6f}" for v in design["gripper_center_mm"]),
+                  rpy="0 0 0")
     ET.SubElement(center_joint, "parent", link="hand_held_base")
     ET.SubElement(center_joint, "child", link="gripper_center_link")
+
+    if CAMERA_LINK in kept:
+        camera_prefix = "wrist_camera"
+        camera_dir = os.path.join(os.path.dirname(os.path.abspath(dst)), camera_prefix)
+        os.makedirs(camera_dir, exist_ok=True)
+        for filename in (STAND_MESH, *(f for f, _ in D435I_MESHES)):
+            shutil.copy2(os.path.join(CAMERA_MESH_DIR, filename), camera_dir)
+        camera_joint = joints[CAMERA_LINK]
+        T_parent_camera = origin_matrix(camera_joint.find("origin"))
+        if camera_down:
+            T_parent_camera = flip_camera_frame(T_parent_camera)
+            _set_origin(camera_joint, T_parent_camera)
+        add_wrist_camera_model(root, camera_joint.find("parent").get("link"), T_parent_camera, camera_prefix,
+                               camera_down)
+
+    if real_blade:
+        # hoja real (ver REAL_PIVOT_MM): links fijos a hand_held_base, al final para no mover los índices de los
+        # demás links (los splats los usan). El eje del pivote es la z de hand_held_base.
+        points = real_blade_points_mm(design["gripper_center_mm"][2], blade_tip_radius_mm)
+        for name, xyz_mm in points.items():
+            link = ET.SubElement(root, "link", name=name)
+            _inertial(link, 0.001, (0, 0, 0), 1e-8)
+            joint = ET.SubElement(root, "joint", name=name.replace("_link", "_fix"), type="fixed")
+            ET.SubElement(joint, "origin", xyz=" ".join(f"{v / 1000:.6f}" for v in xyz_mm), rpy="0 0 0")
+            ET.SubElement(joint, "parent", link="hand_held_base")
+            ET.SubElement(joint, "child", link=name)
 
     ET.indent(tree)
     tree.write(dst, encoding="utf-8", xml_declaration=True)

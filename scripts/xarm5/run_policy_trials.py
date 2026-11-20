@@ -14,6 +14,11 @@ la grabación (trial_seconds de tiempo simulado). La política se carga una sola
 
 Salida en output_dir/<nombre del modelo>/<fecha>/: una carpeta por ensayo (000/, 001/, ... con meta.json)
 y trials.csv con un resumen (distancia final y mínima del efector al tomate).
+En una escena con cortadora y tallo (p. ej. --robot_name xarm5_lite_plant_v3_hand_held_down_cam_down en el
+servidor), trials.csv suma el corte: min_cut_err (distancia mínima del centro del filo al punto de corte antes
+de cortar), cut_err_at_command (esa distancia cuando la política ordena cerrar por primera vez, orden de la
+cortadora >= 0.5), cut_err_at_closed (cuando la cortadora llega a 0.8 cerrada, el momento en que se decide el
+corte), time_to_cut, y peduncle_cut / peduncle_held al final. Éxito del corte: peduncle_held = 1.
 
 Robot real (launch_nodes.py --robot xarm5): no hay posición del tomate, así que los ensayos se
 hacen con el operador, por el panel: antes de cada uno pide poner el tomate en la posición de la
@@ -22,6 +27,7 @@ queda en la columna manual_success (Discard no escribe fila). La duración es de
 """
 import time
 import csv
+import json
 import datetime
 import os
 import re
@@ -37,6 +43,7 @@ from splatsim.utils.remote_call import ask_operator, call
 from splatsim.utils.trials.durations import other_durations
 
 from splatsim.robots.xarm.config import APPLE_KEY, APPLE_NAME
+from splatsim.utils.scene.peduncle import CLOSED_FRACTION
 
 APPLE_QUAT = (0.0, 0.0, 0.0, 1.0)
 
@@ -68,12 +75,50 @@ class Args:
     occlusion_targets: tuple[float, ...] | None = None
     leaf_dir: str = "~/data/occluders/xarm5_lite_plant_v3"
     leaf_seed: int = 0
+    # cámara en que la hoja tapa el tomate (None: las cámaras base, como antes). Con wrist_rgb, la hoja
+    # se ajusta con el brazo en la pose de pregrasp del planner (efector a leaf_pregrasp m del punto de
+    # agarre, inclinación leaf_pitch_deg o la más cercana que alcance), porque en la pose inicial la
+    # muñeca no ve el tomate en casi ninguna posición. La hoja queda fija en el mundo durante el ensayo
+    leaf_camera: str | None = None
+    leaf_pregrasp: float = 0.09     # el centro del rango de pregrasp de las demos (0.06–0.12 m)
+    leaf_pitch_deg: float = -27.5   # el centro del rango de inclinación de las demos (−50 a −5°)
     # IK del agente: off (solo posición, lo de siempre) o hybrid (con la orientación si alcanza)
     ik_orientation: str = "off"
-    # termina el ensayo apenas el error de agarre baja de SUCCESS_RADIUS (4 cm): ahorra tiempo y no
-    # cambia la tasa de éxito, pero el error mínimo de esos ensayos queda en ~4 cm en vez del que
-    # habría alcanzado después. time_to_success se anota igual con o sin esta opción
+    # muestreador de la difusión (None: el del modelo, DDPM) y sus pasos (None: los del modelo, 100). DDIM
+    # muestrea los mismos modelos entrenados con DDPM, sin reentrenar; p. ej. --noise_scheduler DDIM
+    # --num_inference_steps 16
+    # (políticas de flujo: nada o flow, y --num_inference_steps son los pasos de Euler)
+    noise_scheduler: str | None = None
+    num_inference_steps: int | None = None
+    # acciones que se ejecutan por cada predicción de la política (None: las del modelo, 32 en todos los
+    # entrenados hasta ahora); menos = vuelve a mirar más seguido. Hasta horizon - n_obs_steps + 1
+    n_action_steps: int | None = None
+    # None: una acción por paso de control, llegue o no el brazo (lo de siempre). Con un valor (rad,
+    # norma de las 5 articulaciones), repite cada acción hasta que el brazo llegue a esa distancia del
+    # comando (0.01 en el agente del SplatSim original) o hasta waypoint_max_steps pasos
+    waypoint_tolerance: float | None = None
+    waypoint_max_steps: int = 10
+    # None: la pinza recibe el valor predicho (lo de siempre). Con un valor, 1 si la predicción lo alcanza y
+    # 0 si no, como la orden binaria de las demos del planificador
+    gripper_threshold: float | None = None
+    # al ordenar cerrar la pinza, el brazo se queda quieto hasta que cierra (como en las demos del planificador)
+    hold_while_closing: bool = False
+    # una vez cerrada la pinza (>= 0.8), queda cerrada hasta el final del ensayo (como en las demos de cortar y sujetar)
+    latch_closed: bool = False
+    # termina el ensayo success_extra_seconds después de que el error de agarre baja de
+    # SUCCESS_RADIUS (4 cm): ahorra tiempo y no cambia la tasa de éxito; en esos segundos el brazo
+    # sigue acercándose, así el error mínimo no queda cortado en ~4 cm. time_to_success se anota
+    # igual con o sin esta opción
     stop_on_success: bool = True
+    success_extra_seconds: float = 5.0   # tiempo simulado (de reloj en el robot real)
+    # cámaras que la política recibe en negro (p. ej. base_rgb o wrist_rgb), para medir de cuál depende.
+    # Solo cambia lo que ve la política: la grabación del ensayo guarda la imagen real
+    blank_cameras: tuple[str, ...] = ()
+    # mide cuánto del tomate tapa la escena en esta cámara (p. ej. wrist_rgb) cada track_every pasos
+    # de control durante el ensayo, no solo al inicio: guarda la serie en occlusion_track.json de cada
+    # episodio y su resumen en trials.csv (track_<cámara>_mean, _max, _pre_success y _in_view)
+    track_occlusion: str | None = None
+    track_every: int = 5
 
 
 def run_name_for(checkpoint: str) -> str:
@@ -100,6 +145,30 @@ def leaf_columns(fit: dict | None, target: float | None) -> dict:
             "leaf_camera": fit.get("camera"), "occlusion_fit": fit.get("occlusion")}
 
 
+def blank(obs: dict, cameras) -> dict:
+    """Copia de obs con las imágenes de esas cámaras en negro (mismo tipo y forma)."""
+    if not cameras:
+        return obs
+    out = dict(obs)
+    for cam in cameras:
+        image = obs[cam]
+        out[cam] = image * 0 if hasattr(image, "detach") else np.zeros_like(image)
+    return out
+
+
+def pregrasp_q(kin, tomato, point, seed, back: float, pitch_deg: float) -> list[float] | None:
+    """Articulaciones del brazo en la pose de pregrasp de plan_trajectories.plan_episode: el efector
+    `back` m antes de la pose de agarre, sobre el eje de la herramienta. Prueba pitch_deg y después
+    las inclinaciones del rango de las demos más cercanas a ella; None si ninguna alcanza."""
+    from plan_trajectories import grasp_pose
+    for pitch in [pitch_deg, *sorted(np.linspace(-50.0, -5.0, 10), key=lambda p: abs(p - pitch_deg))]:
+        pos, rot = grasp_pose(tomato, np.radians(pitch), point)
+        q = kin.ik(pos - back * rot[:, 2], rot, seed)
+        if q is not None:
+            return [float(v) for v in q]
+    return None
+
+
 def grid_index(apple_grid, pos, tol: float = 0.01) -> int:
     """Índice de la grilla más cercano a pos si está a menos de tol (m), si no -1."""
     if not apple_grid:
@@ -113,13 +182,39 @@ def occlusion_columns(measured: dict) -> dict:
     return {f"occlusion_{cam}": r["occlusion"] for cam, r in measured.items()}
 
 
+TRACK_FILE = "occlusion_track.json"
+CLOSE_COMMAND = 0.5   # orden de la cortadora desde la que se cuenta como "cerrar" (las demos dan 0/1)
+
+
+def track_columns(camera: str) -> list[str]:
+    return [f"track_{camera}_{k}" for k in ("mean", "max", "pre_success", "in_view")]
+
+
+def track_summary(camera: str, samples: list[tuple[float, float | None]],
+                  time_to_success: float | None) -> dict:
+    """samples: (segundos desde el inicio, % tapado o None si el tomate no está en cuadro). mean/max
+    sobre las muestras en cuadro; pre_success: la media hasta time_to_success (todo el ensayo si no
+    llegó); in_view: fracción de muestras con el tomate en cuadro."""
+    seen = [o for _, o in samples if o is not None]
+    pre = [o for t, o in samples if o is not None and (time_to_success is None or t <= time_to_success + 1e-9)]
+    mean = lambda v: round(float(np.mean(v)), 1) if v else None  # noqa: E731
+    cols = track_columns(camera)
+    return {cols[0]: mean(seen), cols[1]: max(seen) if seen else None, cols[2]: mean(pre),
+            cols[3]: round(len(seen) / len(samples), 2) if samples else None}
+
+
 def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_point,
               reset: bool = True, measure_occlusion: bool = False, leaf: dict | None = None,
-              stop_on_success: bool = False) -> dict:
+              stop_on_success: bool = False, success_extra_seconds: float = 0.0,
+              blank_cameras: tuple[str, ...] = (), track_camera: str | None = None,
+              track_every: int = 5) -> dict:
     """apple_pos None: el tomate se deja donde está. Sin su posición en la observación (robot
     real) solo se cuentan los frames. leaf: {leaf_dir, target, key, seed} para place_trial_leaf.
     time_to_success: segundos desde el primer comando hasta que el error de agarre baja de
-    SUCCESS_RADIUS (tiempo simulado en el sim, de reloj en el robot real); vacío si no llega."""
+    SUCCESS_RADIUS (tiempo simulado en el sim, de reloj en el robot real); vacío si no llega.
+    stop_on_success: corta el ensayo success_extra_seconds después de ese momento.
+    blank_cameras: cámaras que la política recibe en negro.
+    track_camera: mide la oclusión del tomate en esa cámara cada track_every pasos (track_summary)."""
     call(robot, "stop_recording")
     if reset:
         call(robot, "reset_robot")
@@ -129,6 +224,10 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     leaf_fit = call(robot, "place_trial_leaf", **leaf) if leaf is not None else None
     leaf_info = leaf_columns(leaf_fit, leaf["target"] if leaf else None)
     ik_before = dict(agent.ik_counts)
+    latencies = getattr(agent, "chunk_latencies_ms", [])   # los agentes de prueba no lo tienen
+    chunks_before = len(latencies)
+    waypoints_before = dict(agent.waypoint_counts)
+    holds_before = getattr(agent, "hold_count", 0)
 
     # antes de que el brazo se mueva: cuánto tapa la planta (y las hojas) con el brazo en reposo
     occlusion = occlusion_columns(call(robot, "measure_occlusion")) if measure_occlusion else {}
@@ -142,13 +241,27 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     # vale 1/hz de tiempo simulado y no hace falta esperar
     period = 1 / obs["control_hz"] if "control_hz" in obs else 0.0
     frames, distances, grasp_errors = 0, [], []
+    cut_errors, time_to_cut = [], None   # escena con cortadora y tallo (peduncle_error en la observación)
+    # error del filo al punto de corte cuando la política ordena cerrar (orden >= CLOSE_COMMAND por primera
+    # vez) y cuando la cortadora llega a CLOSED_FRACTION, el momento en que el simulador decide el corte
+    cut_err_at_command = cut_err_at_closed = None
     clock = (lambda o: o["sim_time"]) if "sim_time" in obs else (lambda o: time.monotonic())
-    start, time_to_success = clock(obs), None
+    start, time_to_success, stopped = clock(obs), None, False
+
+    def track():
+        r = call(robot, "measure_occlusion", camera_names=[track_camera]).get(track_camera) or {}
+        samples.append((round(clock(obs) - start, 3), r.get("occlusion")))
+    samples = []
+    if track_camera:
+        track()
     while True:
         t0 = time.monotonic()
-        robot.command_joint_state(agent.act(obs))
+        action = agent.act(blank(obs, blank_cameras))
+        robot.command_joint_state(action)
         obs = robot.get_observations()
         frames += 1
+        if track_camera and frames % track_every == 0:
+            track()
         time.sleep(max(0.0, period - (time.monotonic() - t0)))
         if APPLE_KEY in obs:
             ee = np.asarray(obs["state"][:3])
@@ -158,20 +271,50 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
             grasp_errors.append(float(grasp_error(obs["state"], apple, grasp_point)))
             if time_to_success is None and grasp_errors[-1] <= SUCCESS_RADIUS:
                 time_to_success = round(clock(obs) - start, 3)
-                if stop_on_success:
-                    call(robot, "stop_recording")
-                    break
+            if (stop_on_success and time_to_success is not None
+                    and clock(obs) - start >= time_to_success + success_extra_seconds - 1e-9):
+                call(robot, "stop_recording")
+                stopped = True
+                break
+        if "peduncle_error" in obs and obs["peduncle_error"] is not None:
+            if not obs["peduncle_cut"]:      # después del corte el tallo se mueve con la cortadora
+                cut_errors.append(float(obs["peduncle_error"]))
+            elif time_to_cut is None:
+                time_to_cut = round(clock(obs) - start, 3)
+            if cut_err_at_command is None and float(action[-1]) >= CLOSE_COMMAND:
+                cut_err_at_command = cut_errors[-1] if cut_errors else 0.0
+            if cut_err_at_closed is None and float(np.ravel(obs["gripper_position"])[0]) >= CLOSED_FRACTION:
+                cut_err_at_closed = cut_errors[-1] if cut_errors else 0.0
         if not obs["recording"]:   # el servidor cortó al llegar a trial_seconds
             break
 
     result = {"folder": folder, "frames": frames, "time_to_success": time_to_success,
-              "stopped_on_success": int(stop_on_success and time_to_success is not None),
+              "stopped_on_success": int(stopped),
               **occlusion, **leaf_info}
+    if track_camera:
+        result.update(track_summary(track_camera, samples, time_to_success))
+        with open(os.path.join(folder, TRACK_FILE), "w") as f:
+            json.dump({"camera": track_camera, "every": track_every,
+                       "samples": [{"t": t, "occlusion": o} for t, o in samples]}, f)
+    chunks = latencies[chunks_before:]
+    if chunks:   # el primer bloque del primer ensayo incluye la carga de CUDA: la mediana lo absorbe
+        result.update(chunk_latency_ms=round(float(np.median(chunks)), 2), chunks=len(chunks))
     if agent.ik_orientation != "off":
         result["ik_fallbacks"] = agent.ik_counts["fallback"] - ik_before["fallback"]
+    if agent.waypoint_tolerance is not None:
+        # acciones terminadas al llegar y por agotar waypoint_max_steps
+        result["waypoints_reached"] = agent.waypoint_counts["reached"] - waypoints_before["reached"]
+        result["waypoint_timeouts"] = agent.waypoint_counts["timeout"] - waypoints_before["timeout"]
+    if getattr(agent, "hold_while_closing", False):
+        result["closing_holds"] = agent.hold_count - holds_before
     if distances:
         result.update(final_dist=distances[-1], min_dist=min(distances),
                       final_grasp_err=grasp_errors[-1], min_grasp_err=min(grasp_errors))
+    if "peduncle_error" in obs and obs["peduncle_error"] is not None:
+        # éxito del corte: cortado y con el tomate sujeto al final (cut-and-hold)
+        result.update(min_cut_err=min(cut_errors) if cut_errors else 0.0, time_to_cut=time_to_cut,
+                      cut_err_at_command=cut_err_at_command, cut_err_at_closed=cut_err_at_closed,
+                      peduncle_cut=int(bool(obs["peduncle_cut"])), peduncle_held=int(bool(obs["peduncle_held"])))
     return result
 
 
@@ -212,7 +355,15 @@ def main(args: Args) -> None:
 
     robot = ZMQClientRobot(port=args.robot_port, host=args.hostname)
     agent = LeRobotDiffusionAgent(checkpoint=args.checkpoint, dataset_root=args.dataset_root,
-                                  device="cuda", ik_orientation=args.ik_orientation)
+                                  device="cuda", ik_orientation=args.ik_orientation,
+                                  n_action_steps=args.n_action_steps,
+                                  waypoint_tolerance=args.waypoint_tolerance,
+                                  waypoint_max_steps=args.waypoint_max_steps,
+                                  noise_scheduler=args.noise_scheduler,
+                                  num_inference_steps=args.num_inference_steps,
+                                  gripper_threshold=args.gripper_threshold,
+                                  hold_while_closing=args.hold_while_closing,
+                                  latch_closed=args.latch_closed)
 
     first_obs = robot.get_observations()
     missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
@@ -235,7 +386,11 @@ def main(args: Args) -> None:
     total = len(positions) * len(targets) * args.trials_per_position
     fields = ["pos_idx", "trial", "x", "y", "z", "folder", "frames", "final_dist", "min_dist",
               "final_grasp_err", "min_grasp_err", "manual_success", "grasp_point", "trial_seconds",
-              "time_to_success", "stopped_on_success"]
+              "time_to_success", "stopped_on_success", "success_extra_seconds", "n_action_steps",
+              "noise_scheduler", "num_inference_steps", "chunk_latency_ms", "chunks"]
+    if first_obs.get("peduncle_error") is not None:   # escena con cortadora: métricas del corte
+        fields += ["min_cut_err", "cut_err_at_command", "cut_err_at_closed", "time_to_cut", "peduncle_cut",
+                   "peduncle_held"]
     if targets != [None]:
         fields += ["occlusion_target", "leaf_status", "leaf", "leaf_camera", "occlusion_fit"]
     elif not manual:
@@ -243,9 +398,41 @@ def main(args: Args) -> None:
         call(robot, "place_trial_leaf", leaf_dir=args.leaf_dir, target=0.0, key=0, seed=args.leaf_seed)
     if args.ik_orientation != "off":
         fields += ["ik_fallbacks"]
+    if args.gripper_threshold is not None:
+        fields += ["gripper_threshold"]
+    if args.hold_while_closing:
+        fields += ["closing_holds"]
+    if args.blank_cameras:
+        fields += ["blank_cameras"]
+    unknown = set(args.blank_cameras) - set(policy_cameras(agent))
+    if unknown:
+        raise SystemExit(f"--blank_cameras: la política no usa {sorted(unknown)} (usa {policy_cameras(agent)})")
+    if args.waypoint_tolerance is not None:
+        fields += ["waypoint_tolerance", "waypoint_max_steps", "waypoints_reached", "waypoint_timeouts"]
     if not manual:
         fields += list(occlusion_columns(call(robot, "measure_occlusion")))
+    if args.track_occlusion:
+        if manual or args.track_occlusion not in first_obs:
+            raise SystemExit(f"--track_occlusion {args.track_occlusion}: solo en el sim y con una cámara del servidor")
+        fields += track_columns(args.track_occlusion)
     grasp_point = load_grasp_point()
+    pregrasp = {}   # pos_idx -> articulaciones de pregrasp (--leaf_camera wrist_rgb)
+    if args.leaf_camera and targets != [None]:
+        if args.leaf_camera not in first_obs:
+            raise SystemExit(f"--leaf_camera {args.leaf_camera}: el servidor no tiene esa cámara")
+        if "wrist" in args.leaf_camera:
+            from plan_trajectories import ARM_JOINTS, Kinematics
+            kin = Kinematics(call(robot, "robot_urdf"))
+            call(robot, "reset_robot")
+            sim_q = robot.get_observations()["sim_joint_positions"]
+            seed = [sim_q[i] for i in kin.movable[:ARM_JOINTS]]
+            for pos_idx in positions:
+                apple_pos = here if args.here else apple_grid[pos_idx]
+                pregrasp[pos_idx] = pregrasp_q(kin, apple_pos, grasp_point, seed,
+                                               args.leaf_pregrasp, args.leaf_pitch_deg)
+                if pregrasp[pos_idx] is None:
+                    print(f"[Trials] AVISO: sin pregrasp para la posición {pos_idx}: la hoja se ajusta "
+                          "con el brazo en la pose inicial")
     # con qué punto se midió el error de agarre: compare_trials.py recalcula si cambió
     point_text = " ".join(f"{v:.4f}" for v in grasp_point)
 
@@ -260,6 +447,8 @@ def main(args: Args) -> None:
                 # la misma hoja (sorteada por posición) en todos los niveles: solo cambia cuánto tapa
                 leaf = None if target is None else {"leaf_dir": args.leaf_dir, "target": target,
                                                     "key": pos_idx, "seed": args.leaf_seed}
+                if leaf is not None and args.leaf_camera:
+                    leaf.update(cameras=[args.leaf_camera], reference_q=pregrasp.get(pos_idx))
                 for trial in range(args.trials_per_position):
                     n += 1
                     where = "actual" if args.here else ""
@@ -280,11 +469,24 @@ def main(args: Args) -> None:
                             continue
                     metadata = {"pos_idx": pos_idx, "trial": trial, "apple_position": apple_pos,
                                 "trial_seconds": args.trial_seconds, "manual": manual,
-                                "checkpoint": checkpoint, "run_name": run_name}
+                                "success_extra_seconds": args.success_extra_seconds if args.stop_on_success else None,
+                                "n_action_steps": agent.policy.config.n_action_steps,
+                                "waypoint_tolerance": args.waypoint_tolerance,
+                                "gripper_threshold": args.gripper_threshold,
+                                "hold_while_closing": args.hold_while_closing,
+                                "latch_closed": args.latch_closed,
+                                "waypoint_max_steps": args.waypoint_max_steps if args.waypoint_tolerance else None,
+                                "checkpoint": checkpoint, "run_name": run_name,
+                                "blank_cameras": list(args.blank_cameras),
+                                "leaf_reference": "pregrasp" if pregrasp.get(pos_idx) else None,
+                                "leaf_pregrasp": args.leaf_pregrasp if pregrasp else None}
                     result = run_trial(robot, agent, None if (args.here or manual) else apple_pos,
                                        args.trial_seconds, metadata, root, grasp_point,
                                        reset=not manual, measure_occlusion=not manual, leaf=leaf,
-                                       stop_on_success=args.stop_on_success and not manual)
+                                       stop_on_success=args.stop_on_success and not manual,
+                                       success_extra_seconds=args.success_extra_seconds,
+                                       blank_cameras=args.blank_cameras,
+                                       track_camera=args.track_occlusion, track_every=args.track_every)
                     if manual:
                         call(robot, "stop_recording")
                         answer = ask_operator(robot, f"Trial {n}/{total} finished: result?",
@@ -294,7 +496,17 @@ def main(args: Args) -> None:
                             continue
                         result["manual_success"] = int(answer == "Success")
                     row = {"pos_idx": pos_idx, "trial": trial, **result, "grasp_point": point_text,
-                           "trial_seconds": args.trial_seconds}
+                           "trial_seconds": args.trial_seconds,
+                           "success_extra_seconds": args.success_extra_seconds if args.stop_on_success else "",
+                           "n_action_steps": agent.policy.config.n_action_steps,
+                           "noise_scheduler": agent.sampler[0], "num_inference_steps": agent.sampler[1]}
+                    if args.waypoint_tolerance is not None:
+                        row.update(waypoint_tolerance=args.waypoint_tolerance,
+                                   waypoint_max_steps=args.waypoint_max_steps)
+                    if args.gripper_threshold is not None:
+                        row["gripper_threshold"] = args.gripper_threshold
+                    if args.blank_cameras:
+                        row["blank_cameras"] = " ".join(args.blank_cameras)
                     if apple_pos:
                         row.update(x=apple_pos[0], y=apple_pos[1], z=apple_pos[2])
                     writer.writerow(row)

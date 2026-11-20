@@ -153,6 +153,7 @@ python scripts/xarm5/estimate_grasp_point.py                 # the grasp point b
 Edit `urdf_path` in `configs/object_configs/objects.yaml` or pass `--urdf` if your URDF is elsewhere. For the real station's 3D view, set `urdf` in `configs/xarm5_real.yaml` to the new file.
 
 - **URDF:** removes `xarm_gripper_base_link` and everything below it, and attaches the tool at the same place. `wrist_camera_link` keeps its pose, so the wrist camera is unchanged; the `mount_xarm5` disc bolts directly to the bottom plate, and the tool has no GoPro. The default orientation puts the assembly's +z (the top cover's side) towards the link's +x; if your mount differs, use `--roll-deg`.
+- **Wrist camera and stand:** the D435i is bolted to the Camera Stand_1300, a 3 mm plate between the flange and `mount_xarm5`, so the tool sits 3 mm past the flange. The URDF draws the stand and Intel's D435i housing as visuals of `wrist_camera_link`; the link's pose is unchanged and no links are added. The meshes are in `splatsim/robot_definitions/meshes/wrist_camera/` (`scripts/xarm5/build_d435i_mesh.py` makes the D435i ones from `d435.dae` in realsense-ros, Apache-2.0). The panel draws the same D435i at each base camera, on its desk tripod (`splatsim/utils/scene/camera_tripod.py`, approximate sizes, kept vertical under the camera and standing on z = 0). The sim frame is about 3 cm from where the real RGB lens sits: see [the wrist camera experiment](experiments/wrist_camera_frame.md).
 - **Actuated joint:** `gripper_drive_joint` is the XL330 horn. Its travel is `HAND_HELD_TRAVEL_RAD` in `splatsim/robots/station/urdf_view.py` (107.6°, RoboHarvest's value); set it to the travel printed by `calibrate`.
 - **Pruner:** it is traced from photos on a 7 mm grid (about ±1-2 mm), not from the CAD. The fixed body is the steel handle with the anvil, and the moving body is the toothed jaw with its black plate. `hand_held_jaw_joint` turns the jaw about the pivot, in proportion to the horn: `JAW_TRAVEL_RAD` in `splatsim/utils/scene/hand_held.py` (35.3°) is measured between the open and closed photos, but the real rod is not simulated. `--moving-part` adds another mesh to the horn.
 - **Splat:** `hand_held_splat.py` needs no new scan. It removes the old gripper's Gaussians, adds flat-colored ones sampled on the CAD meshes, remaps the per-link labels and writes a new scene; the original is untouched. It looks like CAD, not like a photo. For a policy meant for the real robot, prefer a new scan ([Adding a new robot](../README.md#adding-a-new-robot)) with the same URDF and `gripper: hand_held_xl330`; if the jaw was not open in the scan, also set `splat_gripper_value` (fraction of the travel).
@@ -172,11 +173,37 @@ python scripts/xarm5/plan_trajectories.py --episodes 6 --out ~/data/bc_data/plan
 python scripts/xarm5/render_recordings.py ~/data/bc_data/planned_cut --fps 10 --robot_name xarm5_lite_plant_v3_hand_held_down
 ```
 
+`xarm5_lite_plant_v3_hand_held_v4_down` is the same scene with the v4 tool, to compare with `_hand_held_down`:
+
+- **v4 changes:** the XL330 is 9.30 mm closer to the arm, so the horn axis is at (12.7, 4.565) mm. The pruner has measured dimensions and sits 7.10 mm higher, on two columns of the bottom plate. An HN05 adapter on the horn drives a 62.72 mm rod to a pin on the pruner's moving plate, which forms a four-bar linkage.
+- **Linkage:** `hand_held_rod_joint` hangs from the horn. In the sim only the horn has a motor; after every physics step, the jaw and rod are set from the horn angle (`splatsim/utils/scene/hand_held_linkage.py`). The horn turns 85.9° from open to closed, and the jaw closes faster at the start: at half the horn travel it is 61 % closed.
+- **Meshes:** `splatsim/robot_definitions/meshes/hand_held_xl330_v4/` is built from the CAD package by `scripts/xarm5/import_hand_held_v4.py`. Its `manifest.json` holds the geometry that changed and the linkage parameters. The package has no new XL330, horn or screw meshes, so it uses the v3 ones moved by 9.30 mm; the mount and top cover are the v3 ones.
+- **Unconfirmed in the CAD:** where the pruner pin goes, the width of `anvil_lip`, the 6 × 3 mm rod, and the sign between the horn angle and the Dynamixel position.
+- **Not covered yet:** the real station's 3D view (`xarm5_urdf_joints` in `urdf_view.py`) still moves the jaw in proportion to the horn.
+
+```bash
+python scripts/xarm5/import_hand_held_v4.py ~/Downloads/paquete_v4
+python scripts/xarm5/build_hand_held_urdf.py --mesh-dir splatsim/robot_definitions/meshes/hand_held_xl330_v4 --dst ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_v4_down.urdf
+python scripts/xarm5/hand_held_splat.py --new-scene xarm5_lite_plant_v3_hand_held_v4_down --urdf '~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_v4_down.urdf' --mesh-dir splatsim/robot_definitions/meshes/hand_held_xl330_v4
+python scripts/xarm5/add_peduncle.py --scene xarm5_lite_plant_v3_hand_held_v4_down
+```
+
+`xarm5_lite_plant_v3_hand_held_down_cam_down` is the same scene with the camera stand turned 180° on the flange, so the D435i sits below the tool (on the blue cover's side). The camera is remounted turned 180° on the stand, so its image stays upright; the tool now shows at the top of the wrist image instead of the bottom. It shares the splat of `_hand_held_down` (the camera is not in the splat):
+
+```bash
+python scripts/xarm5/build_hand_held_urdf.py --camera-down --dst ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down.urdf
+cp data/labels_path/xarm5_lite_plant_v3_hand_held_down_labels.npy data/labels_path/xarm5_lite_plant_v3_hand_held_down_cam_down_labels.npy
+```
+
 `add_peduncle.py` writes a new splat next to the original tomato and adds `plastic_apple_peduncle` to `objects.yaml`, with the `bottom`, `top` and `cut` points of the stem in the tomato's frame. The scene's `object_overrides` makes it use that tomato under its usual name, so other scenes are unchanged. For a real scan, change `ply_path`, `aabb` and those points.
 
 With `--target peduncle` the planner puts the middle of the blade edge on the `cut` point, arrives open, closes at the start of the hold, and then backs away still closed. Episodes that don't end with the tomato held are discarded, and `meta.json` records `peduncle_cut` and `peduncle_held`. Frames record `peduncle_error` (m, blade to `cut` point), `peduncle_cut` and `peduncle_held`, and the panel's *Tomato* folder shows them.
 
-The pruner is cut-and-hold. A cut happens when the jaw finishes closing (gripper at 0.8) with the stem crossing the blade plane, within 15 mm of the middle of the edge and at most 45° from the pivot axis. Arriving already closed doesn't cut. The tomato then moves rigidly with the pruner until the gripper opens below 0.6, when it falls. Placing it again restores it.
+The pruner is cut-and-hold. A cut happens when the jaw finishes closing (gripper at 0.8) with the stem crossing the blade plane, within 15 mm of the middle of the edge and at most 45° from the pivot axis. Arriving already closed doesn't cut.
+
+With `cut_range_mm` in the peduncle entry of `objects.yaml` (`[17, 67]` for `plastic_apple_peduncle`, the whole edge from heel to tip; it was `[17, 42]`, mid-edge to pivot, while the real pruner could not cut near the tip), the cut uses the measured pruner instead (`real_cut_check` in `splatsim/utils/scene/peduncle.py`, geometry in `hand_held.py`: `REAL_PIVOT_MM`, `BLADE_HEEL/MID/TIP`). When the jaw reaches 0.8, the stem must cross the blade plane at most 45° from the pivot axis, 17–67 mm from the real pivot, and between the anvil and the blade, which is then 7.6° open in the real two-stage mechanism. The stem's radius gives some margin. `peduncle_error` is then measured from the middle of that range (42 mm), 3.8° towards the open side. `plan_perception_episodes.py --target peduncle` aims each episode at a random point of the real edge, `--cut-radius-mm 38 46` mm from the pivot by default (C400-R used `26 34`, for the 17–42 mm range), and records it as `cut_radius_mm` in `meta.json`. `plan_trajectories.py` aims at the middle of the CAD blade (about 44 mm from the real pivot). Without `cut_range_mm`, the old rule applies.
+
+The tomato then moves rigidly with the pruner until the gripper opens below 0.6, when it falls. Placing it again restores it.
 
 **Limits:**
 
@@ -185,6 +212,23 @@ The pruner is cut-and-hold. A cut happens when the jaw finishes closing (gripper
 - The 15 mm, 45° and the 0.8 and 0.6 gripper values are chosen, not measured on the real pruner.
 - The stem is straight and vertical, and the tomato doesn't turn. With `joint5` at 0, the tool's pitch is the angle between the stem and the pivot axis, which is why the planner keeps it between -25° and 0°.
 - `run_policy_trials.py` still measures against the grasp point, not the cut point.
+
+### Splat of a real tomato on a white background
+
+For a single object, train the splat on photos without background. COLMAP still runs on the original photos: a smooth, shiny tomato has very few features to match, and without the background COLMAP can't place the cameras. Only the photos used for training lose the background:
+
+```bash
+# all steps: photos or video → COLMAP → masks → train
+python scripts/xarm5/splat_from_video.py ~/Videos/tomate.mp4 --out ~/data/tomate --white-background
+# or after convert.py, which leaves images/ and sparse/0 in ~/data/tomate
+python scripts/xarm5/splat_from_video.py ~/data/tomate --out ~/data/tomate --white-background --steps mask train
+```
+
+The `mask` step (`splatsim/utils/scene/white_background.py`) makes one mask per photo of `images/` with rembg (`--mask-model`, `isnet-general-use` by default) in `masks/<photo>.png` (255 = object). It composites each photo on white in `images_white/`, with the same name, extension and size, because `train.py` looks photos up by the name COLMAP saved and the cameras in `sparse/0` belong to `images/`. Then `train.py` runs with `--images images_white --white_background`. With a white background in the photos and in the render, the background counts in the loss and training leaves empty space empty. An RGBA photo would do the opposite: `train.py` multiplies the render by the alpha, so the background would be left out of the loss and floaters wouldn't be penalized. The log gives the median fraction of each photo covered by the object and warns about photos with an empty mask.
+
+Check `masks/` before training. rembg tends to cut off the thin peduncle and to keep the stand or the table under the tomato. Fix the masks you need, by hand or with another tool, and rerun with `--reuse-masks --steps mask train`: masks already in `masks/` are kept and only missing ones are computed. Even so, crop the splat with an `aabb` in `objects.yaml`, as for `plastic_apple`, to remove what is left of the background points COLMAP started from.
+
+rembg is installed in the `fork-splatsim` env without its `opencv-python-headless` dependency, because it would overwrite `opencv-python`'s `cv2`. It uses `onnxruntime-gpu==1.23.2`, the CUDA 12 build that matches torch's libraries: 1.32 asks for CUDA 13 and falls back to the CPU. On the RTX 5080 the first mask takes about a minute while CUDA compiles, then about 0.1 s per photo; on the CPU, about 0.7 s. The render image for pods doesn't have rembg, so the cloud *Scene* job doesn't have this option.
 
 ## Replay recordings in each control mode
 
@@ -387,6 +431,8 @@ python scripts/xarm5/train_diffusion.py --config configs/train/diffusion.yaml --
 ```
 The output folder `<output_root>/<model_name>/` gets the final policy, checkpoints every `save_freq` steps and the resolved `train_config.yaml`.
 
+**Flow policy.** `--objective flow` trains a flow-matching (rectified flow) policy with the same network: the U-Net, image encoders, normalization and saved files of the diffusion policy. Only the loss and the sampler change (`splatsim/policies/flow_matching.py`). Training mixes noise and action as `(1 - t) noise + t action`, with `t` uniform in [0, 1], and the network predicts the velocity `action - noise`. Sampling integrates from noise to action with `--flow-steps` Euler steps (10 by default). `train_config.yaml` records `objective: flow`. The agent reads it and samples with Euler, and `run_policy_trials.py --num_inference_steps` changes the number of steps. `--noise_scheduler` must be omitted or `flow`, and trials record the sampler as `flow`.
+
 **Weights & Biases.** With `wandb: true` (default) each training is a W&B run in `wandb_project` (`splatsim-diffusion`; `wandb_entity`, default the account's): its name is the model name, its notes the description and its tag the short name, with the whole config plus the cameras used and the dataset's episodes, frames and fps. Every `wandb_log_freq` steps (10) it logs `train/loss`, `train/lr` and `train/steps_per_s`, and `checkpoint/loss` at each saved checkpoint; at the end the training minutes, final loss and model folder. The run URL and id are appended to `train_config.yaml` (`wandb_run`, `wandb_id`). Log in once per machine with `wandb login` (or set `WANDB_API_KEY`); without it the run is saved offline in `<output_root>/<model_name>/wandb/` instead of failing (a training in the queue can't answer a login prompt), and is uploaded later with `wandb sync <that folder>/offline-run-*`. `--no-wandb` (or *wandb* unticked in the queue's *New job*) trains without it; `wandb_mode: offline` always keeps it local.
 
 ## Training queue
@@ -501,6 +547,10 @@ Results are saved in `~/data/policy_trials/<model name>/<date>/` (change the bas
 - `trials.csv`: one row per trial with the number of frames and the final and minimum distance between the end effector and the tomato.
 
 Press Ctrl+C to stop early; the current recording is closed and the arm is reset.
+
+To watch the trials, open the reviewer on that folder: `python scripts/xarm5/review_recordings.py --root ~/data/policy_trials`. The *Folder* dropdown lists the runs as `<date time> · <run name> · <successes>/<trials>`, newest first. *Folder filters* narrow it by **Date** (the day the run started), **Task** (grasp, cut, or recordings that are not trial runs), **Leaf** (runs with leaf-occlusion trials or not), **Sampler** (`DDIM-16`, `DDPM-100`; older runs did not save it) and **Search**. Search takes words that must all appear in the run's path or its parameters, and `-word` excludes a word: `a4j s2 -n4`, or `hybrid` for the runs with hybrid IK. Under the dropdown the open run shows its date, result, sampler, model, action steps per prediction, IK, blanked cameras, gripper threshold, waypoint tolerance and trial length (`splatsim/utils/trials/run_index.py`). The *Trial filters* folder then filters its episodes by result, occlusion level, row and grid position. In cut runs, success means the peduncle was cut and held (`peduncle_held`), and the episode list shows the minimum blade-to-cut-point distance.
+
+Trial images take most of the disk (three 640x480 PNGs per frame, ~12 GB per 64-trial run). `python scripts/xarm5/pack_trial_images.py ~/data/policy_trials --workers 4` turns each camera of each episode into one lossless H.264 video (`image_1/<cam>.mp4` plus `image_1/videos.json` with the original frame numbers; `splatsim/utils/data/frame_video.py`), about 5x smaller. Before it deletes the PNGs it checks that every decoded frame matches them exactly. It is resumable, runs at low priority and skips folders modified in the last hour. The reviewer shows packed episodes the same way. Converters that read PNGs (`lerobot_conversion.py`) still need them, so do not pack recordings you will convert, or write them back first with `--restore`.
 
 ## Grasp point and success
 

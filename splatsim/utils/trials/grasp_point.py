@@ -59,6 +59,22 @@ def gripper_center(urdf_path: str) -> np.ndarray:
         c.disconnect()
 
 
+def link_in_ee(urdf_path: str, link: str) -> tuple[np.ndarray, np.ndarray]:
+    """Posición y rotación de `link` en el marco del efector, desde la URDF (links fijos al efector)."""
+    import pybullet as p
+    from pybullet_utils.bullet_client import BulletClient
+    c = BulletClient(connection_mode=p.DIRECT)
+    try:
+        body = c.loadURDF(urdf_path, useFixedBase=True)
+        links = {c.getJointInfo(body, i)[12].decode(): i for i in range(c.getNumJoints(body))}
+        ee = c.getLinkState(body, links[EE_LINK], computeForwardKinematics=True)
+        other = c.getLinkState(body, links[link], computeForwardKinematics=True)
+        rot = np.array(c.getMatrixFromQuaternion(ee[5])).reshape(3, 3)
+        return rot.T @ (np.array(other[4]) - ee[4]), rot.T @ np.array(c.getMatrixFromQuaternion(other[5])).reshape(3, 3)
+    finally:
+        c.disconnect()
+
+
 POINT_HEADER = """\
 # Where the tomato must be in the end-effector frame (m): point, from point_source
 # (gripper_center: middle of the space between the fingers, from the URDF; demos: median

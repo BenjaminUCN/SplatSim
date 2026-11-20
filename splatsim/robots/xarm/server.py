@@ -53,7 +53,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
     # métodos que el cliente puede llamar por ZMQ además de los de ZMQRobotServer
     REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording", "get_preview",
                       "set_control_mode", "operator_prompt", "operator_answer", "measure_occlusion",
-                      "place_trial_leaf")
+                      "place_trial_leaf", "robot_urdf")
 
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
@@ -174,6 +174,8 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
     def _step(self, n: int = 1) -> None:
         for _ in range(n):
             self.pybullet_client.stepSimulation()
+            if self.gripper is not None:    # sin use_gripper no se crea
+                self.gripper.follow()       # gripper v4: mandíbula y bastón siguen al horn
         self.sim_steps += n
 
     def _advance(self, n: int) -> None:
@@ -386,13 +388,20 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
             self.occluders = OccluderSet(self)
         return self.occluders.set_episode(entries)
 
+    def robot_urdf(self) -> str:
+        """urdf_path para los clientes (run_policy_trials.py calcula con él la pose de pregrasp)."""
+        return self.urdf_path
+
     def place_trial_leaf(self, leaf_dir: str, target: float, key: int, seed: int = 0,
-                         cameras: list[str] | None = None) -> dict:
+                         cameras: list[str] | None = None, reference_q: list[float] | None = None) -> dict:
         """Ensayos con oclusión (run_policy_trials.py --occlusion-targets): con el brazo y el tomate
         ya en su lugar, pone una hoja de leaf_dir que tape target % del tomate, ajustada como en
         render_recordings.py --leaf_dir (splatsim/utils/scene/leaf_variation.py). El sorteo (hoja,
         cámara, dirección, giro) depende solo de seed y key, así todos los modelos ven la misma hoja.
-        target 0 quita las hojas del ensayo anterior. Devuelve el ajuste (leaf_fit)."""
+        target 0 quita las hojas del ensayo anterior. Devuelve el ajuste (leaf_fit).
+        reference_q: articulaciones del brazo (5) en que se ajusta la hoja, p. ej. la pose de pregrasp
+        para la cámara de muñeca, que en la pose inicial no ve el tomate. El brazo se pone ahí solo
+        para medir (sin física) y vuelve a donde estaba; la hoja queda fija en el mundo."""
         from pathlib import Path
         from splatsim.utils.scene.leaf_variation import draw_episode, place_episode_leaf
         leaves = sorted(Path(leaf_dir).expanduser().glob("*.ply"))
@@ -401,8 +410,25 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
         cameras = list(cameras) if cameras else [c for c in self.camera_names if "wrist" not in c]
         draw = draw_episode(str(int(key)), leaves, (float(target),), seed)
         with self.lock:
-            _, fit = place_episode_leaf(self, draw, cameras)
-        return fit
+            if reference_q is None:
+                _, fit = place_episode_leaf(self, draw, cameras)
+                return fit
+            c, robot = self.pybullet_client, self.dummy_robot
+            saved = [c.getJointState(robot, i)[:2] for i in range(c.getNumJoints(robot))]
+            arm = [i for i in range(c.getNumJoints(robot))
+                   if c.getJointInfo(robot, i)[2] != c.JOINT_FIXED][:len(reference_q)]
+            try:
+                for i, q in zip(arm, reference_q):
+                    c.resetJointState(robot, i, float(q))
+                for i in range(c.getNumJoints(robot)):   # sin FK, getLinkState daría la pose anterior
+                    c.getLinkState(robot, i, computeForwardKinematics=True)
+                _, fit = place_episode_leaf(self, draw, cameras)
+            finally:
+                for i, (q, v) in enumerate(saved):
+                    c.resetJointState(robot, i, q, v)
+                for i in range(c.getNumJoints(robot)):
+                    c.getLinkState(robot, i, computeForwardKinematics=True)
+        return {**fit, "reference_q": [round(float(q), 4) for q in reference_q]}
 
     def measure_occlusion(self, camera_names=None) -> dict:
         """Cuánto del tomate tapa la escena en cada cámara (splatsim/utils/render/occlusion.py), con el

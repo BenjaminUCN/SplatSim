@@ -14,14 +14,18 @@ corrida se guarda offline en <output_root>/<model_name>/wandb y se sube después
 """
 
 import argparse
+import copy
+import math
 import netrc
 import os
+import random
 import sys
 import time
 from dataclasses import asdict, dataclass, fields, replace
 from datetime import datetime
 from pathlib import Path
 
+import numpy as np
 import torch
 import tyro
 import yaml
@@ -38,6 +42,8 @@ from lerobot.transforms import (
 )
 from lerobot.utils.feature_utils import dataset_to_policy_features
 
+from splatsim.policies.flow_matching import OBJECTIVES, use_flow
+from splatsim.utils.data.action_space import action_space_of
 from splatsim.utils.data.relative_actions import to_relative
 from splatsim.utils.render.camera_setup import arrangement_cameras
 from splatsim.utils.paths import expand
@@ -66,18 +72,52 @@ class TrainConfig:
     # Entrena más rápido, y el agente le sigue pasando las del sim tal cual. Con un dataset ya reescalado
     # (scripts/xarm5/resize_dataset.py) se pone el mismo tamaño, para que el modelo reescale las del sim
     resize_shape: tuple[int, int] | None = None
+    # Encoder de imágenes. Por defecto (LeRobot desde may-2026) ResNet18 de ImageNet con BatchNorm;
+    # Diffusion Policy lo entrena desde cero con GroupNorm: pretrained_backbone: null, group_norm: true
+    pretrained_backbone: str | None = "ResNet18_Weights.IMAGENET1K_V1"
+    group_norm: bool = False
     # optimización
+    seed: int | None = None             # None -> otra corrida cada vez
+    # Learning rate coseno con warmup (el preset de DiffusionConfig: warmup 500, termina en ~0).
+    # False -> constante 1e-4, como todos los modelos hasta el 13-nov
+    lr_scheduler: bool = False
+    lr_warmup_steps: int = 500
+    # Promedio exponencial de los pesos, como Diffusion Policy (power 0.75, máximo 0.9999). Se guarda
+    # y se evalúa el modelo promediado. Con BatchNorm conviene group_norm (las estadísticas se copian)
+    ema: bool = False
+    ema_power: float = 0.75
+    ema_max_decay: float = 0.9999
     training_steps: int = 50000
     batch_size: int = 32
-    num_workers: int = 12               # 16 causaba OOM con 56GB en WSL
-    prefetch_factor: int = 3
+    # acumulación de gradientes: cada paso de optimización junta grad_accumulation lotes de
+    # batch_size / grad_accumulation muestras (mismo batch efectivo, menos VRAM; con GroupNorm da el
+    # mismo gradiente). Con BatchNorm las estadísticas se calculan por lote chico
+    grad_accumulation: int = 1
+    # Cada worker del DataLoader deja prefetch_factor batches en memoria compartida, así que hay
+    # num_workers × prefetch_factor batches en RAM a la vez. Ver loader_memory_bytes
+    num_workers: int = 12
+    prefetch_factor: int = 1
     image_augmentation: bool = True
+    # camera dropout: en cada muestra, cada cámara de camera_dropout se pone en negro (todos los pasos
+    # observados) con probabilidad camera_dropout_p, como --blank_cameras de run_policy_trials.py.
+    # Obliga a la política a usar las otras cámaras (sin esto, DP-16/8 ignora base_rgb). Nunca deja
+    # una muestra sin ninguna cámara
+    camera_dropout: tuple[str, ...] = ()
+    camera_dropout_p: float = 0.3
     # acciones relativas a la pose del estado en el último paso observado (pos y euler; el gripper
     # queda absoluto). Ver splatsim/utils/data/relative_actions.py
     relative_actions: bool = False
     torch_compile: bool = False         # compila la U-Net y los encoders (no cambia el modelo guardado)
+    # diffusion: DDPM (lo de siempre); flow: política de flujo con la misma red (splatsim/policies/flow_matching.py),
+    # que muestrea con flow_steps pasos de Euler
+    objective: str = "diffusion"
+    flow_steps: int = 10
     # logging / guardado
     log_freq: int = 1
+    # cada resume_every pasos guarda el estado completo (pesos, EMA, optimizador, LR, escalador, paso y
+    # generadores aleatorios) en <output_root>/<model_name>/resume/state.pt, reemplazándolo; al volver a
+    # lanzar con el mismo model_name sigue desde ahí (corte de luz, OOM). Se borra al terminar. 0 = no
+    resume_every: int = 1000
     save_freq: int = 10000
     push_to_hub: bool = True
     hub_user: str = "LuEduSoHu"
@@ -148,6 +188,86 @@ def make_image_transforms() -> ImageTransforms:
     )
 
 
+def seed_everything(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+
+
+def seed_worker(worker_id: int):
+    """Semilla de cada worker del DataLoader a partir de la del proceso (para random y numpy)."""
+    seed = torch.initial_seed() % 2**32
+    random.seed(seed)
+    np.random.seed(seed)
+
+
+class EMA:
+    """Copia de la política con el promedio exponencial de los pesos, como EMAModel de
+    diffusion_policy: decay = 1 - (1 + step)^-power, recortado a [0, max_decay]. Los buffers
+    (p. ej. estadísticas de BatchNorm) se copian tal cual."""
+
+    def __init__(self, model: torch.nn.Module, power: float = 0.75, max_decay: float = 0.9999):
+        self.model = copy.deepcopy(model).eval().requires_grad_(False)
+        self.power = power
+        self.max_decay = max_decay
+        self.step = 0
+
+    def decay(self) -> float:
+        value = 1 - (1 + self.step) ** -self.power
+        return min(max(value, 0.0), self.max_decay)
+
+    @torch.no_grad()
+    def update(self, model: torch.nn.Module):
+        decay = self.decay()
+        for ema_p, p in zip(self.model.parameters(), model.parameters()):
+            ema_p.lerp_(p.detach(), 1 - decay)
+        for ema_b, b in zip(self.model.buffers(), model.buffers()):
+            ema_b.copy_(b)
+        self.step += 1
+
+
+RESUME_FILE = Path("resume") / "state.pt"
+
+
+def save_resume(path: Path, step: int, policy, ema, optimizer, lr_scheduler, scaler) -> None:
+    """Estado para seguir el entrenamiento; se escribe a un temporal y se renombra (un corte a mitad
+    de la escritura deja el anterior intacto)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state = {"step": step, "policy": policy.state_dict(), "optimizer": optimizer.state_dict(),
+             "scaler": scaler.state_dict(), "torch_rng": torch.get_rng_state(),
+             "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None,
+             "numpy_rng": np.random.get_state(), "python_rng": random.getstate()}
+    if ema is not None:
+        state["ema"] = {"model": ema.model.state_dict(), "step": ema.step}
+    if lr_scheduler is not None:
+        state["lr_scheduler"] = lr_scheduler.state_dict()
+    tmp = path.with_suffix(".tmp")
+    torch.save(state, tmp)
+    os.replace(tmp, path)
+
+
+def load_resume(path: Path, policy, ema, optimizer, lr_scheduler, scaler) -> int:
+    """Carga lo de save_resume y devuelve el paso en que sigue (0 si no hay estado)."""
+    if not path.exists():
+        return 0
+    state = torch.load(path, map_location="cpu", weights_only=False)
+    policy.load_state_dict(state["policy"])
+    optimizer.load_state_dict(state["optimizer"])
+    scaler.load_state_dict(state["scaler"])
+    if ema is not None and "ema" in state:
+        ema.model.load_state_dict(state["ema"]["model"])
+        ema.step = state["ema"]["step"]
+    if lr_scheduler is not None and "lr_scheduler" in state:
+        lr_scheduler.load_state_dict(state["lr_scheduler"])
+    torch.set_rng_state(state["torch_rng"])
+    if state.get("cuda_rng") is not None and torch.cuda.is_available():
+        torch.cuda.set_rng_state_all(state["cuda_rng"])
+    np.random.set_state(state["numpy_rng"])
+    random.setstate(state["python_rng"])
+    return int(state["step"])
+
+
 def make_delta_timestamps(delta_indices: list[int] | None, fps: int) -> list[float]:
     if delta_indices is None:
         return [0]
@@ -166,6 +286,145 @@ def select_cameras(input_features: dict, cameras: tuple[str, ...] | None) -> dic
         raise SystemExit(f"Cámaras {sorted(missing)} no están en el dataset (hay {available})")
     return {k: ft for k, ft in input_features.items()
             if not k.startswith(prefix) or k.removeprefix(prefix) in cameras}
+
+
+class Uint8Images(torch.utils.data.Dataset):
+    """Devuelve las imágenes en uint8 en vez de float32 (4 veces menos memoria compartida).
+
+    Los workers decodifican y aplican el aumento de datos en float, y cuantizan al final; el bucle de
+    entrenamiento las pasa a float en la GPU con images_to_float. Los valores que el aumento deja fuera
+    de [0, 1] (ruido, borrado aleatorio) quedan recortados. Las cámaras del dataset que el modelo no usa
+    se descartan aquí para que no pasen por la memoria compartida."""
+
+    def __init__(self, dataset, image_keys):
+        self.dataset = dataset
+        self.image_keys = list(image_keys)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        item = self.dataset[index]
+        for key in [k for k in item if k.startswith("observation.images.")
+                    and k.removesuffix("_is_pad") not in self.image_keys]:
+            del item[key]
+        for key in self.image_keys:
+            item[key] = item[key].clamp(0, 1).mul(255).round().to(torch.uint8)
+        return item
+
+
+def drop_cameras(batch: dict, image_keys, dropout: tuple[str, ...], p: float,
+                 generator: torch.Generator | None = None) -> dict:
+    """Pone en negro, por muestra, cada cámara de `dropout` con probabilidad p (imágenes ya en float,
+    antes de normalizar: igual que una cámara en negro en la evaluación). Si en una muestra caerían
+    todas las cámaras del modelo, se deja la primera que no está en `dropout` (o la primera)."""
+    keys = list(image_keys)
+    drop = [f"observation.images.{c}" for c in dropout]
+    if not drop or p <= 0:
+        return batch
+    n = batch[keys[0]].shape[0]
+    device = batch[keys[0]].device
+    mask = {k: torch.rand(n, generator=generator, device="cpu").lt(p).to(device) if k in drop
+            else torch.zeros(n, dtype=torch.bool, device=device) for k in keys}
+    everything = torch.stack([mask[k] for k in keys]).all(0)
+    keep = next((k for k in keys if k not in drop), keys[0])
+    mask[keep] = mask[keep] & ~everything
+    out = dict(batch)
+    for k in drop:
+        m = mask[k].view(-1, *[1] * (batch[k].dim() - 1))
+        out[k] = batch[k].masked_fill(m, 0.0)
+    return out
+
+
+def images_to_float(batch: dict, image_keys, device: torch.device) -> dict:
+    """Pasa las imágenes uint8 de Uint8Images a float en [0, 1], ya en `device`.
+
+    Devuelve un dict nuevo: el DataLoader conserva el que entregó, y si se modificara en el lugar esa
+    referencia mantendría viva en la GPU la copia sin normalizar (~0,7 GB con 3 cámaras y batch 32)."""
+    return batch | {key: batch[key].to(device, non_blocking=True).float().div_(255) for key in image_keys}
+
+
+def release_step_inputs(pipeline):
+    """Suelta la última transición que cada paso del preprocesador de LeRobot guarda en
+    _current_transition. Los primeros pasos (renombrar, agregar dimensión de batch) reciben las imágenes
+    de images_to_float ya en la GPU, y sin esto esa copia sin normalizar seguiría ocupando VRAM durante
+    el forward y el backward. Algunos pasos contienen sub-pasos (AddBatchDimensionProcessorStep)."""
+    for step in pipeline.steps:
+        for obj in (step, *vars(step).values()):
+            if getattr(obj, "_current_transition", None) is not None:
+                obj._current_transition = None
+
+
+def loader_memory_bytes(image_frames: dict[str, tuple[int, int]], batch_size: int,
+                        num_workers: int, prefetch_factor: int, bytes_per_value: int = 1) -> int:
+    """RAM de los batches de imágenes que tiene el DataLoader a la vez.
+
+    image_frames: {cámara: (frames por muestra, valores por frame)}. Hay num_workers × prefetch_factor
+    batches en memoria compartida, más la copia de pin_memory y el que se está usando."""
+    batch = batch_size * sum(frames * size for frames, size in image_frames.values()) * bytes_per_value
+    in_flight = num_workers * prefetch_factor + 2 if num_workers else 1
+    return batch * in_flight
+
+
+def micro_batch(cfg) -> int:
+    """Muestras por lote del DataLoader: batch_size / grad_accumulation."""
+    if cfg.grad_accumulation < 1 or cfg.batch_size % cfg.grad_accumulation:
+        raise SystemExit(f"batch_size {cfg.batch_size} no se divide en grad_accumulation {cfg.grad_accumulation}")
+    return cfg.batch_size // cfg.grad_accumulation
+
+
+def grouped(batches, n: int):
+    """Lotes de n en n (para la acumulación de gradientes); descarta el grupo incompleto del final."""
+    group = []
+    for b in batches:
+        group.append(b)
+        if len(group) == n:
+            yield group
+            group = []
+
+
+def total_ram_bytes() -> int:
+    """RAM de la máquina, o el límite del contenedor si es menor (cgroup v2, pods de la nube)."""
+    total = os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
+    try:
+        limit = Path("/sys/fs/cgroup/memory.max").read_text().strip()
+        if limit.isdigit():
+            total = min(total, int(limit))
+    except OSError:
+        pass
+    return total
+
+
+# Fracción de la RAM que pueden ocupar los batches en vuelo. Los workers y el proceso principal ocupan
+# varios GB más; con 56 GB en WSL, 3 cámaras 480x640 en float32 (~27 GB, 48%) terminó en OOM y
+# 2 cámaras (~18 GB, 32%) entrenaban bien
+MAX_LOADER_RAM_FRACTION = 0.4
+
+
+def check_loader_memory(cfg: TrainConfig, image_frames: dict[str, tuple[int, int]]):
+    """Imprime la RAM estimada del DataLoader y aborta antes de entrenar si no cabe."""
+    need = loader_memory_bytes(image_frames, micro_batch(cfg), cfg.num_workers, cfg.prefetch_factor)
+    total = total_ram_bytes()
+    print(f"DataLoader: {cfg.num_workers} workers × prefetch {cfg.prefetch_factor}, "
+          f"~{need / 1e9:.1f} GB de imágenes en RAM ({need / total:.0%} de {total / 1e9:.0f} GB)")
+    if need > MAX_LOADER_RAM_FRACTION * total:
+        raise SystemExit(f"El DataLoader ocuparía ~{need / 1e9:.1f} GB, más del "
+                         f"{MAX_LOADER_RAM_FRACTION:.0%} de la RAM: baja --prefetch-factor, "
+                         "--num-workers o --batch-size, o reescala el dataset (resize_dataset.py)")
+
+
+def warn_if_vram_overflows(device: torch.device):
+    """Avisa si PyTorch reservó más VRAM que la que tiene la GPU. En WSL/Windows el driver no falla:
+    usa RAM del sistema como memoria de GPU y cada paso se vuelve ~10 veces más lento (3 cámaras
+    480x640 con batch 32: 19,6 GB en una RTX 5080 de 16 GB, 4,5 s por paso; con batch 16, 0,3 s)."""
+    if device.type != "cuda":
+        return
+    reserved = torch.cuda.memory_reserved(device)
+    total = torch.cuda.get_device_properties(device).total_memory
+    if reserved > total:
+        print(f"AVISO: el entrenamiento ocupa {reserved / 1e9:.1f} GB de VRAM y la GPU tiene "
+              f"{total / 1e9:.1f} GB; el resto va a la RAM del sistema y es mucho más lento. "
+              "Baja --batch-size o usa --resize-shape (p. ej. 240 320)")
 
 
 def wandb_logged_in() -> bool:
@@ -192,10 +451,17 @@ def start_wandb(cfg: TrainConfig, model_name: str, output_directory: Path, extra
         mode = "offline"
         print("[W&B] Sin `wandb login` (ni WANDB_API_KEY): la corrida se guarda offline en "
               f"{output_directory / 'wandb'}; súbela después con `wandb sync`")
-    run = wandb.init(project=cfg.wandb_project, entity=cfg.wandb_entity, name=model_name,
-                     notes=cfg.description or None, tags=[cfg.name] if cfg.name else None,
-                     dir=str(output_directory), mode=mode,
-                     config={**asdict(cfg), "model_name": model_name, **extra})
+    kwargs = dict(project=cfg.wandb_project, entity=cfg.wandb_entity, name=model_name,
+                  notes=cfg.description or None, tags=[cfg.name] if cfg.name else None,
+                  dir=str(output_directory), config={**asdict(cfg), "model_name": model_name, **extra})
+    try:
+        run = wandb.init(mode=mode, **kwargs)
+    except Exception as e:  # noqa: BLE001  sin W&B se entrena igual
+        if mode == "offline":
+            raise
+        # p. ej. un 403 desde un pod en China (13-nov): la corrida queda offline y se sube con `wandb sync`
+        print(f"[W&B] No se pudo iniciar online ({type(e).__name__}: {str(e)[:200]}); sigue offline")
+        run = wandb.init(mode="offline", **kwargs)
     print(f"[W&B] {run.url or f'offline: {run.dir}'}")
     return run
 
@@ -210,6 +476,9 @@ def main(cfg: TrainConfig):
     print(f"Output: {output_directory}")
 
     device = torch.device(cfg.device)
+    if cfg.seed is not None:
+        seed_everything(cfg.seed)
+        print(f"Semilla: {cfg.seed}")
 
     print(f"Setting optimizations for device: {device}")
     # Optimizaciones RTX 5080
@@ -227,6 +496,9 @@ def main(cfg: TrainConfig):
         raise SystemExit("Usa cameras o arrangement, no ambos")
     cameras = tuple(arrangement_cameras(cfg.arrangement)) if cfg.arrangement else cfg.cameras
     input_features = select_cameras(input_features, cameras)
+    used = [k.removeprefix("observation.images.") for k in input_features if k.startswith("observation.images.")]
+    if set(cfg.camera_dropout) - set(used):
+        raise SystemExit(f"camera_dropout: el modelo no usa {sorted(set(cfg.camera_dropout) - set(used))} (usa {used})")
 
     policy_cfg = DiffusionConfig(
         input_features=input_features,
@@ -235,10 +507,23 @@ def main(cfg: TrainConfig):
         horizon=cfg.horizon,
         n_action_steps=cfg.n_action_steps,
         resize_shape=tuple(cfg.resize_shape) if cfg.resize_shape else None,
+        pretrained_backbone_weights=cfg.pretrained_backbone,
+        use_group_norm=cfg.group_norm,
+        scheduler_warmup_steps=cfg.lr_warmup_steps,
+        device=cfg.device,                      # también el del preprocesador
     )
+    print(f"Encoder: {cfg.pretrained_backbone or 'desde cero'}, "
+          f"{'GroupNorm' if cfg.group_norm else 'BatchNorm'}")
     print(f"Cameras: {list(policy_cfg.image_features)}")
     policy = DiffusionPolicy(policy_cfg)
+    if cfg.objective not in OBJECTIVES:
+        raise SystemExit(f"objective debe ser uno de {OBJECTIVES}")
+    if cfg.objective == "flow":
+        print(f"Política de flujo: {use_flow(policy, cfg.flow_steps)} pasos de Euler al muestrear")
     stats = dataset_metadata.stats
+    print(f"Estado y acción: {action_space_of(dataset_metadata.features)}")
+    if cfg.relative_actions and action_space_of(dataset_metadata.features) == "joints":
+        raise SystemExit("relative_actions es para la pose de link_eef (pos y Euler), no para articulaciones")
     if cfg.relative_actions:
         from splatsim.utils.data.relative_actions import relative_action_stats, save_stats
         ref = policy_cfg.n_obs_steps - 1     # índice del frame de referencia en observation.state
@@ -254,6 +539,7 @@ def main(cfg: TrainConfig):
     policy.to(device)
     print("Setting memory format to channels_last for CNN optimizations")
     policy.to(memory_format=torch.channels_last)  # Optimizado para CNNs con imágenes
+    ema = EMA(policy, cfg.ema_power, cfg.ema_max_decay) if cfg.ema else None   # antes de compilar
     if cfg.torch_compile:
         # module.compile() en vez de torch.compile(module) o compile_model de DiffusionConfig: esos
         # agregan _orig_mod. a las claves guardadas. Se compilan las submódulos porque aquí se
@@ -283,8 +569,12 @@ def main(cfg: TrainConfig):
         image_transforms=make_image_transforms() if cfg.image_augmentation else None,
     )
 
+    image_keys = list(policy_cfg.image_features)
+    check_loader_memory(cfg, {k: (len(delta_timestamps[k]), math.prod(policy_cfg.image_features[k].shape))
+                              for k in image_keys})
+
     run = start_wandb(cfg, model_name, output_directory, {
-        "cameras_used": list(policy_cfg.image_features), "dataset_episodes": dataset.num_episodes,
+        "cameras_used": image_keys, "dataset_episodes": dataset.num_episodes,
         "dataset_frames": dataset.num_frames, "fps": dataset_metadata.fps})
     if run is not None:
         with open(output_directory / "train_config.yaml", "a") as f:
@@ -293,16 +583,27 @@ def main(cfg: TrainConfig):
     # Create the optimizer and dataloader for offline training
     print("Creating optimizer and dataloader")
     optimizer = policy_cfg.get_optimizer_preset().build(policy.parameters())
+    lr_scheduler = (policy_cfg.get_scheduler_preset().build(optimizer, cfg.training_steps)
+                    if cfg.lr_scheduler else None)
+    print(f"Learning rate: {policy_cfg.optimizer_lr:g}, "
+          + (f"coseno con warmup {cfg.lr_warmup_steps}" if lr_scheduler else "constante")
+          + (", EMA" if ema else ""))
     scaler = GradScaler()
+    generator = None
+    if cfg.seed is not None:
+        generator = torch.Generator()
+        generator.manual_seed(cfg.seed)
     dataloader = torch.utils.data.DataLoader(
-        dataset,
-        batch_size=cfg.batch_size,
+        Uint8Images(dataset, image_keys),
+        batch_size=micro_batch(cfg),
         shuffle=True,
         num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=True,
         prefetch_factor=cfg.prefetch_factor,
         persistent_workers=True,
+        worker_init_fn=seed_worker,
+        generator=generator,
     )
 
     checkpoint_root = output_directory / "checkpoints"
@@ -311,24 +612,40 @@ def main(cfg: TrainConfig):
     # Run training loop
     start_time = datetime.now()
     print(f"[{start_time.strftime('%y%m%d %H:%M')}] Starting training loop")
-    step = 0
-    done = False
+    resume_path = output_directory / RESUME_FILE
+    step = load_resume(resume_path, policy, ema, optimizer, lr_scheduler, scaler) if cfg.resume_every else 0
+    if step:
+        print(f"[Resume] sigue desde el paso {step} ({resume_path})")
+    done = step >= cfg.training_steps
     last_log = (time.monotonic(), 0)    # para la velocidad entre registros de W&B
     while not done:
-        for batch in dataloader:
-            if cfg.relative_actions:
-                batch["action"] = to_relative(batch["action"], batch["observation.state"], policy_cfg.n_obs_steps - 1)
-            batch = preprocessor(batch)
+        for group in grouped(dataloader, cfg.grad_accumulation):
+            loss = 0.0
+            for batch in group:
+                batch = images_to_float(batch, image_keys, device)
+                batch = drop_cameras(batch, image_keys, cfg.camera_dropout, cfg.camera_dropout_p)
+                if cfg.relative_actions:
+                    batch["action"] = to_relative(batch["action"], batch["observation.state"], policy_cfg.n_obs_steps - 1)
+                batch = preprocessor(batch)
+                release_step_inputs(preprocessor)
 
-            # Mixed precision con bfloat16 (óptimo para RTX 50xx)
-            with autocast(device_type="cuda", dtype=torch.bfloat16):
-                loss, _ = policy.forward(batch)
+                # Mixed precision con bfloat16 (óptimo para RTX 50xx)
+                with autocast(device_type=device.type, dtype=torch.bfloat16, enabled=device.type == "cuda"):
+                    micro_loss, _ = policy.forward(batch)
+                scaler.scale(micro_loss / len(group)).backward()
+                loss = loss + micro_loss.detach() / len(group)
+                del batch, micro_loss
 
-            scaler.scale(loss).backward()
             scaler.step(optimizer)
             scaler.update()
             optimizer.zero_grad(set_to_none=True)  # Más eficiente en memoria
+            if lr_scheduler is not None:
+                lr_scheduler.step()
+            if ema is not None:
+                ema.update(policy)
 
+            if step == 2:                    # el primer paso todavía no reservó todo
+                warn_if_vram_overflows(device)
             if step % cfg.log_freq == 0:
                 print(f"step: {step} loss: {loss.item():.3f}")
             if run is not None and step % cfg.wandb_log_freq == 0:
@@ -344,13 +661,15 @@ def main(cfg: TrainConfig):
 
                 print(f"Saving checkpoint to {checkpoint_dir}")
 
-                policy.save_pretrained(checkpoint_dir / "policy")
+                (ema.model if ema else policy).save_pretrained(checkpoint_dir / "policy")
                 preprocessor.save_pretrained(checkpoint_dir / "preprocessor")
                 postprocessor.save_pretrained(checkpoint_dir / "postprocessor")
                 if run is not None:
                     run.log({"checkpoint/loss": loss.item()}, step=step)
 
             step += 1
+            if cfg.resume_every and step % cfg.resume_every == 0 and step < cfg.training_steps:
+                save_resume(resume_path, step, policy, ema, optimizer, lr_scheduler, scaler)
             if step >= cfg.training_steps:
                 done = True
                 break
@@ -361,13 +680,16 @@ def main(cfg: TrainConfig):
     print(f"\n Training time: {end_time - start_time}")
 
     # Save the policy checkpoint, alongside the pre/post processors
-    policy.save_pretrained(output_directory)
+    final = ema.model if ema else policy      # con EMA se guarda y se evalúa el modelo promediado
+    final.save_pretrained(output_directory)
     preprocessor.save_pretrained(output_directory)
     postprocessor.save_pretrained(output_directory)
+    if resume_path.exists():
+        resume_path.unlink()            # el modelo final ya está guardado
 
     if cfg.push_to_hub:
         repo_id = f"{cfg.hub_user}/robot_learning_tutorial_{model_name}"
-        policy.push_to_hub(repo_id)
+        final.push_to_hub(repo_id)
         preprocessor.push_to_hub(repo_id)
         postprocessor.push_to_hub(repo_id)
     if run is not None:

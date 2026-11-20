@@ -9,6 +9,7 @@ Lo que necesita del servidor (backend):
 import json
 import os
 import pickle
+import queue
 import shutil
 import sys
 import threading
@@ -57,6 +58,7 @@ class TrajectoryRecorder:
         self._count = 0              # índice de carpeta de la trayectoria
         self._root = None            # carpeta base de la grabación en curso
         self.default_root = None     # carpeta elegida en el panel (None -> server.path)
+        self._writer = None          # hilo que escribe los frames de los ensayos (_FrameWriter)
 
     # ── teclado ──────────────────────────────────────────────────────────────
     def start_keyboard_listener(self) -> None:
@@ -117,6 +119,8 @@ class TrajectoryRecorder:
             print("[Recording] No hay grabación activa.")
             return
         self.active = False
+        if self._writer is not None:
+            self._writer.flush()     # la carpeta queda completa antes de responder
         if self._length == 0:
             shutil.rmtree(self._folder, ignore_errors=True)
             print("[Recording] ■ Detenido — sin frames, carpeta eliminada.")
@@ -157,7 +161,17 @@ class TrajectoryRecorder:
     # ── guardado ─────────────────────────────────────────────────────────────
     def _save_frame(self, obs) -> None:
         self._length += 1
-        save_frame(self._folder, self._length, obs, images_in_pkl=self._images_in_pkl)
+        if self._images_in_pkl:
+            save_frame(self._folder, self._length, obs, images_in_pkl=True)
+            return
+        # ensayos (imágenes solo en los .png): aquí solo se copian las imágenes a la CPU; el PNG y el
+        # .pkl se escriben en otro hilo mientras el servidor atiende el siguiente comando
+        images = {name: to_uint8_image(img) for name, img in obs.items()
+                  if name.endswith("_rgb") and img is not None}
+        state = {k: v for k, v in obs.items() if k not in images}
+        if self._writer is None:
+            self._writer = _FrameWriter()
+        self._writer.submit(write_frame, self._folder, self._length, images, state)
 
 
 def to_uint8_image(img) -> np.ndarray:
@@ -175,16 +189,46 @@ def save_frame(folder: str, index: int, obs: dict, images_in_pkl: bool = True) -
     """Escribe <folder>/<index>.pkl y, si la observación trae cámaras, image_1/<cam>_<index>.png
     (images_in_pkl=False deja las imágenes solo en los .png)."""
     images = {name: img for name, img in obs.items() if name.endswith("_rgb") and img is not None}
+    write_frame(folder, index, {name: to_uint8_image(img) for name, img in images.items()},
+                obs if images_in_pkl else {k: v for k, v in obs.items() if k not in images})
+
+
+def write_frame(folder: str, index: int, images: dict[str, np.ndarray], pkl: dict) -> None:
+    """image_1/<cam>_<index>.png de cada imagen uint8 HxWx3 y <index>.pkl con `pkl`."""
     if images:
         image_dir = os.path.join(folder, "image_1")
         os.makedirs(image_dir, exist_ok=True)
-    for name, img in images.items():
-        frame = to_uint8_image(img)
+    for name, frame in images.items():
         # el índice coincide con el del .pkl
         path = os.path.join(image_dir, f"{name}_{index:05d}.png")
         cv2.imwrite(path, cv2.cvtColor(frame, cv2.COLOR_RGB2BGR))
-
-    if not images_in_pkl:
-        obs = {k: v for k, v in obs.items() if k not in images}
     with open(os.path.join(folder, f"{index:05d}.pkl"), "wb") as f:
-        pickle.dump(obs, f)
+        pickle.dump(pkl, f)
+
+
+class _FrameWriter:
+    """Un hilo que escribe frames en el orden en que llegan; flush() espera a que termine."""
+
+    def __init__(self):
+        self._queue = queue.Queue()
+        self._error = None
+        threading.Thread(target=self._run, daemon=True).start()
+
+    def _run(self) -> None:
+        while True:
+            fn, args = self._queue.get()
+            try:
+                fn(*args)
+            except Exception as e:          # se informa en flush(); el resto de frames sigue
+                self._error = self._error or e
+            finally:
+                self._queue.task_done()
+
+    def submit(self, fn, *args) -> None:
+        self._queue.put((fn, args))
+
+    def flush(self) -> None:
+        self._queue.join()
+        if self._error is not None:
+            error, self._error = self._error, None
+            print(f"[Recording] Error al escribir frames: {error!r}")

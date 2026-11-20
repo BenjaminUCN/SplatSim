@@ -13,7 +13,10 @@ from lerobot.policies.utils import build_inference_frame
 from torchvision import transforms
 
 from splatsim.image_classifier import SimpleCNN
+from splatsim.policies.flow_matching import checkpoint_objective, use_flow
+from splatsim.utils.data.action_space import action_space_of
 from splatsim.utils.data.registry import dataset_source_for_checkpoint, hub_repo_id
+from splatsim.utils.scene.peduncle import CLOSED_FRACTION
 
 _N_OBS_STEPS = 2   # temporal window size
 _N_ACT_STEPS = 32  # action chunk size
@@ -23,6 +26,7 @@ DEFAULT_CHECKPOINT = "~/lerobot/examples/tutorial/diffusion/outputs/robot_learni
 DEFAULT_DATASET_ROOT = "~/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261020_2010"
 IK_ORIENTATION_MODES = ("off", "hybrid")
 IK_HYBRID_MAX_POS_ERR = 0.01   # m
+CLOSE_COMMAND = 0.5   # orden de la pinza desde la que cuenta como "cerrar" (las demos dan 0/1)
 EE_LINK_INDEX = 6
 
 
@@ -42,6 +46,49 @@ def checkpoint_relative_actions(checkpoint: str) -> bool:
         return bool((yaml.safe_load(f) or {}).get("relative_actions", False))
 
 
+SAMPLERS = ("DDPM", "DDIM")   # de difusión; las políticas de flujo usan "flow" (Euler)
+
+
+def set_sampler(policy, name: str | None = None, steps: int | None = None) -> tuple[str, int]:
+    """Cambia el muestreador de difusión de un DiffusionPolicy ya cargado, sin reentrenar: DDIM usa el mismo
+    beta schedule, la misma predicción (epsilon) y los mismos pasos de entrenamiento que el modelo. steps None:
+    los del modelo (num_inference_steps, o num_train_timesteps si no lo fija). Devuelve (muestreador, pasos)."""
+    from lerobot.policies.diffusion.modeling_diffusion import _make_noise_scheduler
+    cfg, model = policy.config, policy.diffusion
+    if name is not None:
+        if name not in SAMPLERS:
+            raise ValueError(f"noise_scheduler debe ser uno de {SAMPLERS}")
+        cfg.noise_scheduler_type = name
+        model.noise_scheduler = _make_noise_scheduler(
+            name, num_train_timesteps=cfg.num_train_timesteps, beta_start=cfg.beta_start,
+            beta_end=cfg.beta_end, beta_schedule=cfg.beta_schedule, clip_sample=cfg.clip_sample,
+            clip_sample_range=cfg.clip_sample_range, prediction_type=cfg.prediction_type)
+    if steps is not None:
+        if not 1 <= steps <= cfg.num_train_timesteps:
+            raise ValueError(f"num_inference_steps debe estar entre 1 y {cfg.num_train_timesteps}")
+        cfg.num_inference_steps = steps
+        model.num_inference_steps = steps
+    return cfg.noise_scheduler_type, model.num_inference_steps
+
+
+def time_chunks(policy, out: list[float]) -> None:
+    """Anota en `out` los ms que tarda cada predicción de un bloque de acciones (generate_actions: codificar
+    las imágenes y muestrear la difusión), con la GPU sincronizada antes y después."""
+    import time
+    generate = policy.diffusion.generate_actions
+
+    def timed(*args, **kwargs):
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        t0 = time.perf_counter()
+        actions = generate(*args, **kwargs)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        out.append((time.perf_counter() - t0) * 1000)
+        return actions
+    policy.diffusion.generate_actions = timed
+
+
 class LeRobotDiffusionAgent:
     """
     SplatSim agent wrapping a LeRobot DiffusionPolicy checkpoint.
@@ -54,12 +101,29 @@ class LeRobotDiffusionAgent:
         dataset_root: LeRobot dataset the policy was trained on: local folder, or Hugging Face
             repo id / URL (only meta/ is downloaded).
         device: "cuda" or "cpu".
-        n_action_steps: overrides the default chunk size of 32.
+        n_action_steps: acciones que se ejecutan por predicción (None: las del modelo, normalmente 32).
         ik_orientation: "off" solves IK for the predicted position only (what every trial did
             before 2026-11-10: the Euler angles passed to PyBullet were silently ignored);
             "hybrid" also asks for the predicted orientation and falls back to position-only
             when that moves the end effector more than IK_HYBRID_MAX_POS_ERR from the target
             (the xArm5 has 5 DOF, so not every pose is reachable).
+        waypoint_tolerance: None ejecuta una acción por paso de control, llegue o no el brazo (lo de
+            siempre). Con un valor (rad, norma de las 5 articulaciones), repite cada acción hasta que
+            el brazo esté a menos de eso del comando, como el agente del SplatSim original (0.01), o
+            hasta waypoint_max_steps pasos. Mientras repite, la observación igual entra a la cola de
+            la política, así las n_obs_steps observaciones de la próxima predicción siguen siendo
+            pasos seguidos, como en el entrenamiento.
+        waypoint_max_steps: pasos de control como máximo por acción con waypoint_tolerance.
+        gripper_threshold: None manda a la pinza el valor que predice la política (lo de siempre).
+            Con un valor, manda 1 (cerrar) si la predicción es mayor o igual y 0 (abrir) si no, como en
+            las demos del planificador, donde la orden es 0 o 1.
+        hold_while_closing: cuando la orden de la pinza llega a CLOSE_COMMAND con la pinza todavía abierta,
+            deja el brazo quieto en el objetivo de esa acción y manda cerrar del todo hasta que la pinza
+            llega a CLOSED_FRACTION (0.8, cuando el simulador decide el corte); después sigue la política.
+            Así cierran las demos del planificador, con el brazo quieto. Mientras tanto la política
+            igual recibe las observaciones y saca acciones, que no se usan.
+        latch_closed: una vez que la pinza llega a CLOSED_FRACTION, la orden de la pinza queda en 1 (cerrar)
+            hasta el final del ensayo, como en las demos de cortar y sujetar; el brazo sigue a la política.
     """
 
     def __init__(
@@ -69,6 +133,13 @@ class LeRobotDiffusionAgent:
         device: str = "cuda",
         n_action_steps: int | None = None,
         ik_orientation: str = "off",
+        waypoint_tolerance: float | None = None,
+        waypoint_max_steps: int = 10,
+        noise_scheduler: str | None = None,
+        num_inference_steps: int | None = None,
+        gripper_threshold: float | None = None,
+        hold_while_closing: bool = False,
+        latch_closed: bool = False,
     ):
         """checkpoint: carpeta del modelo o repo del Hub (None -> DEFAULT_CHECKPOINT).
         dataset_root: dataset con que se entrenó, carpeta o repo del Hub; None -> se busca en
@@ -77,9 +148,25 @@ class LeRobotDiffusionAgent:
         if ik_orientation not in IK_ORIENTATION_MODES:
             raise ValueError(f"ik_orientation debe ser uno de {IK_ORIENTATION_MODES}")
         self.ik_orientation = ik_orientation
+        if waypoint_tolerance is not None and (waypoint_tolerance <= 0 or waypoint_max_steps < 1):
+            raise ValueError("waypoint_tolerance debe ser > 0 y waypoint_max_steps >= 1")
+        self.waypoint_tolerance = waypoint_tolerance
+        self.waypoint_max_steps = waypoint_max_steps
+        self.gripper_threshold = gripper_threshold
+        self.hold_while_closing = hold_while_closing
+        self._hold_joints: np.ndarray | None = None   # hold_while_closing: brazo quieto aquí mientras cierra
+        self.hold_count = 0                            # veces que se quedó quieto para cerrar
+        self.latch_closed = latch_closed
+        self._latched = False                          # latch_closed: ya cerró, la pinza queda cerrada
+        self.waypoint_counts = {"reached": 0, "timeout": 0}   # acciones que terminaron así
+        self._held = 0                                         # pasos que lleva la acción actual
+        self._last_joints: np.ndarray | None = None            # último comando articular (5)
         self.ik_counts = {"orientation": 0, "fallback": 0}   # hybrid: con orientación / sin ella
         self.device = device
-        self._n_act_steps = n_action_steps or _N_ACT_STEPS
+        self._requested_n_action_steps = n_action_steps   # lo aplica _load_diffusion_policy_model
+        # muestreador de la difusión al evaluar (None: el del modelo, DDPM de 100 pasos en todos hasta ahora)
+        self._requested_sampler = (noise_scheduler, num_inference_steps)
+        self.chunk_latencies_ms: list[float] = []         # una por bloque de acciones predicho
         self._obs_buffer: deque[dict[str, torch.Tensor]] = deque(maxlen=_N_OBS_STEPS)
         self._action_queue: list[np.ndarray] = []
 
@@ -102,8 +189,13 @@ class LeRobotDiffusionAgent:
         # acciones = pose del efector - pose del estado con que se predijo el chunk (pos y euler)
         self.relative_actions = checkpoint_relative_actions(checkpoint)
         self._chunk_reference: np.ndarray | None = None
-        print(f"[LeRobotDiffusionAgent] Acciones {'relativas' if self.relative_actions else 'absolutas'}, "
-              f"IK {self.ik_orientation}")
+        # pose: estado y acción = pose de link_eef, la acción pasa por la IK; joints: 5 articulaciones +
+        # pinza, la acción va directo al robot (splatsim/utils/data/action_space.py)
+        self.action_space = action_space_of(self.dataset_metadata.features)
+        if self.action_space == "joints" and (self.relative_actions or self.ik_orientation != "off"):
+            raise ValueError("un modelo en articulaciones no usa IK ni acciones relativas")
+        print(f"[LeRobotDiffusionAgent] Espacio {self.action_space}, acciones "
+              f"{'relativas' if self.relative_actions else 'absolutas'}, IK {self.ik_orientation}")
 
         self.make_new_prediction = True
     
@@ -122,6 +214,31 @@ class LeRobotDiffusionAgent:
         self.policy = DiffusionPolicy.from_pretrained(checkpoint)
         self.policy.to(self.device)
         self.policy.eval()
+        n_action_steps = self._requested_n_action_steps
+        if n_action_steps is not None:
+            # acciones ejecutadas por predicción: el chunk entrenado es de horizon pasos desde el primer
+            # paso observado, así que caben hasta horizon - n_obs_steps + 1 (modeling_diffusion.py)
+            cfg = self.policy.config
+            limit = cfg.horizon - cfg.n_obs_steps + 1
+            if not 1 <= n_action_steps <= limit:
+                raise ValueError(f"n_action_steps debe estar entre 1 y {limit} (horizon {cfg.horizon}, "
+                                 f"n_obs_steps {cfg.n_obs_steps})")
+            print(f"[LeRobotDiffusionAgent] n_action_steps {cfg.n_action_steps} -> {n_action_steps}")
+            cfg.n_action_steps = n_action_steps
+            self.policy.reset()                  # la cola de acciones se crea con maxlen n_action_steps
+        self._n_act_steps = self.policy.config.n_action_steps
+        if checkpoint_objective(checkpoint) == "flow":
+            # política de flujo (train_diffusion.py --objective flow): Euler con num_inference_steps pasos
+            name, steps = self._requested_sampler
+            if name not in (None, "flow"):
+                raise ValueError(f"{checkpoint} es una política de flujo: noise_scheduler debe ser flow o nada")
+            self.sampler = ("flow", use_flow(self.policy, steps))
+        else:
+            if self._requested_sampler[0] == "flow":
+                raise ValueError(f"{checkpoint} es de difusión: noise_scheduler flow es solo para políticas de flujo")
+            self.sampler = set_sampler(self.policy, *self._requested_sampler)
+        print(f"[LeRobotDiffusionAgent] Muestreador {self.sampler[0]}, {self.sampler[1]} pasos")
+        time_chunks(self.policy, self.chunk_latencies_ms)
         
         print("[LeRobotDiffusionAgent] Policy Config:.")
         print(self.policy.config)
@@ -208,7 +325,7 @@ class LeRobotDiffusionAgent:
     def _build_obs(self, obs):
         # joint_positions = obs["joint_positions"]
         # state = self.safe_to_numpy(joint_positions).astype(np.float32).flatten()
-        state = obs["state"]
+        state = obs["joint_positions" if self.action_space == "joints" else "state"]
         state = self.safe_to_numpy(state).astype(np.float32).flatten()
         
         # una imagen por cada cámara que usa la política (puede ser un subconjunto de las
@@ -310,6 +427,34 @@ class LeRobotDiffusionAgent:
         self.policy.reset()
         self._chunk_reference = None
         self.make_new_prediction = True
+        self._held = 0
+        self._last_joints = None
+        self._hold_joints = None
+        self._latched = False
+
+    def _observe_only(self, obs_frame: dict) -> None:
+        """Mete la observación en la cola de la política sin sacar una acción (lo que hace
+        select_action antes de predecir o sacar)."""
+        from lerobot.policies.utils import populate_queues
+        from lerobot.utils.constants import ACTION, OBS_IMAGES
+        # el frame del preprocesador trae "action" vacía; select_action la saca antes de llenar las
+        # colas, y si no se saca, ese None quedaría en la cola de acciones
+        batch = {k: v for k, v in obs_frame.items() if k != ACTION}
+        if self.policy.config.image_features:
+            batch[OBS_IMAGES] = torch.stack([batch[k] for k in self.policy.config.image_features], dim=-4)
+        self.policy._queues = populate_queues(self.policy._queues, batch, exclude_keys=[ACTION])
+
+    def _waypoint_done(self, joints: np.ndarray) -> bool:
+        """Modo waypoint: la acción actual ya terminó (llegó o se le acabaron los pasos)."""
+        if self._last_joints is None:
+            return True
+        if np.linalg.norm(self._last_joints - joints) < self.waypoint_tolerance:
+            self.waypoint_counts["reached"] += 1
+            return True
+        if self._held >= self.waypoint_max_steps:
+            self.waypoint_counts["timeout"] += 1
+            return True
+        return False
 
     def _new_chunk_next(self) -> bool:
         """select_action va a predecir un chunk nuevo (su cola de acciones está vacía)."""
@@ -321,6 +466,38 @@ class LeRobotDiffusionAgent:
         return p.calculateInverseKinematics(
             self.dummy_robot, endEffectorLinkIndex=EE_LINK_INDEX, targetPosition=position,
             residualThreshold=0.00001, maxNumIterations=10000, restPoses=rest, **kwargs)
+
+    @staticmethod
+    def _gripper_closed(obs: dict, n_joints: int) -> float:
+        """Cuánto está cerrada la pinza en la observación (0 abierta, 1 cerrada)."""
+        if "gripper_position" in obs:
+            return float(np.ravel(obs["gripper_position"])[0])
+        return float(np.ravel(obs["joint_positions"])[n_joints])
+
+    def _latch(self, obs: dict, n_joints: int, gripper: float) -> float:
+        """latch_closed: la orden de la pinza en este paso."""
+        if not self._latched and self._gripper_closed(obs, n_joints) >= CLOSED_FRACTION:
+            self._latched = True
+        return 1.0 if self._latched else gripper
+
+    def _hold_for_closing(self, obs: dict, joints: np.ndarray, gripper: float) -> tuple[np.ndarray, float]:
+        """hold_while_closing: el comando del brazo y de la pinza en este paso."""
+        closed = self._gripper_closed(obs, joints.size)
+        if self._hold_joints is None and gripper >= CLOSE_COMMAND and closed < CLOSED_FRACTION:
+            self._hold_joints = np.array(joints, dtype=float)
+            self.hold_count += 1
+        if self._hold_joints is not None:
+            if closed < CLOSED_FRACTION:
+                return self._hold_joints.copy(), 1.0
+            self._hold_joints = None   # ya cerró: la política sigue
+        return joints, gripper
+
+    def gripper_command(self) -> float:
+        """Orden de la pinza: la predicha o, con gripper_threshold, 0/1."""
+        g = float(self.ee_gripper)
+        if self.gripper_threshold is None:
+            return g
+        return 1.0 if g >= self.gripper_threshold else 0.0
 
     def _solve_ik(self, position, quaternion, rest):
         """off: solo posición. hybrid: con orientación si el efector queda a menos de
@@ -353,6 +530,12 @@ class LeRobotDiffusionAgent:
             p.resetJointState(self.dummy_robot, i, obs_dict['joint_positions'][i-1])
         
         
+        if self.waypoint_tolerance is not None and not self.make_new_prediction:
+            if self._waypoint_done(np.asarray(obs_dict["joint_positions"][:5], dtype=float)):
+                self.make_new_prediction = True
+            else:
+                self._observe_only(self._build_obs(obs))
+
         if self.make_new_prediction:
             obs_frame = self._build_obs(obs)  # ya normalizado por self.preprocess
 
@@ -369,37 +552,53 @@ class LeRobotDiffusionAgent:
                 action_np[3:6] = wrap_angles(action_np[3:6] + self._chunk_reference[3:6])
             self.action_prediction = action_np
             print(f"New action prediction: {self.action_prediction}")
-            
-            self.ee_pose = self.action_prediction[:3]
-            self.ee_rot = self.action_prediction[3:6]
-            self.ee_gripper = self.action_prediction[6]
-                
+
+            if self.action_space == "joints":
+                self.target_joints = np.asarray(self.action_prediction[:5], dtype=float)
+                self.ee_gripper = self.action_prediction[5]
+            else:
+                self.ee_pose = self.action_prediction[:3]
+                self.ee_rot = self.action_prediction[3:6]
+                self.ee_gripper = self.action_prediction[6]
+
             self.make_new_prediction = False
-        
-        ee_pose = self.ee_pose
-        ee_rot = self.ee_rot
-        
-        ee_quat = p.getQuaternionFromEuler(ee_rot)
-        print(f"ee_pose: ({ee_pose[0]:.3f}, {ee_pose[1]:.3f}, {ee_pose[2]:.3f})")
-        print(f"ee_rot: ({ee_rot[0]:.3f}, {ee_rot[1]:.3f}, {ee_rot[2]:.3f})")
-        
+            self._held = 0
+
         joints_n = 5
+        if self.action_space == "joints":
+            dummy_joint_pos = self.target_joints        # sin IK
+        else:
+            ee_pose = self.ee_pose
+            ee_rot = self.ee_rot
 
-        self.draw_pose(ee_pose, ee_quat, life_time=1)
+            ee_quat = p.getQuaternionFromEuler(ee_rot)
+            print(f"ee_pose: ({ee_pose[0]:.3f}, {ee_pose[1]:.3f}, {ee_pose[2]:.3f})")
+            print(f"ee_rot: ({ee_rot[0]:.3f}, {ee_rot[1]:.3f}, {ee_rot[2]:.3f})")
 
-        rest = obs_dict["joint_positions"][:len(self.joint_indices)]
-        dummy_joint_pos = self._solve_ik(ee_pose, ee_quat, rest)
+            self.draw_pose(ee_pose, ee_quat, life_time=1)
+
+            rest = obs_dict["joint_positions"][:len(self.joint_indices)]
+            dummy_joint_pos = self._solve_ik(ee_pose, ee_quat, rest)
 
         # calculate difference between current and target joint angles
         joint_diff = np.array(dummy_joint_pos)[:joints_n] - np.array(obs_dict['joint_positions'])[:joints_n]
-        if np.linalg.norm(joint_diff) < 2.0:
+        if self.waypoint_tolerance is not None:
+            # la próxima llamada decide, con la posición a la que llegó, si sigue con esta acción
+            self._held += 1
+            self._last_joints = np.array(dummy_joint_pos, dtype=float)[:joints_n]
+        elif np.linalg.norm(joint_diff) < 2.0:
             self.make_new_prediction = True
         else:
             print(f"Joint difference norm: {np.linalg.norm(joint_diff):.3f}")
             print(f"Joint difference: {joint_diff}")
 
         joints = np.array(dummy_joint_pos)[:joints_n]
-        joints = np.append(joints, self.ee_gripper)
+        gripper = self.gripper_command()
+        if self.hold_while_closing:
+            joints, gripper = self._hold_for_closing(obs_dict, joints, gripper)
+        if self.latch_closed:
+            gripper = self._latch(obs_dict, joints.size, gripper)
+        joints = np.append(joints, gripper)
         
         return joints
     

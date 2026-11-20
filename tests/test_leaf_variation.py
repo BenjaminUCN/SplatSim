@@ -14,6 +14,7 @@ from splatsim.utils.scene.leaf_variation import (
     draw_episode,
     fit_with_fractions,
     lateral_direction,
+    camera_origin,
     place_episode_leaf,
     roll_quaternion,
 )
@@ -185,6 +186,30 @@ class PlaceTest(unittest.TestCase):
         entries, info = place_episode_leaf(s, draw(60.0), ["cam"])
         self.assertEqual((info["status"], info["fraction"]), ("too_small", FRACTIONS[0]))
         self.assertEqual(len(entries), 1)
+
+
+
+class WristCameraTest(unittest.TestCase):
+    """Una cámara que sigue a un link (como WristCamera): sin xyz/rpy, su pose sale de getLinkState."""
+
+    def server(self, link_pos):
+        s = FakeServer({"wrist_rgb": result(0.0)})
+        s.cameras["wrist_rgb"] = types.SimpleNamespace(link_index=7)
+        s.dummy_robot = 1
+        s.pybullet_client.getLinkState = lambda robot, i, computeForwardKinematics=False: (
+            None, None, None, None, link_pos, (0, 0, 0, 1))
+        return s
+
+    def test_origin_follows_the_link(self):
+        origin, right = camera_origin(self.server((0.3, 0.2, 0.5)), "wrist_rgb")
+        np.testing.assert_allclose(origin, [0.3, 0.2, 0.5])
+        np.testing.assert_allclose(right, [0, 1, 0])
+
+    def test_leaf_between_link_and_tomato(self):
+        s = self.server((1.0, 0.0, 1.0))         # sobre la línea que FakeServer.measure_occlusion mide
+        entries, info = place_episode_leaf(s, draw(30.0), ["wrist_rgb"])
+        self.assertEqual((info["status"], info["camera"]), ("ok", "wrist_rgb"))
+        self.assertAlmostEqual(info["occlusion"], 30.0, delta=1.0)
 
 
 if __name__ == "__main__":
