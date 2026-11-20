@@ -147,7 +147,7 @@ class Args:
     """peduncle: corta el pedúnculo en vez de agarrar el tomate (ver arriba y plan_trajectories.py)"""
     peduncle_pitch_deg: tuple[float, float] = (-25.0, 0.0)
     """inclinación con --target peduncle (reemplaza --pitch-deg)"""
-    cut_radius_mm: tuple[float, float] = (26.0, 34.0)
+    cut_radius_mm: tuple[float, float] = (38.0, 46.0)
     """--target peduncle en una escena con cut_range_mm: el punto del filo real al que apunta cada episodio, a
     esta distancia del pivote real (mm, uniforme)"""
 
