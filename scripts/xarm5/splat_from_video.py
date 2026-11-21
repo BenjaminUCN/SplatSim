@@ -4,10 +4,16 @@
 
 Deja lo mismo que el flujo del README (ffmpeg, convert.py y train.py del submódulo):
     <out>/input/           fotos del video
+    <out>/sharpness.csv    con --sharp-window: la nitidez de cada foto extraída y cuáles quedaron
     <out>/distorted/       base de datos y modelo de COLMAP antes de corregir la distorsión
     <out>/images/          fotos sin distorsión          ← source_path en objects.yaml
     <out>/sparse/0/        cámaras de COLMAP
     <out>/output/          el splat (point_cloud/iteration_<n>/point_cloud.ply) ← model_path
+
+Con --sharp-window N, el paso frames extrae N veces más fotos y deja la más nítida de cada N
+consecutivas (splatsim/utils/scene/sharpness.py): las fotos movidas o desenfocadas son las que COLMAP
+no logra ubicar y las que emborronan el splat.
+    python scripts/xarm5/splat_from_video.py ~/Videos/tomate.mp4 --out ~/data/Colmaps/tomate --fps 2 --sharp-window 5
 
 Para un objeto suelto (un tomate), --white-background agrega el paso mask: COLMAP corre con el fondo,
 pero se entrena con las fotos sin fondo, sobre blanco (<out>/images_white/, máscaras en <out>/masks/)
@@ -31,6 +37,7 @@ from pathlib import Path
 import tyro
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
+from splatsim.utils.scene.sharpness import pick_sharpest, weak_windows, write_report  # noqa: E402
 from splatsim.utils.scene.white_background import (  # noqa: E402
     DEFAULT_MODEL,
     WHITE_FOLDER,
@@ -55,6 +62,9 @@ class Args:
     """Carpeta de la escena (p.ej. ~/data/Colmaps/<fecha>)."""
     fps: float = 0.0
     """Fotos por segundo de video; 0 = todas (el lab usó todas: 1290 fotos de 43 s)."""
+    sharp_window: int = 1
+    """>1: extraer a fps × N y dejar la más nítida de cada N consecutivas (con una carpeta, de sus fotos
+    en orden de nombre). Con --fps 0 se eligen entre todos los cuadros del video. 1 = todas."""
     matcher: str = "exhaustive"
     """exhaustive (como convert.py) o sequential (más rápido; solo sirve para fotos de un video)."""
     iterations: int = 30_000
@@ -87,7 +97,7 @@ def log(text: str) -> None:
     _last_log = now
 
 
-def extract_frames(source: Path, folder: Path, fps: float) -> int:
+def dump_photos(source: Path, folder: Path, fps: float) -> None:
     shutil.rmtree(folder, ignore_errors=True)
     folder.mkdir(parents=True)
     if source.is_dir():
@@ -98,6 +108,37 @@ def extract_frames(source: Path, folder: Path, fps: float) -> int:
         rate = ["-vf", f"fps={fps}"] if fps > 0 else []
         subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-i", str(source), *rate, "-qscale:v", "1",
                         "-qmin", "1", "-start_number", "1", str(folder / "%05d.jpg")], check=True)
+
+
+def keep_sharpest(candidates: Path, folder: Path, window: int, report: Path) -> None:
+    """De candidates/ a folder/ la más nítida de cada `window` consecutivas; la nitidez de todas, en report."""
+    photos = sorted(p for p in candidates.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
+    frames = pick_sharpest(photos, window)
+    write_report(frames, report)
+    shutil.rmtree(folder, ignore_errors=True)
+    folder.mkdir(parents=True)
+    for frame in frames:
+        if frame.kept:
+            shutil.move(frame.path, folder / frame.path.name)
+    kept = [f.sharpness for f in frames if f.kept]
+    dropped = [f.sharpness for f in frames if not f.kept]
+    log(f"nitidez: quedan {len(kept)} de {len(frames)} fotos, la más nítida de cada {window}; nitidez mediana "
+        f"{sorted(kept)[len(kept) // 2]:.0f} las elegidas" + (f", {sorted(dropped)[len(dropped) // 2]:.0f} las descartadas"
+                                                                if dropped else "") + f" ({report.name})")
+    weak = weak_windows(frames)
+    if weak:
+        log(f"⚠️ {len(weak)} de {len(kept)} grupos sin ninguna foto nítida (p.ej. {weak[0].path.name}): tramos "
+            f"movidos, desenfocados o primeros planos sin textura; si son muchos, grabar más lento y más lejos")
+
+
+def extract_frames(source: Path, folder: Path, fps: float, sharp_window: int = 1) -> int:
+    if sharp_window <= 1:
+        dump_photos(source, folder, fps)
+    else:
+        candidates = folder.parent / "candidates"
+        dump_photos(source, candidates, fps * sharp_window)
+        keep_sharpest(candidates, folder, sharp_window, folder.parent / "sharpness.csv")
+        shutil.rmtree(candidates)
     count = sum(1 for _ in folder.iterdir())
     if count < 3:
         raise SystemExit(f"Solo {count} fotos en {folder}: COLMAP necesita muchas más")
@@ -191,12 +232,14 @@ def train_splat(scene: Path, iterations: int, data_device: str, python: str, whi
 
 def main(args: Args) -> None:
     unknown = set(args.steps) - set(STEPS)
+    if args.sharp_window < 1:
+        raise SystemExit("--sharp-window va de 1 (todas las fotos) hacia arriba")
     if unknown or args.matcher not in ("exhaustive", "sequential"):
         raise SystemExit(f"Pasos desconocidos {sorted(unknown)} o matcher {args.matcher!r}")
     scene, source = Path(args.out).expanduser(), Path(args.source).expanduser()
     scene.mkdir(parents=True, exist_ok=True)
     if "frames" in args.steps:
-        log(f"{extract_frames(source, scene / 'input', args.fps)} fotos de {source.name}")
+        log(f"{extract_frames(source, scene / 'input', args.fps, args.sharp_window)} fotos de {source.name}")
     if "colmap" in args.steps:
         run_colmap(scene, args.matcher)
     if "mask" in args.steps and args.white_background:
