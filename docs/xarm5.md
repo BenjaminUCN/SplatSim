@@ -213,24 +213,28 @@ The tomato then moves rigidly with the pruner until the gripper opens below 0.6,
 - The stem is straight and vertical, and the tomato doesn't turn. With `joint5` at 0, the tool's pitch is the angle between the stem and the pivot axis, which is why the planner keeps it between -25° and 0°.
 - `run_policy_trials.py` still measures against the grasp point, not the cut point.
 
-### Splat of a real tomato on a white background
+### Splat of a single real object
 
-For a single object, train the splat on photos without background. COLMAP still runs on the original photos: a smooth, shiny tomato has very few features to match, and without the background COLMAP can't place the cameras. Only the photos used for training lose the background:
+As in the original SplatSim, the splat is trained with the background and the object is cropped afterwards. With the background in the photos, the background's gaussians form where the background really is (boxes, table), not next to the object. With `--carve`, the crop uses one mask of the object per photo instead of a box:
 
 ```bash
-# all steps: photos or video → COLMAP → masks → train
-python scripts/xarm5/splat_from_video.py ~/Videos/tomate.mp4 --out ~/data/tomate --white-background
-# or after convert.py, which leaves images/ and sparse/0 in ~/data/tomate
-python scripts/xarm5/splat_from_video.py ~/data/tomate --out ~/data/tomate --white-background --steps mask train
+# all steps: photos or video → COLMAP → masks → train → carve
+python scripts/xarm5/splat_from_video.py ~/Videos/tomate.mp4 --out ~/data/Colmaps/tomate --fps 2 --sharp-window 5 --carve
+# or after convert.py, which leaves images/ and sparse/0
+python scripts/xarm5/splat_from_video.py ~/data/Colmaps/tomate --out ~/data/Colmaps/tomate --carve --steps mask train carve
 ```
 
 With `--sharp-window N`, the `frames` step extracts N times more photos (`--fps` × N) and keeps the sharpest of each N consecutive ones (`splatsim/utils/scene/sharpness.py`). Sharpness is the variance of the Laplacian of the grayscale photo, measured at 1280 px wide. It also depends on content, since a close-up of a smooth tomato scores low even in focus, so photos are compared only with their neighbors, which show almost the same thing. `<out>/sharpness.csv` lists every extracted photo, its sharpness and whether it was kept. The log warns about groups whose sharpest photo is still under 0.3 × the median of the kept ones. In the tomato video (66 s, `--fps 2 --sharp-window 5`), the median sharpness of the kept photos is 284, against 121 for one fixed photo out of every 5, and photos under that threshold drop from 54 to 28 of ~132. Without it, 13 of the 16 photos COLMAP couldn't place were blurred.
 
-The `mask` step (`splatsim/utils/scene/white_background.py`) makes one mask per photo of `images/` with rembg (`--mask-model`, `isnet-general-use` by default) in `masks/<photo>.png` (255 = object). It composites each photo on white in `images_white/`, with the same name, extension and size, because `train.py` looks photos up by the name COLMAP saved and the cameras in `sparse/0` belong to `images/`. Then `train.py` runs with `--images images_white --white_background`. With a white background in the photos and in the render, the background counts in the loss and training leaves empty space empty. An RGBA photo would do the opposite: `train.py` multiplies the render by the alpha, so the background would be left out of the loss and floaters wouldn't be penalized. The log gives the median fraction of each photo covered by the object and warns about photos with an empty mask.
+The `mask` step (`splatsim/utils/scene/object_masks.py`) makes one mask per photo of `images/` with rembg in `masks/<photo>.png` (255 = object). `--mask-model` is `birefnet-general` by default. It keeps the peduncle and the branch, and takes about 3.4 s per photo on the RTX 5080. `isnet-general-use` takes about 0.1 s, but it cut off the peduncle, sometimes lost the tomato and let a box through. The log gives the median fraction of each photo covered by the object and warns about photos with an empty mask. Check `masks/`, fix the masks you need by hand, and rerun with `--reuse-masks`: masks already in `masks/` are kept and only missing ones are computed.
 
-Check `masks/` before training. rembg tends to cut off the thin peduncle and to keep the stand or the table under the tomato. Fix the masks you need, by hand or with another tool, and rerun with `--reuse-masks --steps mask train`: masks already in `masks/` are kept and only missing ones are computed. Even so, crop the splat with an `aabb` in `objects.yaml`, as for `plastic_apple`, to remove what is left of the background points COLMAP started from.
+The `carve` step (`splatsim/utils/scene/carve.py`) projects each gaussian into every COLMAP camera (`sparse/0`, undistorted PINHOLE, the same frame as the splat). It deletes the gaussians that fall outside the mask, grown by `--carve-dilate-px` (10), in more than `--carve-max-outside` (20 %) of the photos where they are in frame, and those in frame in fewer than `--carve-min-views` (3) photos. A point of the object falls inside its silhouette in every photo, and a background point falls outside in almost all of them. The vote tolerates masks that cut the peduncle in a few photos. It writes `point_cloud_carved.ply` next to the splat in a few seconds.
 
-rembg is installed in the `fork-splatsim` env without its `opencv-python-headless` dependency, because it would overwrite `opencv-python`'s `cv2`. It uses `onnxruntime-gpu==1.23.2`, the CUDA 12 build that matches torch's libraries: 1.32 asks for CUDA 13 and falls back to the CPU. On the RTX 5080 the first mask takes about a minute while CUDA compiles, then about 0.1 s per photo; on the CPU, about 0.7 s. The render image for pods doesn't have rembg, so the cloud *Scene* job doesn't have this option.
+**The object must not move.** Carving, and the splat itself, assume the object stays still while the camera moves. In the first tomato video the tomato hung from a string and swung. COLMAP places the cameras with the static background, so the tomato's center, triangulated from the masks, reprojects a median of 1.25 tomato radii from where it is seen, 0.5–2.1 depending on the part of the video. The tomato came out smeared and the carve deleted everything. Fix the object rigidly (e.g. the stem in a clamp) before recording.
+
+Training on photos composited on white (`train.py -w`) doesn't work. A white opaque gaussian and empty space give the same pixel, so nothing removes them. COLMAP's initial points, mostly on the background, turned into a white shell around the tomato: 51 % of the gaussians. With RGBA photos, `train.py` multiplies the render by the alpha, so the background isn't even in the loss.
+
+rembg is installed in the `fork-splatsim` env without its `opencv-python-headless` dependency, because it would overwrite `opencv-python`'s `cv2`. It uses `onnxruntime-gpu==1.23.2`, the CUDA 12 build that matches torch's libraries: 1.32 asks for CUDA 13 and falls back to the CPU. The first mask takes about a minute while CUDA compiles. The render image for pods doesn't have rembg, so the cloud *Scene* job doesn't have `--carve`.
 
 ## Replay recordings in each control mode
 

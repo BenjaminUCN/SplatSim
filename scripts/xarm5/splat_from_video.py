@@ -15,11 +15,11 @@ consecutivas (splatsim/utils/scene/sharpness.py): las fotos movidas o desenfocad
 no logra ubicar y las que emborronan el splat.
     python scripts/xarm5/splat_from_video.py ~/Videos/tomate.mp4 --out ~/data/Colmaps/tomate --fps 2 --sharp-window 5
 
-Para un objeto suelto (un tomate), --white-background agrega el paso mask: COLMAP corre con el fondo,
-pero se entrena con las fotos sin fondo, sobre blanco (<out>/images_white/, máscaras en <out>/masks/)
-y con train.py -w, así que el espacio vacío queda vacío (splatsim/utils/scene/white_background.py).
-Con el COLMAP de convert.py, solo los pasos que siguen:
-    python scripts/xarm5/splat_from_video.py ~/data/tomate --out ~/data/tomate --white-background --steps mask train
+Para un objeto suelto (un tomate), --carve agrega dos pasos. mask: una máscara del objeto por foto de
+images/ (<out>/masks/, object_masks.py). carve, después de train: borra del splat las gaussianas que caen
+fuera de la máscara en demasiadas fotos y escribe point_cloud_carved.ply junto al splat (carve.py). Se
+entrena con el fondo, como en SplatSim original. Con el COLMAP de convert.py, solo los pasos que siguen:
+    python scripts/xarm5/splat_from_video.py ~/data/tomate --out ~/data/tomate --carve --steps mask train carve
 
 COLMAP corre con pycolmap-cuda12, que trae su propio CUDA: la de apt (la del lab) no lo usa, y emparejar
 1300 fotos en la CPU tarda horas. Los pasos de convert.py son los mismos, con sus mismas opciones.
@@ -38,17 +38,13 @@ import tyro
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # raíz del repo
 from splatsim.utils.scene.sharpness import pick_sharpest, weak_windows, write_report  # noqa: E402
-from splatsim.utils.scene.white_background import (  # noqa: E402
-    DEFAULT_MODEL,
-    WHITE_FOLDER,
-    rembg_masker,
-    whiten_folder,
-)
+from splatsim.utils.scene.carve import carve_scene  # noqa: E402
+from splatsim.utils.scene.object_masks import DEFAULT_MODEL, compute_masks, rembg_masker  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 TRAIN_SCRIPT = ROOT / "submodules/gaussian-splatting-wrapper/gaussian_splatting/train.py"
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
-STEPS = ("frames", "colmap", "mask", "train")
+STEPS = ("frames", "colmap", "mask", "train", "carve")
 TQDM = re.compile(r"Training progress:.*?(\d+)/(\d+) \[")
 WARN_REGISTERED = 0.8         # menos fotos con pose que esto suele ser un modelo partido en dos
 MIN_REGISTERED = 0.5          # menos, y entrenar el splat es pagar por una escena que no sirve
@@ -70,17 +66,22 @@ class Args:
     iterations: int = 30_000
     data_device: str = "cpu"
     """Dónde guarda train.py las fotos: 1300 fotos de 1600 px son ~20 GB, más que la GPU de muchos pods."""
-    white_background: bool = False
-    """Objeto suelto: entrenar con las fotos sin fondo, sobre blanco, y train.py -w (paso mask)."""
+    carve: bool = False
+    """Objeto suelto: máscaras del objeto (paso mask) y recortar el splat con ellas (paso carve)."""
     mask_model: str = DEFAULT_MODEL
-    """Modelo de rembg para las máscaras (isnet-general-use, u2net, birefnet-general, ...)."""
+    """Modelo de rembg para las máscaras (birefnet-general, isnet-general-use, u2net, ...)."""
     reuse_masks: bool = False
     """Usar las máscaras que ya estén en <out>/masks/ (p.ej. corregidas a mano) y calcular solo las que falten."""
+    carve_max_outside: float = 0.2
+    """Se borra la gaussiana que cae fuera de la máscara en más de esta fracción de las fotos donde se ve."""
+    carve_min_views: int = 3
+    """Y la que se ve en menos fotos que esto: no hay cómo saber si es del objeto."""
+    carve_dilate_px: int = 10
+    """Píxeles que se agranda la máscara, para no comerse el borde del objeto."""
     steps: list[str] = field(default_factory=lambda: list(STEPS))
-    """Pasos a correr, para repetir uno: frames, colmap, mask (solo con --white-background), train."""
+    """Pasos a correr, para repetir uno: frames, colmap, mask y carve (solo con --carve), train."""
     clean: bool = False
-    """Al terminar, borrar input/, distorted/ e images_white/ (se rehace con --reuse-masks --steps mask):
-    el renderizador solo usa images/, sparse/ y output/."""
+    """Al terminar, borrar input/ y distorted/: el renderizador solo usa images/, sparse/ y output/."""
     python: str = sys.executable
     """Intérprete para train.py (necesita diff_gaussian_rasterization y simple_knn)."""
 
@@ -196,18 +197,14 @@ def run_colmap(scene: Path, matcher: str) -> None:
             shutil.move(item, sparse / "0" / item.name)
 
 
-def train_splat(scene: Path, iterations: int, data_device: str, python: str, white_background: bool = False) -> None:
+def train_splat(scene: Path, iterations: int, data_device: str, python: str) -> None:
     """train.py del submódulo. Su barra (tqdm, con \\r) se reescribe como [hecho/total] para el runner."""
-    if white_background and not (scene / WHITE_FOLDER).is_dir():
-        raise SystemExit(f"No está {scene / WHITE_FOLDER}: corre antes el paso mask")
     output = scene / "output"
     shutil.rmtree(output, ignore_errors=True)
     command = [python, "-u", str(TRAIN_SCRIPT), "-s", str(scene), "-m", str(output), "--iterations", str(iterations),
                "--save_iterations", str(iterations), "--test_iterations", str(iterations),
                "--data_device", data_device, "--disable_viewer"]
-    if white_background:
-        command += ["--images", WHITE_FOLDER, "--white_background"]
-    log(f"train.py: {iterations} iteraciones" + (", fondo blanco" if white_background else ""))
+    log(f"train.py: {iterations} iteraciones")
     proc = subprocess.Popen(command, cwd=TRAIN_SCRIPT.parent, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     shown, buffer = -1, b""
     while chunk := proc.stdout.read1(65536):
@@ -230,6 +227,13 @@ def train_splat(scene: Path, iterations: int, data_device: str, python: str, whi
     log(f"splat: {ply} ({ply.stat().st_size / 1e6:.0f} MB)")
 
 
+def latest_splat(scene: Path) -> Path:
+    plys = list((scene / "output" / "point_cloud").glob("iteration_*/point_cloud.ply"))
+    if not plys:
+        raise SystemExit(f"No hay splat en {scene / 'output'}: corre antes el paso train")
+    return max(plys, key=lambda p: int(p.parent.name.split("_")[1]))
+
+
 def main(args: Args) -> None:
     unknown = set(args.steps) - set(STEPS)
     if args.sharp_window < 1:
@@ -242,13 +246,17 @@ def main(args: Args) -> None:
         log(f"{extract_frames(source, scene / 'input', args.fps, args.sharp_window)} fotos de {source.name}")
     if "colmap" in args.steps:
         run_colmap(scene, args.matcher)
-    if "mask" in args.steps and args.white_background:
+    if "mask" in args.steps and args.carve:
         log(f"máscaras con rembg ({args.mask_model})")
-        whiten_folder(scene, rembg_masker(args.mask_model), args.reuse_masks, log)
+        compute_masks(scene, rembg_masker(args.mask_model), args.reuse_masks, log)
     if "train" in args.steps:
-        train_splat(scene, args.iterations, args.data_device, args.python, args.white_background)
+        train_splat(scene, args.iterations, args.data_device, args.python)
+    if "carve" in args.steps and args.carve:
+        ply = latest_splat(scene)
+        carve_scene(scene, ply, ply.with_name("point_cloud_carved.ply"), args.carve_max_outside,
+                    args.carve_min_views, args.carve_dilate_px, log)
     if args.clean:
-        for name in ("input", "distorted", "stereo", WHITE_FOLDER):
+        for name in ("input", "distorted", "stereo"):
             shutil.rmtree(scene / name, ignore_errors=True)
         for script in scene.glob("run-colmap-*.sh"):
             script.unlink()
