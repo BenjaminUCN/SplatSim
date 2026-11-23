@@ -31,6 +31,7 @@ RANGE_COLOR = (255, 170, 0)   # caja del rango aleatorio (como las esferas de la
 STEM_COLORS = {INTACT: (69, 117, 33), HELD: (40, 200, 220), DROPPED: (140, 140, 140)}
 CUT_COLOR = (255, 230, 0)     # punto de corte del tallo
 ROT_TOL = np.radians(0.5)     # giro del tomate que el panel considera un cambio
+SPLAT_MESH_OPACITY = 0.45     # malla del tomate (splat_object_urdf.py): deja ver el tallo y su punto de corte
 TRIPOD_COLOR = (35, 35, 38)   # trípode de mesa de las cámaras base
 
 
@@ -46,6 +47,34 @@ def fruit_sphere(config: dict) -> tuple[np.ndarray, float]:
     if stem:
         hi[2] = min(hi[2], stem["bottom"][2] + EMBED)
     return (lo + hi) / 2, float(np.mean(hi - lo) / 2)
+
+
+def splat_object_glb(config: dict, opacity: float = SPLAT_MESH_OPACITY) -> bytes | None:
+    """GLB semitransparente de la malla con color por vértice que splat_object_urdf.py deja junto al urdf_path
+    del objeto, o None. trimesh no le pone material, así que se le agrega uno con alphaMode BLEND (el color
+    de cada vértice se multiplica por baseColorFactor)."""
+    urdf = config.get("urdf_path")
+    path = os.path.join(os.path.dirname(os.path.expanduser(urdf)), "visual_colors.ply") if urdf else None
+    if path is None or not os.path.exists(path):
+        return None
+    import json
+    import struct
+
+    import trimesh
+    glb = trimesh.load(path, process=False).export(file_type="glb")
+    length = struct.unpack("<I", glb[12:16])[0]
+    gltf = json.loads(glb[20:20 + length])
+    gltf["materials"] = [{"pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, opacity], "metallicFactor": 0,
+                                                   "roughnessFactor": 1},
+                          "alphaMode": "BLEND", "doubleSided": True}]
+    for mesh in gltf["meshes"]:
+        for primitive in mesh["primitives"]:
+            primitive["material"] = 0
+    text = json.dumps(gltf, separators=(",", ":")).encode()
+    text += b" " * (-len(text) % 4)                 # los chunks de un GLB van alineados a 4 bytes
+    rest = glb[20 + length:]                        # el chunk binario, tal cual
+    body = struct.pack("<I", len(text)) + b"JSON" + text + rest
+    return glb[:8] + struct.pack("<I", 12 + len(body)) + body
 
 
 @functools.cache
@@ -346,7 +375,12 @@ class SimPanel(StationPanel):
         self._apple_gizmo = self.v.scene.add_transform_controls(
             "/apple", scale=0.12, position=pos, wxyz=xyzw_to_wxyz(self._apple_quat()))
         self._fruit_center, radius = fruit_sphere(self.s.object_config[APPLE_NAME])
-        self._fruit = self.v.scene.add_icosphere("/apple/sphere", radius=radius, color=(230, 40, 30))
+        glb = splat_object_glb(self.s.object_config[APPLE_NAME])
+        if glb is not None:     # la malla del splat (splat_object_urdf.py), en el marco del cuerpo; se ve el tallo a través
+            self._fruit = self.v.scene.add_glb("/apple/mesh", glb, cast_shadow=False)
+            self._fruit_center = np.zeros(3)
+        else:
+            self._fruit = self.v.scene.add_icosphere("/apple/sphere", radius=radius, color=(230, 40, 30))
         self._shown_quat = self._apple_quat()      # el giro que muestran rpy y el gizmo
         self._draw_fruit()
         self._stem = None

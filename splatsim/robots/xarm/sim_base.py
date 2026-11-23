@@ -132,9 +132,16 @@ class XArm5SimBase:
         models_lib = md.model_lib()
         self.urdf_object_list, self.urdf_object_mass_list = [], []
         for name in self.object_name_list:
-            if name not in models_lib.model_name_list:
+            # urdf_path en objects.yaml (splat_object_urdf.py: la malla del splat, con la colisión de
+            # urdf_models) o el de urdf_models
+            urdf = self.object_config.get(name, {}).get("urdf_path")
+            if urdf is not None:
+                urdf = os.path.expanduser(urdf)
+                if not os.path.exists(urdf):
+                    raise FileNotFoundError(f"urdf_path de {name} no existe: {urdf}")
+            elif name not in models_lib.model_name_list:
                 raise FileNotFoundError(f"{name} no está en urdf_models (submodules/pybullet-URDF-models)")
-            body = p.loadURDF(models_lib[name], [0.0, 0.0, 0.0], p.getQuaternionFromEuler([0, 0, 0]))
+            body = p.loadURDF(urdf or models_lib[name], [0.0, 0.0, 0.0], p.getQuaternionFromEuler([0, 0, 0]))
             self.urdf_object_list.append(body)
             self.urdf_object_mass_list.append(p.getDynamicsInfo(body, -1)[0])
             p.changeDynamics(body, -1, lateralFriction=OBJECT_FRICTION)

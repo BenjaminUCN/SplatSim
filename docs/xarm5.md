@@ -255,6 +255,24 @@ The script writes the object's `.ply` to `~/data/output/<name>/` and, next to it
 
 For `tomate_tab` (232 photos), 11 249 gaussians are kept and the stem runs straight 3.4 cm above the fruit. The planner cuts it in both episodes of `plan_trajectories.py --target peduncle`.
 
+To see the real tomato in the PyBullet window and in the panel's 3D view, rather than the synthetic apple and a red sphere, give it a URDF made from its splat:
+
+```bash
+python scripts/xarm5/splat_object_urdf.py tomato_real_tab
+```
+
+The script works in the object's frame, using its `transformation`, and keeps the gaussians inside its `aabb`:
+
+1. It adds up their opacities on a 1.5 mm voxel grid, smooths the result and thresholds it.
+2. It fills the inside (the fruit's splat is a shell), keeps the largest piece and extracts the surface with marching cubes.
+3. It colors each vertex from the nearest gaussians.
+
+PyBullet ignores vertex colors in an `.obj`, so each face gets a flat color from a 64×64 palette texture. Mass, friction and the collision mesh come from `--template` (`plastic_apple` by default), so the physics is unchanged: `real_tomato_object.py` already scaled the tomato to that collision mesh.
+
+The output goes to `~/data/output/<name>/urdf/`: `model.urdf`, `visual.obj` with its `.mtl` and palette, `collision.obj`, `visual_colors.ply` (the mesh the panel shows) and `preview.png` (three PyBullet views; check it). The script also adds `urdf_path` to the object in `objects.yaml`. The sim loads that URDF instead of the one from `urdf_models`, including through a scene's `object_overrides`. The splat renders don't use the mesh.
+
+`--threshold` (default 0.015) sets how much of the splat becomes surface: lower closes holes and thickens the stem, higher thins the mesh. For `tomato_real_tab` the mesh has 20 000 faces and measures 11.7 × 7.5 × 19.1 cm with the branch. The fruit's median radius is 32.7 mm, against 33.2 mm for its red gaussians. The stem comes out about twice as thick as the real one (12 mm across just above the fruit, against 5.8 mm), so the panel draws the mesh semitransparent (`SPLAT_MESH_OPACITY` in `panel.py`, 0.45), to keep the stem cylinder and its cut point visible.
+
 ## Replay recordings in each control mode
 
 To compare `position`, `interp` and `velocity` on the same motion (e.g. on the real arm), record one GELLO demonstration and replay it in each mode:
