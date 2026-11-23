@@ -108,6 +108,18 @@ class TrainConfig:
     # queda absoluto). Ver splatsim/utils/data/relative_actions.py
     relative_actions: bool = False
     torch_compile: bool = False         # compila la U-Net y los encoders (no cambia el modelo guardado)
+    # Fine-tuning: init_from es la carpeta de un modelo ya entrenado (model.safetensors y config.json); se
+    # parte de sus pesos en vez de pesos al azar. Tiene que tener las mismas cámaras, n_obs_steps y horizon,
+    # y haberse entrenado con dataset_root: las estadísticas de normalización salen de dataset_root, y si
+    # cambiaran, el modelo vería escalas distintas de estado y acción.
+    init_from: str | None = None
+    # Datasets que se mezclan con dataset_root (p. ej. demos reales): mismas cámaras del modelo, mismo
+    # espacio de estado/acción y mismos fps. Las estadísticas de normalización siguen siendo las de
+    # dataset_root. mix_weights: fracción de cada batch que sale de cada dataset, dataset_root primero
+    # (p. ej. 0.5 0.5 = mitad sim, mitad real, con reemplazo); vacío -> proporcional al tamaño
+    extra_datasets: tuple[str, ...] = ()
+    mix_weights: tuple[float, ...] = ()
+    lr: float | None = None             # None -> el de DiffusionConfig (1e-4); para fine-tuning, menor
     # diffusion: DDPM (lo de siempre); flow: política de flujo con la misma red (splatsim/policies/flow_matching.py),
     # que muestrea con flow_steps pasos de Euler
     objective: str = "diffusion"
@@ -144,8 +156,13 @@ def load_config(argv: list[str]) -> TrainConfig:
         values["cameras"] = tuple(values["cameras"])
 
     print(f"Config: {known.config}")
+    for key in ("extra_datasets", "mix_weights"):
+        if values.get(key) is not None:
+            values[key] = tuple(values[key])
     cfg = tyro.cli(TrainConfig, default=TrainConfig(**values), args=rest)
-    return replace(cfg, output_root=expand(cfg.output_root), dataset_root=expand(cfg.dataset_root))
+    return replace(cfg, output_root=expand(cfg.output_root), dataset_root=expand(cfg.dataset_root),
+                   init_from=expand(cfg.init_from) if cfg.init_from else None,
+                   extra_datasets=tuple(expand(d) for d in cfg.extra_datasets))
 
 
 def make_image_transforms() -> ImageTransforms:
@@ -193,6 +210,15 @@ def seed_everything(seed: int):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
+
+
+def generator_for(seed: int | None) -> torch.Generator | None:
+    """Generador del muestreo del DataLoader (None sin semilla)."""
+    if seed is None:
+        return None
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    return generator
 
 
 def seed_worker(worker_id: int):
@@ -266,6 +292,90 @@ def load_resume(path: Path, policy, ema, optimizer, lr_scheduler, scaler) -> int
     np.random.set_state(state["numpy_rng"])
     random.setstate(state["python_rng"])
     return int(state["step"])
+
+
+INIT_MATCH = ("n_obs_steps", "horizon", "input_features", "output_features", "use_group_norm")
+
+
+def check_init_from(init_dir: Path, policy_cfg) -> None:
+    """Aborta si el modelo de init_from no es compatible con el que se va a entrenar (cámaras, estado,
+    acción, horizonte). n_action_steps puede cambiar: no está en los pesos."""
+    import json
+    if not (init_dir / "model.safetensors").exists():
+        raise SystemExit(f"init_from: no hay model.safetensors en {init_dir}")
+    saved = json.loads((init_dir / "config.json").read_text())
+    ours = json.loads(json.dumps(asdict(policy_cfg), default=lambda o: o.value if hasattr(o, "value") else str(o)))
+    diff = [k for k in INIT_MATCH if k in saved and saved[k] != ours.get(k)]
+    if diff:
+        raise SystemExit("init_from: el modelo guardado difiere en " + ", ".join(
+            f"{k} ({saved[k]} vs {ours.get(k)})" for k in diff))
+
+
+def load_init_from(policy, init_dir: Path) -> None:
+    """Carga los pesos de un modelo guardado con save_pretrained (con EMA, los pesos promediados)."""
+    from safetensors.torch import load_file
+    policy.load_state_dict(load_file(str(init_dir / "model.safetensors"), device="cpu"))
+
+
+def check_init_stats(init_dir: Path, stats: dict, keys=("observation.state", "action")) -> None:
+    """Aborta si las estadísticas de normalización con que se entrenó init_from no son las de
+    dataset_root (mean/std/min/max de estado y acción)."""
+    from safetensors.torch import load_file
+    files = sorted(init_dir.glob("policy_preprocessor_step_*_normalizer_processor.safetensors"))
+    if not files:
+        print(f"AVISO: {init_dir} no tiene el normalizador guardado; no se comparan las estadísticas")
+        return
+    saved = load_file(str(files[0]))
+    for key in keys:
+        for stat in ("mean", "std", "min", "max"):
+            name = f"{key}.{stat}"
+            if name in saved and stat in stats.get(key, {}):
+                ours = torch.as_tensor(np.asarray(stats[key][stat]), dtype=torch.float32).flatten()
+                if ours.shape != saved[name].flatten().shape or not torch.allclose(ours, saved[name].flatten().float(), rtol=1e-4, atol=1e-6):
+                    raise SystemExit(f"init_from: {name} del modelo no coincide con el de dataset_root; usa como "
+                                     "dataset_root el dataset con que se entrenó (los demás van en extra_datasets)")
+
+
+def mix_sample_weights(lengths: list[int], mix: tuple[float, ...]) -> torch.Tensor:
+    """Peso de muestreo de cada muestra de los datasets concatenados, para que el dataset i aporte la
+    fracción mix[i] de cada batch (mix vacío -> todas las muestras igual de probables)."""
+    if not mix:
+        return torch.ones(sum(lengths), dtype=torch.double)
+    if len(mix) != len(lengths) or any(w < 0 for w in mix) or sum(mix) <= 0:
+        raise SystemExit(f"mix_weights {mix}: hace falta un peso >= 0 por dataset ({len(lengths)}, dataset_root primero)")
+    total = sum(mix)
+    return torch.cat([torch.full((n,), w / total / n, dtype=torch.double) for w, n in zip(mix, lengths)])
+
+
+class CommonKeys(torch.utils.data.Dataset):
+    """Deja en cada muestra solo las claves `keys` (las que tienen todos los datasets mezclados, para que
+    el collate no falle si uno trae columnas que otro no tiene)."""
+
+    def __init__(self, dataset, keys):
+        self.dataset = dataset
+        self.keys = set(keys)
+
+    def __len__(self):
+        return len(self.dataset)
+
+    def __getitem__(self, index):
+        item = self.dataset[index]
+        return {k: v for k, v in item.items() if k in self.keys}
+
+
+def check_extra_dataset(meta, primary, keys) -> None:
+    """Un dataset extra tiene que tener los mismos fps, y el estado, la acción y las cámaras del modelo
+    con la misma forma que dataset_root."""
+    if meta.fps != primary.fps:
+        raise SystemExit(f"extra_datasets: {meta.root} tiene {meta.fps} fps y dataset_root {primary.fps}")
+    if action_space_of(meta.features) != action_space_of(primary.features):
+        raise SystemExit(f"extra_datasets: {meta.root} tiene otro espacio de acción ({action_space_of(meta.features)})")
+    for key in keys:
+        if key not in meta.features:
+            raise SystemExit(f"extra_datasets: {meta.root} no tiene {key}")
+        if tuple(meta.features[key]["shape"]) != tuple(primary.features[key]["shape"]):
+            raise SystemExit(f"extra_datasets: {key} tiene forma {meta.features[key]['shape']} en {meta.root} "
+                             f"y {primary.features[key]['shape']} en dataset_root")
 
 
 def make_delta_timestamps(delta_indices: list[int] | None, fps: int) -> list[float]:
@@ -511,6 +621,7 @@ def main(cfg: TrainConfig):
         use_group_norm=cfg.group_norm,
         scheduler_warmup_steps=cfg.lr_warmup_steps,
         device=cfg.device,                      # también el del preprocesador
+        **({"optimizer_lr": cfg.lr} if cfg.lr is not None else {}),
     )
     print(f"Encoder: {cfg.pretrained_backbone or 'desde cero'}, "
           f"{'GroupNorm' if cfg.group_norm else 'BatchNorm'}")
@@ -520,6 +631,10 @@ def main(cfg: TrainConfig):
         raise SystemExit(f"objective debe ser uno de {OBJECTIVES}")
     if cfg.objective == "flow":
         print(f"Política de flujo: {use_flow(policy, cfg.flow_steps)} pasos de Euler al muestrear")
+    if cfg.init_from:
+        check_init_from(Path(cfg.init_from), policy_cfg)
+        load_init_from(policy, Path(cfg.init_from))
+        print(f"Fine-tuning: parte de los pesos de {cfg.init_from}")
     stats = dataset_metadata.stats
     print(f"Estado y acción: {action_space_of(dataset_metadata.features)}")
     if cfg.relative_actions and action_space_of(dataset_metadata.features) == "joints":
@@ -533,6 +648,8 @@ def main(cfg: TrainConfig):
         stats = {**stats, "action": action_stats}
         print(f"Acciones relativas: offsets {offsets[0]}..{offsets[-1]}, "
               f"min {action_stats['min'][:6].round(3)}, max {action_stats['max'][:6].round(3)}")
+    if cfg.init_from:
+        check_init_stats(Path(cfg.init_from), stats)
     preprocessor, postprocessor = make_pre_post_processors(policy_cfg, dataset_stats=stats)
 
     policy.train()
@@ -573,9 +690,34 @@ def main(cfg: TrainConfig):
     check_loader_memory(cfg, {k: (len(delta_timestamps[k]), math.prod(policy_cfg.image_features[k].shape))
                               for k in image_keys})
 
+    # datasets extra (fine-tuning con demos reales y repetición de las de sim)
+    train_set = Uint8Images(dataset, image_keys)
+    sampler = None
+    datasets = [dataset]
+    if cfg.extra_datasets or cfg.mix_weights:
+        needed = ["observation.state", "action", *image_keys]
+        parts = [train_set]
+        for root in cfg.extra_datasets:
+            repo_id = f"local/{Path(root).name}"
+            check_extra_dataset(LeRobotDatasetMetadata(repo_id, root=root), dataset_metadata, needed)
+            extra = LeRobotDataset(repo_id, root=root, delta_timestamps=delta_timestamps,
+                                   image_transforms=make_image_transforms() if cfg.image_augmentation else None)
+            datasets.append(extra)
+            parts.append(Uint8Images(extra, image_keys))
+        keys = set.intersection(*(set(p[0]) for p in parts))
+        parts = [CommonKeys(p, keys) for p in parts]
+        train_set = torch.utils.data.ConcatDataset(parts)
+        weights = mix_sample_weights([len(p) for p in parts], cfg.mix_weights)
+        sampler = torch.utils.data.WeightedRandomSampler(weights, num_samples=len(train_set), replacement=True,
+                                                         generator=generator_for(cfg.seed))
+        shares = cfg.mix_weights or [len(p) for p in parts]
+        print("Mezcla de datasets: " + ", ".join(
+            f"{Path(d.root).name} {len(p)} muestras {w / sum(shares):.0%} del batch"
+            for d, p, w in zip(datasets, parts, shares)))
+
     run = start_wandb(cfg, model_name, output_directory, {
-        "cameras_used": image_keys, "dataset_episodes": dataset.num_episodes,
-        "dataset_frames": dataset.num_frames, "fps": dataset_metadata.fps})
+        "cameras_used": image_keys, "dataset_episodes": sum(d.num_episodes for d in datasets),
+        "dataset_frames": sum(d.num_frames for d in datasets), "fps": dataset_metadata.fps})
     if run is not None:
         with open(output_directory / "train_config.yaml", "a") as f:
             yaml.safe_dump({"wandb_run": run.url or run.dir, "wandb_id": run.id}, f, sort_keys=False)
@@ -589,14 +731,12 @@ def main(cfg: TrainConfig):
           + (f"coseno con warmup {cfg.lr_warmup_steps}" if lr_scheduler else "constante")
           + (", EMA" if ema else ""))
     scaler = GradScaler()
-    generator = None
-    if cfg.seed is not None:
-        generator = torch.Generator()
-        generator.manual_seed(cfg.seed)
+    generator = generator_for(cfg.seed)
     dataloader = torch.utils.data.DataLoader(
-        Uint8Images(dataset, image_keys),
+        train_set,
         batch_size=micro_batch(cfg),
-        shuffle=True,
+        shuffle=sampler is None,
+        sampler=sampler,
         num_workers=cfg.num_workers,
         pin_memory=True,
         drop_last=True,
