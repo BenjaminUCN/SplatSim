@@ -30,6 +30,7 @@ RANGE_COLOR = (255, 170, 0)   # caja del rango aleatorio (como las esferas de la
 # tallo en la vista 3D: entero (el verde del splat), cortado y sujeto, cortado y suelto
 STEM_COLORS = {INTACT: (69, 117, 33), HELD: (40, 200, 220), DROPPED: (140, 140, 140)}
 CUT_COLOR = (255, 230, 0)     # punto de corte del tallo
+ROT_TOL = np.radians(0.5)     # giro del tomate que el panel considera un cambio
 TRIPOD_COLOR = (35, 35, 38)   # trípode de mesa de las cámaras base
 
 
@@ -57,6 +58,11 @@ def d435i_meshes() -> dict:
         color = tuple(int(float(v) * 255) for v in rgba.split()[:3])
         meshes[filename.removesuffix(".stl")] = (vertices.astype(np.float32), faces.reshape(-1, 3).astype(np.uint32), color)
     return meshes
+
+
+def quat_angle(a, b) -> float:
+    """Ángulo (rad) entre dos cuaterniones del mismo orden."""
+    return 2 * float(np.arccos(min(1.0, abs(float(np.dot(a, b))))))
 
 
 def z_to(axis) -> tuple:
@@ -96,7 +102,8 @@ class SimPanel(StationPanel):
     def _update_status_extra(self):
         # la manzana también se mueve desde fuera (p.ej. run_policy_trials.py)
         pos = self._apple_pos()
-        if np.abs(np.subtract(pos, self._apple_xyz.value)).max() > 1e-3:
+        if (np.abs(np.subtract(pos, self._apple_xyz.value)).max() > 1e-3
+                or quat_angle(self._apple_quat(), self._shown_quat) > ROT_TOL):
             self._sync_apple_ui(pos)
         self._draw_fruit()
         if self._stem is not None:
@@ -315,6 +322,11 @@ class SimPanel(StationPanel):
             if self.s.peduncle is not None:
                 self._peduncle_text = self.v.gui.add_markdown("")
             self._apple_xyz = self.v.gui.add_vector3("xyz (m)", pos, step=0.001)
+            self._apple_rpy = self.v.gui.add_vector3(
+                "rpy (deg)", self._apple_rpy_now(), step=1.0,
+                hint="Rotation of the tomato: roll, pitch, yaw about the world x, y, z axes (yaw turns it about "
+                     "the vertical; 0, 0, 0 = upright). Also with the rings of its gizmo. Random Position and grid "
+                     "positions keep it")
             rand = self.v.gui.add_button("Random Position")
             self._grid_which = self.v.gui.add_dropdown(
                 "Grid", list(GRIDS), initial_value="custom",
@@ -332,13 +344,14 @@ class SimPanel(StationPanel):
             self._grid_confirm = self.v.gui.add_button_group("Confirm", ["Remove", "Cancel"], visible=False)
             self._build_range_gui()
         self._apple_gizmo = self.v.scene.add_transform_controls(
-            "/apple", scale=0.12, position=pos, disable_rotations=True)
+            "/apple", scale=0.12, position=pos, wxyz=xyzw_to_wxyz(self._apple_quat()))
         self._fruit_center, radius = fruit_sphere(self.s.object_config[APPLE_NAME])
         self._fruit = self.v.scene.add_icosphere("/apple/sphere", radius=radius, color=(230, 40, 30))
+        self._shown_quat = self._apple_quat()      # el giro que muestran rpy y el gizmo
         self._draw_fruit()
         self._stem = None
         if self.s.peduncle is not None:
-            # el tallo va en el marco del mundo (el gizmo del tomate no gira), con su punto de corte
+            # el tallo va en el marco del mundo (su largo y color cambian), con su punto de corte
             p = self.s.peduncle
             self._stem = self.v.scene.add_cylinder(
                 "/peduncle", radius=max(p.stem.get("radius", 0.0025), 0.002), height=0.05,
@@ -347,8 +360,11 @@ class SimPanel(StationPanel):
             self._draw_stem()
 
         self._on_user(self._apple_xyz, lambda h: self._move_apple(h.value))
+        self._on_user(self._apple_rpy, lambda h: self._move_apple(
+            self._apple_pos(), self.s.pybullet_client.getQuaternionFromEuler(np.radians(h.value))))
         self._apple_gizmo.on_update(
-            lambda _: self._do(self._move_apple, tuple(float(v) for v in self._apple_gizmo.position)))
+            lambda _: self._do(self._move_apple, tuple(float(v) for v in self._apple_gizmo.position),
+                               wxyz_to_xyzw(tuple(float(v) for v in self._apple_gizmo.wxyz))))
         self._on_click(rand, self._random_apple)
         self._on_click(self._grid_save, self._save_apple)
         self._on_user(self._grid_which, lambda _: self._switch_grid())
@@ -492,22 +508,33 @@ class SimPanel(StationPanel):
         self._range_info.content = text + ("" if saved else "  \n**not saved**: Random Position "
                                            "uses it now; Save Range keeps it for next time")
 
-    def _move_apple(self, xyz):
-        self.s.apple.move_to(xyz)
+    def _move_apple(self, xyz, orientation=None):
+        self.s.apple.move_to(xyz, orientation)
         self._sync_apple_ui(self._apple_pos())
 
     def _sync_apple_ui(self, pos):
         self._apple_xyz.value = pos
+        quat = self._apple_quat()
+        self._shown_quat = quat
+        self._apple_rpy.value = self._apple_rpy_now()
+        # no se pisa al gizmo mientras se arrastra
         if np.abs(np.subtract(pos, self._apple_gizmo.position)).max() > 1e-3:
-            self._apple_gizmo.position = pos  # no se pisa al gizmo mientras se arrastra
+            self._apple_gizmo.position = pos
+        if quat_angle(quat, wxyz_to_xyzw(self._apple_gizmo.wxyz)) > ROT_TOL:
+            self._apple_gizmo.wxyz = xyzw_to_wxyz(quat)
+
+    def _apple_quat(self):
+        _, quat = self.s.pybullet_client.getBasePositionAndOrientation(self.s.apple.body_id)
+        return tuple(float(v) for v in quat)
+
+    def _apple_rpy_now(self):
+        rpy = np.degrees(self.s.pybullet_client.getEulerFromQuaternion(self._apple_quat()))
+        return tuple(round(float(v), 1) + 0.0 for v in rpy)
 
     def _draw_fruit(self):
         """La esfera del tomate en su centro real: el origen del cuerpo está en su base, no en el
-        centro. Es hija del gizmo (que no gira), así que el desplazamiento se gira aquí."""
-        c = self.s.pybullet_client
-        _, quat = c.getBasePositionAndOrientation(self.s.apple.body_id)
-        rot = np.reshape(c.getMatrixFromQuaternion(quat), (3, 3))
-        self._fruit.position = rot @ self._fruit_center
+        centro. Es hija del gizmo, que gira con el tomate, así que va en el marco del cuerpo."""
+        self._fruit.position = tuple(float(v) for v in self._fruit_center)
 
     def _draw_stem(self):
         """El cilindro del tallo donde está ahora (sigue al tomate, también sujeto o al caer); el

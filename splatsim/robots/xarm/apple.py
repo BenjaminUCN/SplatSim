@@ -32,6 +32,8 @@ class AppleController:
         # mass=0 => cuerpo estático (no solo "sin gravedad")
         server.pybullet_client.changeDynamics(self.body_id, -1, mass=0)
         print("[xArm5] gravedad desactivada para la apple")
+        # orientación (xyzw) con que move_to pone el tomate; se cambia desde el panel
+        self.orientation = (0.0, 0.0, 0.0, 1.0)
 
         # parte en la primera posición de la grilla, si hay
         grid = load_grid()
@@ -54,8 +56,12 @@ class AppleController:
         self._save_btn = c.addUserDebugParameter("Save Apple Position to Grid", 1, 0, 0)
         self._prev_save = 0
 
-    def move_to(self, xyz):
-        self.s.set_object_pose(APPLE_NAME, np.array(xyz), np.array([0, 0, 0, 1]), use_gravity=False)
+    def move_to(self, xyz, orientation=None):
+        """Pone el tomate en xyz, quieto; con orientation (xyzw) también lo gira, si no conserva el giro elegido."""
+        if orientation is not None:
+            q = np.asarray(orientation, float)
+            self.orientation = tuple(float(v) for v in q / np.linalg.norm(q))
+        self.s.set_object_pose(APPLE_NAME, np.array(xyz), np.array(self.orientation), use_gravity=False)
 
     def random_position(self):
         if self.shape == "hemisphere":
