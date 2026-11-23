@@ -500,3 +500,34 @@ xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab:
   use_gripper: true
   gripper: hand_held_xl330
   object_overrides: {plastic_apple: tomato_real_tab}
+# escena capturada de verdad con la cortadora (video scene_pruner.mp4, 23-nov): alineada sin CloudCompare,
+# con los AprilTag de la pared contra 260729_2003 y luego ajustando el URDF en la pose de reset al splat
+# (recorte: gaussianas de la caja a más de 1.5 cm del URDF o de más de 3 cm, salvo el piso)
+# (URDF→splat mediana 7.3 mm; la escena vieja da 11.8 mm con la misma medida)
+xarm5_lite_plant_v4_pruner:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/scene_pruner
+  model_path: ~/data/Colmaps/scene_pruner/output_trimmed
+  transformation:
+    matrix:
+    - [-0.016184, -0.084016, -0.138755, -0.249791]
+    - [0.161774, -0.018573, -0.007622, -0.084945]
+    - [-0.011881, -0.138456, 0.085221, 0.528389]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.519, -0.1187, -0.0]
+    - [0.2502, 0.0865, 0.6076]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  splat_gripper_value: 0.20
+  object_overrides: {plastic_apple: tomato_real_tab}
