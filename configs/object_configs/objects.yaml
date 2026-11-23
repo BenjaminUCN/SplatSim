@@ -411,6 +411,9 @@ xarm5_lite_plant_v3_hand_held_down_cam_down_tilt:
   wrist_camera_link_name: wrist_camera_link
   joint_states:
   - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  # el splat se capturó en la pose de cam_down (joint4 -0.6108): es la referencia de sus gaussianas
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
   source_path: ~/data/Colmaps/260729_2003
   model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
   transformation:
@@ -481,6 +484,9 @@ xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab:
   wrist_camera_link_name: wrist_camera_link
   joint_states:
   - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  # el splat se capturó en la pose de cam_down (joint4 -0.6108): es la referencia de sus gaussianas
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
   source_path: ~/data/Colmaps/260729_2003
   model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
   transformation:
@@ -510,6 +516,36 @@ xarm5_lite_plant_v4_pruner:
   - [0, 0, 0]
   wrist_camera_link_name: wrist_camera_link
   joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/scene_pruner
+  model_path: ~/data/Colmaps/scene_pruner/output_trimmed
+  transformation:
+    matrix:
+    - [-0.016184, -0.084016, -0.138755, -0.249791]
+    - [0.161774, -0.018573, -0.007622, -0.084945]
+    - [-0.011881, -0.138456, 0.085221, 0.528389]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.519, -0.1187, -0.0]
+    - [0.2502, 0.0865, 0.6076]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  splat_gripper_value: 0.20
+  object_overrides: {plastic_apple: tomato_real_tab}
+# la misma escena con el reset de _cam_down_tilt (joint4 +0.325 rad); el splat sigue en la pose de captura
+xarm5_lite_plant_v4_pruner_tilt:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  splat_joint_states:
   - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
   source_path: ~/data/Colmaps/scene_pruner
   model_path: ~/data/Colmaps/scene_pruner/output_trimmed

@@ -92,11 +92,14 @@ class XArm5SimBase:
 
         # joint_states trae un 0 extra al principio (la articulación del mundo)
         self.initial_joint_state = scene["joint_states"][0][1:]
+        # pose del brazo en el splat (la de la captura); si no se da, es la de reset
+        self.splat_joint_state = scene.get("splat_joint_states", scene["joint_states"])[0][1:]
         num_joints = p.getNumJoints(self.dummy_robot)
         if len(self.initial_joint_state) > num_joints:
             print(f"Warning: Provided initial joint positions ({len(self.initial_joint_state)}) exceed "
                   f"the number of joints ({num_joints}). Truncating to {num_joints} positions.")
             self.initial_joint_state = self.initial_joint_state[:num_joints]
+        self.splat_joint_state = self.splat_joint_state[:len(self.initial_joint_state)]
         self.joint_signs = [1] * len(self.initial_joint_state)
 
         self._load_objects()

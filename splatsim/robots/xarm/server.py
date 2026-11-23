@@ -586,14 +586,18 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
             self.serve_loop()
 
     def setup_scene(self) -> None:
-        """Pone el robot en la pose inicial y guarda los estados de referencia del render."""
+        """Guarda los estados de referencia del render (el brazo en la pose del splat,
+        splat_joint_states) y pone el robot en la pose inicial (joint_states)."""
         c = self.pybullet_client
         for i in range(len(self.initial_joint_state)):
             c.setJointMotorControl2(self.dummy_robot, i, c.VELOCITY_CONTROL, force=0)
+        for i in range(1, len(self.splat_joint_state)):
+            c.resetJointState(self.dummy_robot, i,
+                              self.splat_joint_state[i - 1] * self.joint_signs[i - 1])
+        self.initial_link_states = get_curr_link_states(self.dummy_robot, self.use_link_centers)
         for i in range(1, len(self.initial_joint_state)):
             c.resetJointState(self.dummy_robot, i,
                               self.initial_joint_state[i - 1] * self.joint_signs[i - 1])
-        self.initial_link_states = get_curr_link_states(self.dummy_robot, self.use_link_centers)
 
         for i in range(1, self.num_dofs()):
             c.setJointMotorControl2(self.dummy_robot, i, c.VELOCITY_CONTROL,

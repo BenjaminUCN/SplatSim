@@ -211,6 +211,8 @@ Add `your_robot_name` to `configs/object_configs/objects.yaml`. First, copy-past
 
 - Set `joint_states` (radians) to the joint angles that the robot had when the gaussian splat data was collected. There might be an extra 0 preceding the base joint (ex: [0, 0, 1.57, ...])
 
+- The xArm5 sim (`splatsim/robots/xarm`) also resets the robot to `joint_states`. To reset it to another pose with the same splat, set `joint_states` to that pose and `splat_joint_states` to the capture pose (same format). Without `splat_joint_states`, both are `joint_states`.
+
 - If you have a different URDF, change `urdf_path`. Note that `robot_iphone` is a UR5 robot.
 
 #### Convert URDF to point cloud

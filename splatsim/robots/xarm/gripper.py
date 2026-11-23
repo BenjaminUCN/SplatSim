@@ -107,6 +107,9 @@ class XArm5Gripper:
             c.resetJointState(s.dummy_robot, jid, pose)
         for _ in range(50):
             c.stepSimulation()
+        # los links del gripper se toman con el brazo en la pose del splat, como initial_link_states
+        for i, val in enumerate(s.splat_joint_state[:5]):
+            c.resetJointState(s.dummy_robot, i + 1, val * s.joint_signs[i])
 
         new_states = get_curr_link_states(s.dummy_robot, s.use_link_centers)
         for jid in self._splat_poses():
