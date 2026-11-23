@@ -236,6 +236,25 @@ Training on photos composited on white (`train.py -w`) doesn't work. A white opa
 
 rembg is installed in the `fork-splatsim` env without its `opencv-python-headless` dependency, because it would overwrite `opencv-python`'s `cv2`. It uses `onnxruntime-gpu==1.23.2`, the CUDA 12 build that matches torch's libraries: 1.32 asks for CUDA 13 and falls back to the CPU. The first mask takes about a minute while CUDA compiles. The render image for pods doesn't have rembg, so the cloud *Scene* job doesn't have `--carve`.
 
+To use a real tomato in the simulation, `real_tomato_object.py` adds it to `objects.yaml` in the same frame as `plastic_apple`. That frame has its origin at the bottom of the fruit, z along the peduncle, and units in meters:
+
+```bash
+python scripts/xarm5/real_tomato_object.py ~/data/Colmaps/tomate_tab --name tomato_real_tab \
+    --scene xarm5_lite_plant_v3_hand_held_down_cam_down_tilt
+```
+
+The frame is computed in `splatsim/utils/scene/real_object.py`:
+
+- **Fruit:** a sphere is fitted to the red gaussians.
+- **Object:** the connected component that holds the fruit. This also drops the loose gaussians the carve leaves.
+- **z axis:** from the fruit's center to the centroid of the non-red gaussians 1–2 radii away. x points where the branch leans; `--yaw` turns it about z.
+- **Scale:** the fruit's width becomes `--diameter`. COLMAP has no scale, so the default is the synthetic tomato's 7.28 cm, which matches the collision mesh in PyBullet.
+- **Peduncle:** `bottom` is the top of the fruit and `top` is where the stem leaves the axis by more than 4 mm. `cut` is halfway along the part that is visible, because the sepals, curled upward, hide the first 2 cm of the stem. `cut_range_mm` is copied from `plastic_apple_peduncle`.
+
+The script writes the object's `.ply` to `~/data/output/<name>/` and, next to it, `<name>.png` with two views of the peduncle it found. Check that image. With `--scene`, it also adds `<scene>_<name>`, a copy of that scene that swaps the tomato through `object_overrides`. That scene needs its own `data/labels_path/<scene>_labels.npy`, a copy of the base scene's.
+
+For `tomate_tab` (232 photos), 11 249 gaussians are kept and the stem runs straight 3.4 cm above the fruit. The planner cuts it in both episodes of `plan_trajectories.py --target peduncle`.
+
 ## Replay recordings in each control mode
 
 To compare `position`, `interp` and `velocity` on the same motion (e.g. on the real arm), record one GELLO demonstration and replay it in each mode:

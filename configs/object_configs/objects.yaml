@@ -456,3 +456,47 @@ xarm5_lite_plant_v3_hand_held_v4_down:
   use_gripper: true
   gripper: hand_held_xl330_v4
   object_overrides: {plastic_apple: plastic_apple_peduncle}
+tomato_real_tab:
+  transformation:
+    matrix:
+    - [-0.074807, 0.006208, -0.043246, 0.009076]
+    - [0.029685, 0.07014, -0.04128, 0.033905]
+    - [0.032056, -0.050465, -0.062694, 0.259083]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.0415, -0.0412, -0.0078]
+    - [0.0795, 0.04, 0.1862]
+  ply_path: ~/data/output/tomato_real_tab/point_cloud/iteration_30000/point_cloud.ply
+  peduncle:
+    bottom: [0.0, 0.0, 0.0674]
+    top: [0.0, 0.0, 0.1014]
+    cut: [0.0, 0.0, 0.0954]
+    radius: 0.0029
+    cut_range_mm: [17, 67]
+xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  object_overrides: {plastic_apple: tomato_real_tab}
