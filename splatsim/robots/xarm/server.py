@@ -9,7 +9,7 @@ import time
 import numpy as np
 
 from splatsim.utils.render.camera_setup import base_camera_poses
-from splatsim.utils.render.occlusion import measure_camera
+from splatsim.utils.render.occlusion import fruit_indices, measure_camera
 from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 
 # antes que gaussian_renderer: importar gaussian_splatting agrega su carpeta al path
@@ -291,7 +291,15 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
     def prep_image_rendering(self, data, cached_link_states=None):
         super().prep_image_rendering(data, cached_link_states=cached_link_states)
         # los objetos (el tomate) van después de la escena y antes de los oclusores
-        self._object_gaussians = slice(self.gaussians_backup._xyz.shape[0], self.robot_gaussian._xyz.shape[0])
+        start = self.gaussians_backup._xyz.shape[0]
+        self._object_gaussians = slice(start, self.robot_gaussian._xyz.shape[0])
+        if not hasattr(self, "_fruit"):     # la oclusión se mide sobre el fruto y el tallo, sin la rama
+            self._fruit = None
+            if len(self.object_gaussians) == 1:
+                name = self.splat_object_name_list[0]
+                self._fruit = fruit_indices(self.object_config[name], self.object_gaussians[0].get_xyz.detach())
+        if self._fruit is not None:
+            self._object_gaussians = self._fruit + start
         if self.occluders is not None:
             self.occluders.append_to(self.robot_gaussian)
 

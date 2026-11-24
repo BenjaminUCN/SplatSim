@@ -36,9 +36,28 @@ def _paint(gaussian, target: slice, dc: float) -> None:
     gaussian._features_rest[target] = 0.0     # sin brillo: el color es el mismo desde todo ángulo
 
 
-def measure_camera(render: Callable, gaussian, target: slice, camera, background) -> dict:
+def fruit_indices(config: dict, xyz: torch.Tensor) -> torch.Tensor | None:
+    """Las gaussianas del fruto y su tallo, sin la rama: índices dentro de las del objeto que quedan
+    tras recortarlas por su aabb (transform_object, mismo orden), las que están hasta occlusion_max_z
+    (m, marco del objeto). xyz: las del ply. None si el objeto no la define (el tomate sintético):
+    entonces cuenta el objeto entero.
+
+    Un splat capturado del natural trae la rama (tomato_real_tab: 19 cm de alto); contándola, en
+    wrist_rgb el tomate siempre toca el borde del cuadro y la hoja no se puede ajustar."""
+    max_z = config.get("occlusion_max_z")
+    if max_z is None:
+        return None
+    matrix = torch.as_tensor(config["transformation"]["matrix"], dtype=torch.float32, device=xyz.device)
+    canonical = xyz @ matrix[:3, :3].T + matrix[:3, 3]
+    low, high = (torch.as_tensor(b, dtype=torch.float32, device=xyz.device) for b in config["aabb"]["bounding_box"])
+    inside = ((canonical > low) & (canonical < high)).all(dim=1)
+    keep = canonical[inside][:, 2] <= float(max_z)
+    return None if bool(keep.all()) else torch.nonzero(keep).squeeze(1)
+
+
+def measure_camera(render: Callable, gaussian, target, camera, background) -> dict:
     """render(camera, gaussian, background) -> imagen (3, H, W). target: las gaussianas del tomate
-    dentro de gaussian, que queda como estaba."""
+    dentro de gaussian (slice o índices), que queda como estaba."""
     with torch.no_grad():
         dc, rest = gaussian._features_dc, gaussian._features_rest
         try:

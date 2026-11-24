@@ -477,6 +477,9 @@ tomato_real_tab:
     cut: [0.0, 0.0, 0.0954]
     radius: 0.0029
     cut_range_mm: [17, 67]
+  # la oclusión (hojas, measure_occlusion) se mide sobre el fruto y el tallo, hasta peduncle.top: sin la
+  # rama, que deja el tomate siempre cortado por el borde de wrist_rgb (24-nov)
+  occlusion_max_z: 0.1014
   urdf_path: ~/data/output/tomato_real_tab/urdf/model.urdf
 xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab:
   urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down.urdf]

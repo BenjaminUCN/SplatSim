@@ -14,6 +14,7 @@ from splatsim.utils.render.occlusion import (
     OUT_OF_VIEW,
     fit_lateral_offset,
     fit_message,
+    fruit_indices,
     measure_camera,
     occlusion_level,
 )
@@ -95,6 +96,31 @@ class MeasureTest(unittest.TestCase):
     def test_cut_by_frame(self):
         self.assertFalse(measure([], [], [])["cut_by_frame"])
         self.assertTrue(measure([], [], [], tomato=(0, 20, 10, 30))["cut_by_frame"])
+
+
+class FruitTest(unittest.TestCase):
+    """Tomate con rama: la rama sale del cuadro, el fruto no."""
+    CONFIG = {"transformation": {"matrix": [[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]]},
+              "aabb": {"bounding_box": [[-1, -1, -1], [1, 1, 1]]}, "occlusion_max_z": 0.2}
+    # ply: fuera de la caja, fruto, rama, fruto (marco del objeto = 2 * ply)
+    XYZ = torch.tensor([[0.0, 0.0, 0.9], [0.0, 0.0, 0.0], [0.0, 0.0, 0.3], [0.0, 0.0, 0.05]])
+
+    def test_without_branch(self):
+        # índices entre las que quedan tras el aabb (fruto, rama, fruto)
+        self.assertEqual(fruit_indices(self.CONFIG, self.XYZ).tolist(), [0, 2])
+
+    def test_whole_object_without_key(self):
+        config = {k: v for k, v in self.CONFIG.items() if k != "occlusion_max_z"}
+        self.assertIsNone(fruit_indices(config, self.XYZ))
+        self.assertIsNone(fruit_indices({**self.CONFIG, "occlusion_max_z": 5.0}, self.XYZ))
+
+    def test_branch_out_of_frame_does_not_count(self):
+        # fruto en el centro, rama hasta el borde: con índices no se marca cut_by_frame
+        g = FakeGaussians([TOMATO, (0, 10, 18, 22)], [1.0, 1.0], [1.0, 1.0], [RED, GREEN])
+        self.assertTrue(measure_camera(fake_render, g, slice(0, 2), None, torch.ones(3))["cut_by_frame"])
+        result = measure_camera(fake_render, g, torch.tensor([0]), None, torch.ones(3))
+        self.assertFalse(result["cut_by_frame"])
+        self.assertEqual(result["occlusion"], 0.0)
 
 
 class LevelTest(unittest.TestCase):
