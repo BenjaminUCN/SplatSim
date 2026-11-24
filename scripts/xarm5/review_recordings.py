@@ -22,6 +22,9 @@ Carpetas renderizadas con scripts/xarm5/render_recordings.py (traen render_info.
 trayectoria original de teleoperación (~30 Hz, naranja) a la remuestreada (puntos azules, un
 punto por frame) y la carpeta Resampling compara ambas en el tiempo.
 
+Renders cuyos PNG se borraron con scripts/xarm5/prune_render_images.py (traen dataset_images.yaml): las imágenes
+salen del dataset LeRobot convertido desde ellos (AV1, con pérdida); el resto funciona igual.
+
 Ensayos de scripts/xarm5/run_policy_trials.py (carpetas con trials.csv):
     python scripts/xarm5/review_recordings.py --root ~/data/policy_trials
 Las corridas aparecen como "<fecha hora> · <modelo> · <éxitos>/<ensayos>", la más reciente primero. Folder
@@ -61,6 +64,7 @@ from splatsim.utils.render.camera_setup import load_camera_setup  # noqa: E402
 from splatsim.utils.paths import load_yaml  # noqa: E402
 from splatsim.utils.data.episode_selection import load_discarded, save_discarded  # noqa: E402
 from splatsim.utils.data.frame_video import open_frame, video_cameras  # noqa: E402
+from splatsim.utils.data.dataset_frames import dataset_cameras  # noqa: E402
 from splatsim.utils.viser_page import set_page_title  # noqa: E402
 from splatsim.utils.trials.grasp_point import (  # noqa: E402
     GRASP_POINT_PATH,
@@ -250,6 +254,8 @@ class RecordingFolder:
             images = {cam: [p for _, p in sorted(files)] for cam, files in per_cam.items()}
             if image_dir is not None:             # cámaras empaquetadas en video (scripts/xarm5/pack_trial_images.py)
                 images.update(video_cameras(image_dir))
+            if not images:   # render sin PNG (scripts/xarm5/prune_render_images.py): cuadros del dataset LeRobot
+                images = dataset_cameras(self.path, name)
             self._images[name] = dict(sorted(images.items()))
         return self._images[name]
 

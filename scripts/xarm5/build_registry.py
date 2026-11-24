@@ -36,6 +36,7 @@ import pandas as pd
 import tyro
 import yaml
 
+from splatsim.utils.data.dataset_frames import load_pointer, png_files
 from splatsim.utils.data.dataset_sources import read_sources
 from splatsim.utils.paths import DATASETS_DIR, contract_tree
 from safetensors.numpy import load_file
@@ -145,6 +146,9 @@ def _find_shared_episodes(recordings: dict) -> None:
 
 def _recording_images(episode: Path) -> dict:
     """Cámaras y numeración de imágenes del episodio (misma lógica que lerobot_conversion)."""
+    pointer = load_pointer(episode.parent)   # PNG borrados (scripts/xarm5/prune_render_images.py)
+    if pointer and episode.name in pointer["episodes"] and not png_files(episode):
+        return {"cameras": pointer["cameras"], "image_numbering": "dataset", "images_in": pointer["dataset"]}
     for name in ("image_1", "images"):
         image_dir = episode / name
         if image_dir.is_dir():
