@@ -8,8 +8,8 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-from render_recordings import pregrasp_frame  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.xarm5.recordings.render_recordings import pregrasp_frame  # noqa: E402
 
 PHASES = {"phases": {"start_pause": 0.3, "reach": 4.7, "settle": 0.3, "approach": 3.4, "hold": 3.4}}
 

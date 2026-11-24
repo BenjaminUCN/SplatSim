@@ -7,8 +7,8 @@ from pathlib import Path
 import torch
 from torch.amp import GradScaler
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-import train_diffusion as td  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.xarm5.training import train_diffusion as td  # noqa: E402
 
 
 def setup(seed):

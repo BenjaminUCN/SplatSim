@@ -2,9 +2,9 @@
 *
 !requirements-render.txt
 !requirements-train.txt
-!scripts/xarm5/render_recordings.py
-!scripts/xarm5/mirror_recordings.py
-!scripts/xarm5/splat_from_video.py
+!scripts/xarm5/recordings/render_recordings.py
+!scripts/xarm5/recordings/mirror_recordings.py
+!scripts/xarm5/scene/splat_from_video.py
 !configs/camera_poses.yaml
 !configs/object_configs/objects.yaml
 !configs/folder_configs.yaml

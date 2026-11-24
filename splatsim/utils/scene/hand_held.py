@@ -1,7 +1,7 @@
 """Gripper hand_held_XL330 en el simulador: URDF del xArm5 con este gripper y splat sin escanear.
 
-Solo numpy y la biblioteca estándar; los scripts son scripts/xarm5/build_hand_held_urdf.py y
-scripts/xarm5/hand_held_splat.py. Las mallas están en mm, en el marco del ensamble CAD: y hacia la
+Solo numpy y la biblioteca estándar; los scripts son scripts/xarm5/robot/build_hand_held_urdf.py y
+scripts/xarm5/scene/hand_held_splat.py. Las mallas están en mm, en el marco del ensamble CAD: y hacia la
 punta del pruner, z hacia arriba de la tapa, cara de la brida del brazo en y = -51.63
 (el disco mount_xarm5 va atornillado directo a bottom_plate).
 """
@@ -105,7 +105,7 @@ STAND_MESH = "camera_stand_1300.stl"
 T_EEF_STAND = np.array([[1.0, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
 # la placa va entre la brida y mount_xarm5: el gripper queda 3 mm más allá de la brida, sobre +z de link_eef
 STAND_THICKNESS_M = 0.003
-# mallas de scripts/xarm5/build_d435i_mesh.py, en el marco óptico de la RGB: (archivo, rgba)
+# mallas de scripts/xarm5/robot/build_d435i_mesh.py, en el marco óptico de la RGB: (archivo, rgba)
 D435I_MESHES = (("d435i_body.stl", "0.62 0.63 0.66 1"), ("d435i_front.stl", "0.03 0.03 0.04 1"))
 D435I_DEPTH_M = 0.0251
 # centro de la carcasa en el marco óptico de la RGB (la RGB está a 32.5 mm del centro, hacia un extremo)

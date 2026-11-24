@@ -6,8 +6,8 @@ from types import SimpleNamespace
 
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-import train_diffusion as td  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.xarm5.training import train_diffusion as td  # noqa: E402
 
 
 class GradAccumulationTest(unittest.TestCase):

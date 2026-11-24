@@ -3,8 +3,8 @@ import sys
 import unittest
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-import run_policy_trials as rpt  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.xarm5.trials import run_policy_trials as rpt  # noqa: E402
 
 
 class TrackSummaryTest(unittest.TestCase):

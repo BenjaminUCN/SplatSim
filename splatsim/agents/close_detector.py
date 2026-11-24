@@ -1,6 +1,6 @@
 """Detector de cierre: probabilidad, desde un cuadro de wrist_rgb, de que cerrar la cortadora ahora corte el tallo.
 
-Se entrena con scripts/xarm5/close_detector.py (etiquetas peduncle_cuttable de los ensayos guardados). En la
+Se entrena con scripts/xarm5/training/close_detector.py (etiquetas peduncle_cuttable de los ensayos guardados). En la
 evaluación, LeRobotDiffusionAgent(close_detector=...) cierra cuando el detector lo dice, además de cuando lo
 ordena la política.
 """

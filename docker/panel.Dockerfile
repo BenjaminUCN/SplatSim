@@ -1,4 +1,4 @@
-# Panel del orquestador (scripts/xarm5/cloud_server.py), para correrlo en cualquier PC sin torch ni CUDA:
+# Panel del orquestador (scripts/xarm5/cloud/cloud_server.py), para correrlo en cualquier PC sin torch ni CUDA:
 # solo encola, alquila pods en Vast y mueve archivos con rclone. Se usa con docker/panel.compose.yml.
 #     docker build -f docker/panel.Dockerfile -t splatsim-panel .
 FROM python:3.12-slim AS rclone
@@ -31,4 +31,4 @@ ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1 XDG_CACHE_HOME=/tmp/.cache
 EXPOSE 8083
 
 # Sin --no-update-registry reescribiría configs/registry.yaml dentro de la imagen, donde nadie lo lee.
-ENTRYPOINT ["python", "scripts/xarm5/cloud_server.py", "--no-update-registry"]
+ENTRYPOINT ["python", "scripts/xarm5/cloud/cloud_server.py", "--no-update-registry"]

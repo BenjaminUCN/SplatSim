@@ -72,7 +72,7 @@ class XL330Gripper:
                  current_limit_ma: int = 1200, profile_velocity: int = 40,
                  profile_acceleration: int = 30, stall_seconds: float = 2.0, hz: float = 30.0,
                  handlers=None):
-        """open/closed_position: pulsos del calibrado (scripts/xarm5/xl330_gripper.py calibrate).
+        """open/closed_position: pulsos del calibrado (scripts/xarm5/robot/xl330_gripper.py calibrate).
         profile_velocity: unidades de 0.229 rpm (40 = 9 rpm). handlers: (puerto, paquetes) del SDK,
         para las pruebas sin hardware."""
         self.port = port
@@ -254,7 +254,7 @@ class XL330Gripper:
 
     def _configure(self) -> None:
         if not self.calibrated:
-            raise GripperError("not calibrated: run scripts/xarm5/xl330_gripper.py calibrate")
+            raise GripperError("not calibrated: run scripts/xarm5/robot/xl330_gripper.py calibrate")
         self._write(ADDR_TORQUE_ENABLE, 1, 0)
         if self._read(ADDR_OPERATING_MODE, 1) != MODE_CURRENT_BASED_POSITION:  # EEPROM: solo si cambia
             self._write(ADDR_OPERATING_MODE, 1, MODE_CURRENT_BASED_POSITION)

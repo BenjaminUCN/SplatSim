@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 import torch
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-import run_policy_trials as rpt  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.xarm5.trials import run_policy_trials as rpt  # noqa: E402
 from test_trial_stop import FakeAgent, trial  # noqa: E402
 
 

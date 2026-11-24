@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.xarm5.data_jobs import SCRIPTS, command, dataset_path
+from scripts.xarm5.training.data_jobs import SCRIPTS, command, dataset_path
 from splatsim.cloud.estimate import (PNG_GB, Workload, convert_workload, render_workload, splat_workload,
                                      train_workload, trials_workload)
 from splatsim.utils.data.episode_selection import load_discarded
@@ -429,7 +429,7 @@ class Splat:
     kind = "splat"
     needs_gpu = True
     image = "render"             # tiene el rasterizador; pycolmap-cuda12 trae COLMAP con CUDA
-    script = "scripts/xarm5/splat_from_video.py"
+    script = "scripts/xarm5/scene/splat_from_video.py"
     output_feeds_children = False
     needs_approval = True
 
@@ -479,14 +479,14 @@ class Splat:
 
 
 class Trials:
-    """scripts/xarm5/cloud_trials.py: evalúa una política en el sim del pod, como run_policy_trials.py en
+    """scripts/xarm5/cloud/cloud_trials.py: evalúa una política en el sim del pod, como run_policy_trials.py en
     el lab. Sube el modelo (sin los checkpoints intermedios, salvo args.step), el meta/ de su dataset,
     la escena y las hojas; baja la carpeta de la corrida a ~/data/policy_trials/<run_name>/."""
     kind = "trials"
     needs_gpu = True
     image = "render"             # el rasterizador, PyBullet y LeRobot
     output_feeds_children = False
-    script = "scripts/xarm5/cloud_trials.py"
+    script = "scripts/xarm5/cloud/cloud_trials.py"
 
     def workload(self, job: dict) -> Workload:
         return trials_workload(job["trials"], job["cameras"], job["model_gb"], job["kept_trials"])

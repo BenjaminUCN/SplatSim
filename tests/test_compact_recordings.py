@@ -10,8 +10,8 @@ import numpy as np
 import torch
 from PIL import Image
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-import compact_recordings as cr  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.xarm5.recordings import compact_recordings as cr  # noqa: E402
 
 
 class CompactRecordingsTest(unittest.TestCase):

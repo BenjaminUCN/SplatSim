@@ -42,4 +42,4 @@ echo "vCPU (límite cgroup): $(cat /sys/fs/cgroup/cpu.max 2>/dev/null || echo '?
 echo "RAM (límite cgroup): $(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo '?')"
 df -h /dev/shm "$WORKDIR" | sed 1d
 "$VENV/bin/python" -c "import torch, torchcodec, lerobot, viser, wandb, tyro; print('torch', torch.__version__, '· CUDA', torch.cuda.is_available())"
-echo "Listo. Panel: cd $REPO && $VENV/bin/python scripts/xarm5/train_server.py"
+echo "Listo. Panel: cd $REPO && $VENV/bin/python scripts/xarm5/training/train_server.py"

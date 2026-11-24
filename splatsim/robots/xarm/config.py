@@ -47,7 +47,7 @@ APPLE_HEMISPHERE = {"center": (0.0, 0.0, 0.267), "radius": (0.5, 0.95), "facing"
                     "z": (-0.5, 0.6), "x": (-1.5, 1.5), "y": (-1.5, 1.5)}   # x, y: sin recorte (más allá del alcance)
 # Valor inicial de los sliders. Antes x=0.3 (fuera de rango); ahora dentro.
 APPLE_INIT = (-0.3, 0.2, 0.1)
-# grilla de posiciones para scripts/xarm5/run_policy_trials.py (se llena con el botón de guardar)
+# grilla de posiciones para scripts/xarm5/trials/run_policy_trials.py (se llena con el botón de guardar)
 from splatsim.utils.scene.apple_grid import APPLE_GRID_PATH  # noqa: E402,F401  (antes vivía aquí)
 
 # objetos de la escena: su URDF en urdf_models (object_name) y su splat en objects.yaml

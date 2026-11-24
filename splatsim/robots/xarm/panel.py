@@ -80,7 +80,7 @@ def splat_object_glb(config: dict, opacity: float = SPLAT_MESH_OPACITY) -> bytes
 
 @functools.cache
 def d435i_meshes() -> dict:
-    """Mallas de la D435i (scripts/xarm5/build_d435i_mesh.py): vértices, caras y color por parte."""
+    """Mallas de la D435i (scripts/xarm5/robot/build_d435i_mesh.py): vértices, caras y color por parte."""
     meshes = {}
     for filename, rgba in D435I_MESHES:
         triangles = read_stl(os.path.join(CAMERA_MESH_DIR, filename)).reshape(-1, 3)
@@ -213,7 +213,7 @@ class SimPanel(StationPanel):
         with self.v.gui.add_folder("Occluders"):
             self._occ_saved = self.v.gui.add_dropdown(
                 "Saved leaf", list(self._saved_leaves) or ["-"],
-                hint="Leaves cut with scripts/xarm5/segment_leaf.py")
+                hint="Leaves cut with scripts/xarm5/scene/segment_leaf.py")
             add = self.v.gui.add_button("Add to Scene", hint="The same leaf can be added several times")
             self._occ_select = self.v.gui.add_dropdown("Occluder", ["-"])
             self._occ_enabled = self.v.gui.add_checkbox("Enabled", True)

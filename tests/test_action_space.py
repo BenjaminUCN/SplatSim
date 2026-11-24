@@ -1,4 +1,4 @@
-"""Estado y acción en articulaciones: action_space.py, scripts/xarm5/to_joint_space.py y el agente.
+"""Estado y acción en articulaciones: action_space.py, scripts/xarm5/dataset/to_joint_space.py y el agente.
 
     python -m unittest discover -s tests -p "test_action_space.py"
 Arma un dataset LeRobot diminuto (solo estado y acción, sin imágenes) desde .pkl falsos, así no necesita
@@ -22,8 +22,8 @@ from splatsim.agents.lerobot_diffusion_agent import LeRobotDiffusionAgent
 from splatsim.utils.data.action_space import JOINT_NAMES, action_space_of, feature_names, joint_state_action
 from splatsim.utils.data.dataset_sources import write_sources
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-import to_joint_space  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.xarm5.dataset import to_joint_space  # noqa: E402
 
 
 def fake_pkl(ep: int, k: int) -> dict:

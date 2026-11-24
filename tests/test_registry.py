@@ -68,8 +68,8 @@ class TestMatchDataset(unittest.TestCase):
     def setUp(self):
         import sys
         from datetime import datetime
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-        from build_registry import match_dataset
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from scripts.xarm5.dataset.build_registry import match_dataset
         self.match = match_dataset
         stats = {"min": [0.0, 0.0], "max": [1.0, 1.0], "count": [100]}
 

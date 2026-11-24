@@ -675,7 +675,7 @@ class TestSimGripper(unittest.TestCase):
 
 class TestCalibrationFile(unittest.TestCase):
     def test_only_the_two_lines_change(self):
-        spec = importlib.util.spec_from_file_location("xl330_cli", "scripts/xarm5/xl330_gripper.py")
+        spec = importlib.util.spec_from_file_location("xl330_cli", "scripts/xarm5/robot/xl330_gripper.py")
         cli = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cli)
         with open("configs/xarm5_real.yaml", "rb") as f:

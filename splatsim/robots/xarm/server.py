@@ -71,7 +71,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
         "realtime": el serve_loop la avanza continuamente al ritmo del reloj y los comandos solo
         cambian el objetivo (teleoperación con GELLO); las grabaciones guardan solo el estado,
         un frame por comando, y las imágenes se renderizan después con
-        scripts/xarm5/render_recordings.py.
+        scripts/xarm5/recordings/render_recordings.py.
         occluders: archivo con hojas recortadas del splat que se agregan a la escena (ver
         splatsim/robots/xarm/occluders.py); None = ninguna.
         trail: dibuja el recorrido del efector durante cada grabación (líneas de PyBullet)."""
@@ -528,7 +528,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
 
     def restore_state(self, obs: dict) -> None:
         """Pone la escena en el estado de una observación grabada (sim_joint_positions y objetos);
-        lo usa scripts/xarm5/render_recordings.py."""
+        lo usa scripts/xarm5/recordings/render_recordings.py."""
         c = self.pybullet_client
         with self.lock:
             for i, q in enumerate(obs["sim_joint_positions"]):

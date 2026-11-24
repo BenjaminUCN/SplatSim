@@ -8,8 +8,8 @@ import numpy as np
 import torch
 from safetensors.torch import save_file
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-import train_diffusion as td  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.xarm5.training import train_diffusion as td  # noqa: E402
 
 
 class MixWeightsTest(unittest.TestCase):

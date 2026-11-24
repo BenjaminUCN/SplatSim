@@ -129,7 +129,7 @@ class LeRobotDiffusionAgent:
             cortaría) y entonces manda cerrar. La política solo aproxima; con hold_while_closing el brazo queda
             quieto mientras cierra. Da la cota de lo que se gana si el cierre lo decide una regla.
         close_detector: carpeta de un detector de cierre (splatsim/agents/close_detector.py, entrenado con
-            scripts/xarm5/close_detector.py). Con la cortadora abierta, mira wrist_rgb en cada paso y, cuando la
+            scripts/xarm5/training/close_detector.py). Con la cortadora abierta, mira wrist_rgb en cada paso y, cuando la
             probabilidad de que cerrar corte llega a detector_threshold en detector_consecutive pasos seguidos,
             manda cerrar con el brazo quieto donde está (con hold_while_closing). La política igual puede cerrar
             antes por su cuenta: cierra lo que ocurra primero. Usa solo la imagen, como en el robot real.
@@ -156,7 +156,7 @@ class LeRobotDiffusionAgent:
     ):
         """checkpoint: carpeta del modelo o repo del Hub (None -> DEFAULT_CHECKPOINT).
         dataset_root: dataset con que se entrenó, carpeta o repo del Hub; None -> se busca en
-        configs/registry.yaml (scripts/xarm5/build_registry.py): su carpeta si existe en esta
+        configs/registry.yaml (scripts/xarm5/dataset/build_registry.py): su carpeta si existe en esta
         máquina, si no (modelo del Hub) su repo; si el modelo no está, DEFAULT_DATASET_ROOT."""
         if ik_orientation not in IK_ORIENTATION_MODES:
             raise ValueError(f"ik_orientation debe ser uno de {IK_ORIENTATION_MODES}")

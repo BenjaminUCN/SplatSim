@@ -5,7 +5,7 @@ al sumarlas, así que filtrar por opacidad deja trozos sueltos. Por eso la regi�
 las gaussianas conectadas, mientras la superficie siga suave y el color se parezca: dos hojas
 casi nunca son continuas y del mismo color a la vez.
 
-Solo depende de numpy/scipy/plyfile/opencv: lo usan la interfaz (scripts/xarm5/segment_leaf.py)
+Solo depende de numpy/scipy/plyfile/opencv: lo usan la interfaz (scripts/xarm5/scene/segment_leaf.py)
 y las pruebas, sin GPU. Todo está en coordenadas de mundo (metros), salvo el .ply guardado, que
 conserva las gaussianas en el marco del splat para no tocar sus rotaciones ni armónicos; el .yaml
 de al lado guarda la transformación a mundo (splatsim/robots/xarm/occluders.py lo usa).
@@ -287,7 +287,7 @@ def load_occluder_config(path) -> list[dict]:
 
 
 _OCCLUDERS_HEADER = """\
-# Leaves cut from a splat (scripts/xarm5/segment_leaf.py) placed in the scene: position of the
+# Leaves cut from a splat (scripts/xarm5/scene/segment_leaf.py) placed in the scene: position of the
 # leaf's center in PyBullet world coordinates (m) and rotation (wxyz, identity = as it was in the
 # plant). They only exist in the images: no collisions. Used with --occluders; written by
 # "Save Occluders" in the control panel.

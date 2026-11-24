@@ -161,8 +161,8 @@ class SummaryTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # measure_occlusion.py importa render_recordings: el servidor solo se importa al usarlo
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-        import measure_occlusion
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from scripts.xarm5.recordings import measure_occlusion
         cls.module = measure_occlusion
 
     def test_summary_starts_at_the_first_frame_in_view(self):

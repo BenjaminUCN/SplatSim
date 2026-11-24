@@ -100,8 +100,8 @@ class TrialTableTest(unittest.TestCase):
 
 class RecordingFoldersTest(unittest.TestCase):
     def test_finds_nested_trial_runs_and_skips_symlinks(self):
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-        from review_recordings import recording_folders
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from scripts.xarm5.recordings.review_recordings import recording_folders
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_run(root, ROWS[:1])

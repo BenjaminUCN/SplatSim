@@ -22,7 +22,7 @@ gripper:
   port: auto                # auto = finds the OpenRB-150 by its USB identity
   dxl_id: 1
   baudrate: 57600
-  # Pulses, written by: python scripts/xarm5/xl330_gripper.py calibrate. null = it does not move.
+  # Pulses, written by: python scripts/xarm5/robot/xl330_gripper.py calibrate. null = it does not move.
   open_position: null
   closed_position: null
   current_limit_ma: 1200    # limit while moving or cutting (XL330 maximum 1750)

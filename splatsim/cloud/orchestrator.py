@@ -24,7 +24,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.xarm5.data_jobs import dataset_path
+from scripts.xarm5.training.data_jobs import dataset_path
 from splatsim.cloud.estimate import (SEED_HISTORY, Estimate, Workload, convert_workload, prefer_machines, rank,
                                      splat_workload, train_workload)
 from splatsim.cloud.providers import Offer, Requirements
@@ -299,7 +299,7 @@ class Orchestrator:
 
     def submit_trials(self, name: str, args: dict, req: Requirements, max_cost: float,
                       offer_id: int | None = None, description: str = "") -> dict:
-        """Evaluación en el sim de un pod (scripts/xarm5/cloud_trials.py). args: model (carpeta), dataset
+        """Evaluación en el sim de un pod (scripts/xarm5/cloud/cloud_trials.py). args: model (carpeta), dataset
         (con que se entrenó; se sube solo su meta/), run_name, arrangement, hz, grid_path y, como en
         run_policy_trials.py, occlusion_targets, trials_per_position, trial_seconds, positions,
         ik_orientation, stop_on_success, leaf_dir, keep_images_pos y step (checkpoint intermedio)."""

@@ -104,8 +104,8 @@ class CutAndHoldTest(unittest.TestCase):
 
 class MountTest(unittest.TestCase):
     def test_default_mount_puts_the_top_cover_down(self):
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-        from build_hand_held_urdf import DEFAULT_ROLL_DEG
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from scripts.xarm5.robot.build_hand_held_urdf import DEFAULT_ROLL_DEG
         T = flange_from_assembly(DEFAULT_ROLL_DEG)
         cover = T[:3, :3] @ (read_stl(f"{MESH_DIR}/top_cover.stl").reshape(-1, 3).mean(0) / 1000) + T[:3, 3]
         self.assertLess(cover[0], -0.005)   # +x: arriba con joint5 en 0
@@ -114,8 +114,8 @@ class MountTest(unittest.TestCase):
 class ObjectsYamlTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-        import add_peduncle
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from scripts.xarm5.scene import add_peduncle
         cls.module = add_peduncle
 
     TEXT = "# comment\na:\n  x: 1\n  # keep\nb:\n- 1\n- 2\nc: 3\n"

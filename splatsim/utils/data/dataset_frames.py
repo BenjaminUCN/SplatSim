@@ -1,10 +1,10 @@
 """Imágenes de un render tomadas del dataset LeRobot convertido desde él (25-nov, espacio en disco).
 
-Un render de scripts/xarm5/render_recordings.py guarda un PNG por cámara y cuadro: ~80 GB para una escena de 383
+Un render de scripts/xarm5/recordings/render_recordings.py guarda un PNG por cámara y cuadro: ~80 GB para una escena de 383
 episodios. El dataset de lerobot_conversion.py trae las mismas imágenes en AV1 (~2.7 GB).
 
 prune() borra los PNG de un render cuyo dataset está completo y verificado, y deja <render>/dataset_images.yaml, que
-dice de qué dataset y episodio sale cada uno. Con ese archivo, scripts/xarm5/review_recordings.py muestra los cuadros
+dice de qué dataset y episodio sale cada uno. Con ese archivo, scripts/xarm5/recordings/review_recordings.py muestra los cuadros
 del dataset. Ojo: son AV1, con pérdida, no los PNG exactos.
 
 Los .pkl (el estado por cuadro, ~1 KB cada uno) y meta.json se quedan, así que trayectorias, selección y etiquetas
@@ -224,7 +224,7 @@ def prune(render: Path, dataset: Path, mapping: dict[str, int], delete: bool = F
         pointer = {"dataset": str(dataset.resolve()), "cameras": cameras,
                    "episodes": {n: int(i) for n, i in sorted(mapping.items())}}
         tmp = render / (POINTER + ".tmp")
-        tmp.write_text("# PNG borrados por scripts/xarm5/prune_render_images.py; los cuadros están en este dataset\n"
+        tmp.write_text("# PNG borrados por scripts/xarm5/upkeep/prune_render_images.py; los cuadros están en este dataset\n"
                        + yaml.safe_dump(pointer, sort_keys=False))
         os.replace(tmp, render / POINTER)
     size, kept, extra = 0, 0, set()

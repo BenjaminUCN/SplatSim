@@ -10,8 +10,8 @@ import torch
 from splatsim.agents import close_detector as cd
 from splatsim.agents.lerobot_diffusion_agent import LeRobotDiffusionAgent
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-import close_detector as script  # noqa: E402
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from scripts.xarm5.training import close_detector as script  # noqa: E402
 
 
 class FakeDetector:
