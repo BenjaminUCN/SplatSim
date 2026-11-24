@@ -44,6 +44,8 @@ from splatsim.utils.trials.durations import other_durations
 
 from splatsim.robots.xarm.config import APPLE_KEY, APPLE_NAME
 from splatsim.utils.scene.peduncle import CLOSED_FRACTION
+from splatsim.utils.render.camera_setup import base_camera_poses
+from splatsim.utils.scene.scene_variation import VariationRanges, draw_variation, turn_about_own_z
 
 APPLE_QUAT = (0.0, 0.0, 0.0, 1.0)
 
@@ -110,6 +112,13 @@ class Args:
     close_when_cuttable: bool = False
     # detector de cierre desde wrist_rgb (scripts/xarm5/close_detector.py): cierra cuando dispara o cuando lo ordena
     # la política, lo primero; usar con --hold_while_closing --latch_closed
+    # por ensayo, corre y gira las cámaras base y gira el tomate alrededor del tallo, como render_recordings.py
+    # --variation (splatsim/utils/scene/scene_variation.py); variation_scale 2 = B3, el doble de las cámaras.
+    # El sorteo es por posición y ensayo: los niveles de oclusión de una posición comparten variación
+    variation: bool = False
+    variation_scale: float = 1.0
+    variation_seed: int = 0
+    tomato_yaw_deg: float = 180.0
     close_detector: str | None = None
     detector_threshold: float = 0.9
     detector_consecutive: int = 2
@@ -215,19 +224,23 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
               reset: bool = True, measure_occlusion: bool = False, leaf: dict | None = None,
               stop_on_success: bool = False, success_extra_seconds: float = 0.0,
               blank_cameras: tuple[str, ...] = (), track_camera: str | None = None,
-              track_every: int = 5) -> dict:
+              track_every: int = 5, variation: dict | None = None) -> dict:
     """apple_pos None: el tomate se deja donde está. Sin su posición en la observación (robot
     real) solo se cuentan los frames. leaf: {leaf_dir, target, key, seed} para place_trial_leaf.
     time_to_success: segundos desde el primer comando hasta que el error de agarre baja de
     SUCCESS_RADIUS (tiempo simulado en el sim, de reloj en el robot real); vacío si no llega.
     stop_on_success: corta el ensayo success_extra_seconds después de ese momento.
     blank_cameras: cámaras que la política recibe en negro.
-    track_camera: mide la oclusión del tomate en esa cámara cada track_every pasos (track_summary)."""
+    track_camera: mide la oclusión del tomate en esa cámara cada track_every pasos (track_summary).
+    variation: draw_variation(): las cámaras base y el giro del tomate de este ensayo."""
     call(robot, "stop_recording")
     if reset:
         call(robot, "reset_robot")
+    if variation is not None:
+        call(robot, "set_camera_jitter", jitter=variation["camera_jitter"])
     if apple_pos is not None:
-        robot.set_object_pose(APPLE_NAME, np.array(apple_pos), np.array(APPLE_QUAT), use_gravity=False)
+        quat = turn_about_own_z(APPLE_QUAT, variation["tomato_yaw"]) if variation else APPLE_QUAT
+        robot.set_object_pose(APPLE_NAME, np.array(apple_pos), np.array(quat), use_gravity=False)
     reset_policy(agent)
     leaf_fit = call(robot, "place_trial_leaf", **leaf) if leaf is not None else None
     leaf_info = leaf_columns(leaf_fit, leaf["target"] if leaf else None)
@@ -419,6 +432,10 @@ def main(args: Args) -> None:
         fields += ["closing_holds"]
     if args.close_detector:
         fields += ["detector_fired"]
+    if args.variation:
+        fields += ["tomato_yaw_deg", "camera_jitter_mm", "camera_jitter_deg"]
+    ranges = VariationRanges(tomato_yaw_deg=args.tomato_yaw_deg).scaled(args.variation_scale) if args.variation else None
+    base_cameras = list(base_camera_poses())
     if args.blank_cameras:
         fields += ["blank_cameras"]
     unknown = set(args.blank_cameras) - set(policy_cameras(agent))
@@ -468,6 +485,8 @@ def main(args: Args) -> None:
                     leaf.update(cameras=[args.leaf_camera], reference_q=pregrasp.get(pos_idx))
                 for trial in range(args.trials_per_position):
                     n += 1
+                    variation = (draw_variation(pos_idx * 100 + trial, list(base_cameras), ranges, args.variation_seed)
+                                 if ranges else None)
                     where = "actual" if args.here else ""
                     level = "" if target is None else f", oclusión {target:g}%"
                     print(f"\n[Trials] {n}/{total} — posición {where} {pos_idx} {apple_pos}{level}, ensayo {trial}")
@@ -500,14 +519,17 @@ def main(args: Args) -> None:
                                 "checkpoint": checkpoint, "run_name": run_name,
                                 "blank_cameras": list(args.blank_cameras),
                                 "leaf_reference": "pregrasp" if pregrasp.get(pos_idx) else None,
-                                "leaf_pregrasp": args.leaf_pregrasp if pregrasp else None}
+                                "leaf_pregrasp": args.leaf_pregrasp if pregrasp else None,
+                                "variation": variation,
+                                "variation_ranges": ranges.as_dict() if ranges else None}
                     result = run_trial(robot, agent, None if (args.here or manual) else apple_pos,
                                        args.trial_seconds, metadata, root, grasp_point,
                                        reset=not manual, measure_occlusion=not manual, leaf=leaf,
                                        stop_on_success=args.stop_on_success and not manual,
                                        success_extra_seconds=args.success_extra_seconds,
                                        blank_cameras=args.blank_cameras,
-                                       track_camera=args.track_occlusion, track_every=args.track_every)
+                                       track_camera=args.track_occlusion, track_every=args.track_every,
+                                       variation=variation)
                     if manual:
                         call(robot, "stop_recording")
                         answer = ask_operator(robot, f"Trial {n}/{total} finished: result?",
@@ -530,6 +552,11 @@ def main(args: Args) -> None:
                         row["blank_cameras"] = " ".join(args.blank_cameras)
                     if apple_pos:
                         row.update(x=apple_pos[0], y=apple_pos[1], z=apple_pos[2])
+                    if variation:
+                        jit = np.array(list(variation["camera_jitter"].values())).reshape(-1, 6)
+                        row.update(tomato_yaw_deg=round(np.degrees(variation["tomato_yaw"]), 1),
+                                   camera_jitter_mm=round(float(np.abs(jit[:, :3]).max()) * 1000, 1),
+                                   camera_jitter_deg=round(float(np.degrees(np.abs(jit[:, 3:]).max())), 2))
                     writer.writerow(row)
                     f.flush()
                     if manual:

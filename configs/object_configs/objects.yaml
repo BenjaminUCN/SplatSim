@@ -510,6 +510,39 @@ xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab:
   use_gripper: true
   gripper: hand_held_xl330
   object_overrides: {plastic_apple: tomato_real_tab}
+# 24-nov, para la transferencia: la de arriba, renderizando wrist_rgb desde la lente RGB real de la D435i (URDF
+# _lens: build_hand_held_urdf.py --camera-down --no-real-blade --lens-camera) y todas las cámaras en 4:3 con la
+# focal de la RGB de la D435i a 640x480 (~615 px: 55 x 43 grados; el resto de las escenas usa FOV_4_3 y FOV_16_9)
+xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab_lens:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down_lens.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  # el splat se capturó en la pose de cam_down (joint4 -0.6108): es la referencia de sus gaussianas
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_focal_px: 615.0
 # escena capturada de verdad con la cortadora (video scene_pruner.mp4, 23-nov): alineada sin CloudCompare,
 # con los AprilTag de la pared contra 260729_2003 y luego ajustando el URDF en la pose de reset al splat
 # (recorte: gaussianas de la caja a más de 1.5 cm del URDF o de más de 3 cm, salvo el piso)

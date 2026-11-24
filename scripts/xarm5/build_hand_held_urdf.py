@@ -6,6 +6,8 @@
     python scripts/xarm5/build_hand_held_urdf.py --mesh-dir splatsim/robot_definitions/meshes/hand_held_xl330_v4 \
         --dst .../xarm5_hand_held_v4_down.urdf                                    # v4: cuatro barras
     python scripts/xarm5/build_hand_held_urdf.py --camera-down --dst .../xarm5_hand_held_down_cam_down.urdf
+    python scripts/xarm5/build_hand_held_urdf.py --camera-down --no-real-blade --lens-camera \
+        --dst .../xarm5_hand_held_down_cam_down_lens.urdf                        # render desde la lente real
 
 Salida: xarm5_hand_held.urdf y la carpeta hand_held_xl330/ junto al URDF de entrada.
 """
@@ -32,6 +34,9 @@ def main() -> None:
     parser.add_argument("--camera-down", action="store_true",
                         help="camera stand turned 180 deg on the flange (tab towards -x of link_eef) and the "
                              "camera remounted so its image stays upright; wrist_camera_link moves with it")
+    parser.add_argument("--lens-camera", action="store_true",
+                        help="put wrist_camera_link (the frame the sim renders from) on the D435i RGB lens "
+                             "(physical_wrist_camera_pose) instead of the source URDF's frame")
     parser.add_argument("--no-real-blade", action="store_true",
                         help="leave out blade_pivot/heel/mid/tip_link (the measured pruner, see REAL_PIVOT_MM)")
     parser.add_argument("--blade-tip-mm", type=float,
@@ -45,7 +50,7 @@ def main() -> None:
     travel = Linkage.from_manifest(linkage).travel_rad if linkage else HAND_HELD_TRAVEL_RAD
     info = build_urdf(src, dst, travel, mesh_dir=args.mesh_dir, roll_deg=args.roll_deg, extra_horn_mesh=args.moving_part,
                       camera_down=args.camera_down, real_blade=not args.no_real_blade,
-                      blade_tip_radius_mm=args.blade_tip_mm)
+                      blade_tip_radius_mm=args.blade_tip_mm, lens_camera=args.lens_camera)
     print(f"Wrote {dst}")
     print(f"Removed links: {', '.join(info['removed'])}")
     print(f"Kept and moved to {info['parent']}: {', '.join(info['reparented']) or '-'}")

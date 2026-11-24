@@ -18,6 +18,7 @@ origen, el fps y las cámaras: con eso review_recordings.py superpone la trayect
 (~30 Hz) a la remuestreada.
 """
 import json
+import math
 import os
 import pickle
 import shutil
@@ -44,6 +45,7 @@ from splatsim.utils.scene.leaf_variation import (  # noqa: E402
     place_episode_leaf,
 )
 from splatsim.utils.render.parallel_episodes import own_argv, run_workers  # noqa: E402
+from splatsim.utils.scene.scene_variation import VariationRanges, draw_variation  # noqa: E402
 
 
 @dataclass
@@ -72,7 +74,16 @@ class Args:
     meta.json) y sin alejarla del recorrido, como run_policy_trials.py --leaf_camera wrist_rgb; para la cámara
     de muñeca, que en el primer frame no ve el tomate"""
     seed: int = 0
-    """semilla del sorteo de hojas"""
+    """semilla del sorteo de hojas (y de --variation)"""
+    variation: bool = False
+    """por episodio, corre y gira las cámaras base y gira el tomate alrededor del tallo
+    (splatsim/utils/scene/scene_variation.py); se anota en el meta.json de cada episodio"""
+    camera_xyz_m: float = 0.01
+    """con --variation: ± por eje del corrimiento de las cámaras base"""
+    camera_rpy_deg: float = 1.0
+    """con --variation: ± del giro de las cámaras base en roll, pitch y yaw"""
+    tomato_yaw_deg: float = 180.0
+    """con --variation: ± del giro del tomate alrededor del tallo (0 = sin girar)"""
     episodes: tuple[str, ...] = ()
     """solo estos episodios (por defecto todos)"""
     overwrite: bool = False
@@ -185,6 +196,7 @@ def main(args: Args):
     leaf_cameras = list(args.leaf_cameras) or [c for c in cameras if "wrist" not in c]
     if args.leaf_reference not in ("start", "pregrasp"):
         raise SystemExit("--leaf_reference: start o pregrasp")
+    ranges = VariationRanges(args.camera_xyz_m, args.camera_rpy_deg, args.tomato_yaw_deg) if args.variation else None
     out_root.mkdir(parents=True, exist_ok=True)
     if (folder / SELECTION_FILE).exists():
         shutil.copy(folder / SELECTION_FILE, out_root / SELECTION_FILE)
@@ -195,6 +207,7 @@ def main(args: Args):
                                            "targets": list(args.occlusion_targets),
                                            "cameras": leaf_cameras, "seed": args.seed,
                                            "reference": args.leaf_reference} if leaves else None,
+                        "variation": ranges.as_dict() if ranges else None,
                         "rendered": datetime.now().strftime("%Y-%m-%d %H:%M")}, f, sort_keys=False)
     print(f"{len(episodes)} episodios → {out_root} a {args.fps} fps, cámaras {cameras}")
     if args.workers > 1:
@@ -223,6 +236,11 @@ def main(args: Args):
         tmp.mkdir()
         if (episode / "meta.json").exists():
             shutil.copy(episode / "meta.json", tmp / "meta.json")
+        variation = None
+        if ranges:   # antes de la hoja: se ajusta con las cámaras y el tomate como quedan
+            variation = draw_variation(int(episode.name), cameras, ranges, args.seed)
+            server.set_camera_jitter(variation["camera_jitter"])
+            server.tomato_yaw = variation["tomato_yaw"]
         entries, leaf_fit = [], None
         if leaves:
             if args.leaf_reference == "pregrasp":
@@ -247,6 +265,10 @@ def main(args: Args):
             save_frame(str(tmp), k, obs, images_in_pkl=False)   # 14.7 MB por frame si no
         if leaf_fit:
             write_leaf_meta(tmp / "meta.json", entries, leaf_fit)
+        if variation:
+            meta_path = tmp / "meta.json"
+            meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
+            meta_path.write_text(json.dumps({**meta, "variation": variation}, indent=2))
         shutil.rmtree(target, ignore_errors=True)
         os.rename(tmp, target)
         gaps = np.diff(times)
@@ -255,6 +277,8 @@ def main(args: Args):
             leaf_note = f" | objetivo {leaf_fit['target']:.0f}%: {leaf_fit['status']}"
             if entries:
                 leaf_note += f", {leaf_fit['leaf']} en {leaf_fit['camera']} → {leaf_fit['occlusion']:.0f}%"
+        if variation:
+            leaf_note += f" | tomate {math.degrees(variation['tomato_yaw']):+.0f}°"
         print(f"[{n}/{len(episodes)}] {episode.name}: {len(frames)} frames grabados "
               f"({times[-1] - times[0]:.1f} s, dt máx {gaps.max() * 1000:.0f} ms) → "
               f"{len(points)} a {args.fps} fps, {time.time() - start:.0f} s{leaf_note}")

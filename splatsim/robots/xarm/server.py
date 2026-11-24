@@ -10,6 +10,7 @@ import numpy as np
 
 from splatsim.utils.render.camera_setup import base_camera_poses
 from splatsim.utils.render.occlusion import fruit_indices, measure_camera
+from splatsim.utils.scene.scene_variation import turn_about_own_z
 from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 
 # antes que gaussian_renderer: importar gaussian_splatting agrega su carpeta al path
@@ -53,7 +54,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
     # métodos que el cliente puede llamar por ZMQ además de los de ZMQRobotServer
     REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording", "get_preview",
                       "set_control_mode", "operator_prompt", "operator_answer", "measure_occlusion",
-                      "place_trial_leaf", "robot_urdf")
+                      "place_trial_leaf", "robot_urdf", "set_camera_jitter")
 
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
@@ -112,6 +113,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
             self, MAX_RECORD_SECONDS, RECORD_EVERY, state_only_max_seconds=TELEOP_MAX_RECORD_SECONDS)
         self.gripper = None  # se crea en setup_gripper(), que XArm5SimBase llama en su __init__
         self.occluders = None
+        self.tomato_yaw = 0.0            # restore_state gira los objetos esto alrededor de su z (rad)
         super().__init__(**kwargs)
         if occluders:
             self.occluders = OccluderSet(self, occluders)
@@ -400,6 +402,18 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
         """urdf_path para los clientes (run_policy_trials.py calcula con él la pose de pregrasp)."""
         return self.urdf_path
 
+    def set_camera_jitter(self, jitter: dict | None = None) -> None:
+        """Corre y gira las cámaras base respecto de su pose nominal: {nombre: [dx, dy, dz, droll, dpitch,
+        dyaw]} (m, rad; splatsim/utils/scene/scene_variation.py). Las que no están vuelven a la nominal."""
+        jitter = jitter or {}
+        unknown = set(jitter) - {n for n, cam in self.cameras.items() if hasattr(cam, "jitter")}
+        if unknown:
+            raise ValueError(f"set_camera_jitter: {sorted(unknown)} no son cámaras base")
+        with self.lock:
+            for name, cam in self.cameras.items():
+                if hasattr(cam, "jitter"):
+                    cam.jitter = tuple(float(v) for v in jitter.get(name, (0.0,) * 6))
+
     def place_trial_leaf(self, leaf_dir: str, target: float, key: int, seed: int = 0,
                          cameras: list[str] | None = None, reference_q: list[float] | None = None) -> dict:
         """Ensayos con oclusión (run_policy_trials.py --occlusion-targets): con el brazo y el tomate
@@ -523,8 +537,10 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
                 c.getLinkState(self.dummy_robot, i, computeForwardKinematics=True)
             for name, body in zip(self.splat_object_name_list, self.urdf_object_list):
                 if f"{name}_position" in obs:
-                    c.resetBasePositionAndOrientation(
-                        body, obs[f"{name}_position"], obs[f"{name}_orientation"])
+                    orientation = obs[f"{name}_orientation"]
+                    if self.tomato_yaw:   # el giro del episodio (render_recordings.py --variation)
+                        orientation = turn_about_own_z(orientation, self.tomato_yaw)
+                    c.resetBasePositionAndOrientation(body, obs[f"{name}_position"], orientation)
 
     # ── control remoto (REMOTE_METHODS) ──────────────────────────────────────
     def reset_joint_command(self) -> np.ndarray:

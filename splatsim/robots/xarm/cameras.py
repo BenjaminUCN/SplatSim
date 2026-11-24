@@ -1,4 +1,6 @@
 """Cámaras del splat: un helper común + una clase por cámara."""
+import math
+
 import numpy as np
 import torch
 from gaussian_splatting.scene.cameras import Camera
@@ -48,6 +50,24 @@ def build_splat_camera(server, T_cam_world, name: str, colmap_id: int, fov) -> C
     )
 
 
+def scene_fov(server, default):
+    """(FoVx, FoVy) en radianes. Si la escena define camera_focal_px (objects.yaml), todas las cámaras usan
+    esa focal con píxeles cuadrados a IMAGE_W x IMAGE_H (p.ej. la RGB de la D435i a 640x480); si no, default."""
+    focal = server.object_config[server.robot_name].get("camera_focal_px")
+    if focal is None:
+        return default
+    return 2 * math.atan(IMAGE_W / 2 / focal), 2 * math.atan(IMAGE_H / 2 / focal)
+
+
+def rpy_matrix(rpy) -> np.ndarray:
+    """La misma convención que getQuaternionFromEuler de PyBullet: Rz(yaw) Ry(pitch) Rx(roll)."""
+    r, p, y = rpy
+    cr, sr, cp, sp, cy, sy = math.cos(r), math.sin(r), math.cos(p), math.sin(p), math.cos(y), math.sin(y)
+    return np.array([[cy * cp, cy * sp * sr - sy * cr, cy * sp * cr + sy * sr],
+                     [sy * cp, sy * sp * sr + cy * cr, sy * sp * cr - cy * sr],
+                     [-sp, cp * sr, cp * cr]])
+
+
 def _pose_matrix(pos, rot_matrix_flat) -> np.ndarray:
     T = np.eye(4)
     T[:3, :3] = np.array(rot_matrix_flat).reshape(3, 3)
@@ -56,20 +76,29 @@ def _pose_matrix(pos, rot_matrix_flat) -> np.ndarray:
 
 
 class BaseCamera:
-    """Cámara fija en el mundo (base_rgb, base_left_rgb, ...). Su pose se cambia desde los sliders."""
+    """Cámara fija en el mundo (base_rgb, base_left_rgb, ...). Su pose se cambia desde los sliders.
+
+    jitter: corrimiento (dx, dy, dz en m, en el mundo) y giro (roll, pitch, yaw en rad, en los ejes de la
+    cámara) sobre la pose nominal, para variar la cámara por episodio; (0,)*6 = la pose nominal."""
 
     def __init__(self, server, name: str, xyz, rpy):
         self.s = server
         self.name = name
+        self.jitter = (0.0,) * 6
         self.set_pose(xyz, rpy)
 
     def set_pose(self, xyz, rpy):
         self.xyz, self.rpy = tuple(xyz), tuple(rpy)
 
+    def pose(self) -> np.ndarray:
+        """4x4 en el mundo, con el jitter."""
+        T = np.eye(4)
+        T[:3, :3] = rpy_matrix(self.rpy) @ rpy_matrix(self.jitter[3:])
+        T[:3, 3] = np.add(self.xyz, self.jitter[:3])
+        return T
+
     def get(self) -> Camera:
-        quat = self.s.pybullet_client.getQuaternionFromEuler(self.rpy)
-        rot = self.s.pybullet_client.getMatrixFromQuaternion(quat)
-        return build_splat_camera(self.s, _pose_matrix(self.xyz, rot), self.name, 1, BASE_CAM_FOV)
+        return build_splat_camera(self.s, self.pose(), self.name, 1, scene_fov(self.s, BASE_CAM_FOV))
 
 
 class WristCamera:
@@ -97,7 +126,7 @@ class WristCamera:
         st = client.getLinkState(self.s.dummy_robot, self.link_index,
                                  computeForwardKinematics=True)
         T = _pose_matrix(st[4], client.getMatrixFromQuaternion(st[5]))
-        return build_splat_camera(self.s, T, self.name, 1, WRIST_CAM_FOV)
+        return build_splat_camera(self.s, T, self.name, 1, scene_fov(self.s, WRIST_CAM_FOV))
 
 
 class AppleCamera:

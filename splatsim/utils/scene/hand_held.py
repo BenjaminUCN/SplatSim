@@ -264,10 +264,12 @@ def _part_mass(part: dict) -> float:
 
 def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, roll_deg: float = 0.0,
                extra_horn_mesh: str | None = None, keep_links=KEEP_LINKS, camera_down: bool = False,
-               real_blade: bool = True, blade_tip_radius_mm: float | None = None) -> dict:
+               real_blade: bool = True, blade_tip_radius_mm: float | None = None, lens_camera: bool = False) -> dict:
     """Escribe dst: src sin el gripper del xArm y con el hand_held_XL330, y copia las mallas al lado.
     Los links de keep_links (y lo que cuelga de ellos) siguen en la misma pose. extra_horn_mesh: STL
-    (mm, marco del ensamble) de lo que gira con el horn, p.ej. la hoja móvil."""
+    (mm, marco del ensamble) de lo que gira con el horn, p.ej. la hoja móvil. lens_camera: wrist_camera_link
+    (el marco que renderiza el sim) en la lente RGB de la D435i (physical_wrist_camera_pose) y no en el
+    marco del URDF de origen."""
     tree = ET.parse(src)
     root = tree.getroot()
     joints = {j.find("child").get("link"): j for j in root.findall("joint")}
@@ -417,7 +419,10 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
             shutil.copy2(os.path.join(CAMERA_MESH_DIR, filename), camera_dir)
         camera_joint = joints[CAMERA_LINK]
         T_parent_camera = origin_matrix(camera_joint.find("origin"))
-        if camera_down:
+        if lens_camera:
+            T_parent_camera = physical_wrist_camera_pose(camera_down)
+            _set_origin(camera_joint, T_parent_camera)
+        elif camera_down:
             T_parent_camera = flip_camera_frame(T_parent_camera)
             _set_origin(camera_joint, T_parent_camera)
         add_wrist_camera_model(root, camera_joint.find("parent").get("link"), T_parent_camera, camera_prefix,

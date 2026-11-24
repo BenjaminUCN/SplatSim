@@ -25,6 +25,7 @@ from splatsim.utils.scene.peduncle import DROPPED, EMBED, HELD, INTACT
 from splatsim.utils.render.occlusion import fit_lateral_offset, fit_message
 
 from .config import APPLE_NAME, BASE_CAM_FOV, SIM_CLOCKS
+from .cameras import scene_fov
 
 RANGE_COLOR = (255, 170, 0)   # caja del rango aleatorio (como las esferas de la grilla)
 # tallo en la vista 3D: entero (el verde del splat), cortado y sujeto, cortado y suelto
@@ -144,7 +145,7 @@ class SimPanel(StationPanel):
 
     # ── cámaras base ─────────────────────────────────────────────────────────
     def _build_camera_gui(self):
-        fovx, fovy = BASE_CAM_FOV
+        fovx, fovy = scene_fov(self.s, BASE_CAM_FOV)
         aspect = np.tan(fovx / 2) / np.tan(fovy / 2)
         self._cam_ui = {}
         with self.v.gui.add_folder("Base cameras"):
