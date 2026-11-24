@@ -90,6 +90,9 @@ def _params(rows: list[dict], meta: dict) -> dict:
     for key in ("hold_while_closing", "latch_closed", "close_when_cuttable"):
         if meta.get(key):
             out[key.replace("_", " ")] = "yes"
+    if meta.get("close_detector"):
+        out["close detector"] = (f"{Path(str(meta['close_detector'])).name} "
+                                 f"p>={meta.get('detector_threshold')} x{meta.get('detector_consecutive')}")
     if meta.get("relative_actions"):
         out["relative actions"] = "yes"
     seconds = first.get("trial_seconds") or meta.get("trial_seconds")

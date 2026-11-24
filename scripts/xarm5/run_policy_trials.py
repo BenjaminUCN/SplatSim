@@ -108,6 +108,11 @@ class Args:
     # oráculo de la simulación: la cortadora cierra cuando cerrar en ese momento cortaría (peduncle_cuttable del
     # servidor), sin importar lo que predice la política; usar con --hold_while_closing --latch_closed
     close_when_cuttable: bool = False
+    # detector de cierre desde wrist_rgb (scripts/xarm5/close_detector.py): cierra cuando dispara o cuando lo ordena
+    # la política, lo primero; usar con --hold_while_closing --latch_closed
+    close_detector: str | None = None
+    detector_threshold: float = 0.9
+    detector_consecutive: int = 2
     # termina el ensayo success_extra_seconds después de que el error de agarre baja de
     # SUCCESS_RADIUS (4 cm): ahorra tiempo y no cambia la tasa de éxito; en esos segundos el brazo
     # sigue acercándose, así el error mínimo no queda cortado en ~4 cm. time_to_success se anota
@@ -231,6 +236,7 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
     chunks_before = len(latencies)
     waypoints_before = dict(agent.waypoint_counts)
     holds_before = getattr(agent, "hold_count", 0)
+    fires_before = getattr(agent, "detector_fires", 0)
 
     # antes de que el brazo se mueva: cuánto tapa la planta (y las hojas) con el brazo en reposo
     occlusion = occlusion_columns(call(robot, "measure_occlusion")) if measure_occlusion else {}
@@ -310,6 +316,8 @@ def run_trial(robot, agent, apple_pos, trial_seconds, metadata, root, grasp_poin
         result["waypoint_timeouts"] = agent.waypoint_counts["timeout"] - waypoints_before["timeout"]
     if getattr(agent, "hold_while_closing", False):
         result["closing_holds"] = agent.hold_count - holds_before
+    if getattr(agent, "close_detector", None) is not None:
+        result["detector_fired"] = agent.detector_fires - fires_before
     if distances:
         result.update(final_dist=distances[-1], min_dist=min(distances),
                       final_grasp_err=grasp_errors[-1], min_grasp_err=min(grasp_errors))
@@ -367,7 +375,10 @@ def main(args: Args) -> None:
                                   gripper_threshold=args.gripper_threshold,
                                   hold_while_closing=args.hold_while_closing,
                                   latch_closed=args.latch_closed,
-                                  close_when_cuttable=args.close_when_cuttable)
+                                  close_when_cuttable=args.close_when_cuttable,
+                                  close_detector=args.close_detector,
+                                  detector_threshold=args.detector_threshold,
+                                  detector_consecutive=args.detector_consecutive)
 
     first_obs = robot.get_observations()
     missing = [c for c in policy_cameras(agent) if first_obs.get(c) is None]
@@ -406,6 +417,8 @@ def main(args: Args) -> None:
         fields += ["gripper_threshold"]
     if args.hold_while_closing:
         fields += ["closing_holds"]
+    if args.close_detector:
+        fields += ["detector_fired"]
     if args.blank_cameras:
         fields += ["blank_cameras"]
     unknown = set(args.blank_cameras) - set(policy_cameras(agent))
@@ -480,6 +493,9 @@ def main(args: Args) -> None:
                                 "hold_while_closing": args.hold_while_closing,
                                 "latch_closed": args.latch_closed,
                                 "close_when_cuttable": args.close_when_cuttable,
+                                "close_detector": args.close_detector,
+                                "detector_threshold": args.detector_threshold if args.close_detector else None,
+                                "detector_consecutive": args.detector_consecutive if args.close_detector else None,
                                 "waypoint_max_steps": args.waypoint_max_steps if args.waypoint_tolerance else None,
                                 "checkpoint": checkpoint, "run_name": run_name,
                                 "blank_cameras": list(args.blank_cameras),

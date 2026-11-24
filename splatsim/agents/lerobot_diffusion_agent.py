@@ -128,6 +128,11 @@ class LeRobotDiffusionAgent:
             predice la política: manda abrir hasta que la observación trae peduncle_cuttable (cerrar ahora
             cortaría) y entonces manda cerrar. La política solo aproxima; con hold_while_closing el brazo queda
             quieto mientras cierra. Da la cota de lo que se gana si el cierre lo decide una regla.
+        close_detector: carpeta de un detector de cierre (splatsim/agents/close_detector.py, entrenado con
+            scripts/xarm5/close_detector.py). Con la cortadora abierta, mira wrist_rgb en cada paso y, cuando la
+            probabilidad de que cerrar corte llega a detector_threshold en detector_consecutive pasos seguidos,
+            manda cerrar con el brazo quieto donde está (con hold_while_closing). La política igual puede cerrar
+            antes por su cuenta: cierra lo que ocurra primero. Usa solo la imagen, como en el robot real.
     """
 
     def __init__(
@@ -145,6 +150,9 @@ class LeRobotDiffusionAgent:
         hold_while_closing: bool = False,
         latch_closed: bool = False,
         close_when_cuttable: bool = False,
+        close_detector: str | None = None,
+        detector_threshold: float = 0.9,
+        detector_consecutive: int = 2,
     ):
         """checkpoint: carpeta del modelo o repo del Hub (None -> DEFAULT_CHECKPOINT).
         dataset_root: dataset con que se entrenó, carpeta o repo del Hub; None -> se busca en
@@ -164,6 +172,11 @@ class LeRobotDiffusionAgent:
         self.latch_closed = latch_closed
         self._latched = False                          # latch_closed: ya cerró, la pinza queda cerrada
         self.close_when_cuttable = close_when_cuttable
+        self.close_detector = None
+        if close_detector:
+            from splatsim.agents.close_detector import CloseDetector
+            self.close_detector = CloseDetector(close_detector, detector_threshold, detector_consecutive, device)
+        self.detector_fires = 0                        # veces que cerró el detector
         self.waypoint_counts = {"reached": 0, "timeout": 0}   # acciones que terminaron así
         self._held = 0                                         # pasos que lleva la acción actual
         self._last_joints: np.ndarray | None = None            # último comando articular (5)
@@ -437,6 +450,8 @@ class LeRobotDiffusionAgent:
         self._last_joints = None
         self._hold_joints = None
         self._latched = False
+        if self.close_detector is not None:
+            self.close_detector.reset()
 
     def _observe_only(self, obs_frame: dict) -> None:
         """Mete la observación en la cola de la política sin sacar una acción (lo que hace
@@ -502,6 +517,16 @@ class LeRobotDiffusionAgent:
     def _cuttable_command(obs: dict) -> float:
         """close_when_cuttable: cerrar (1) si cerrar ahora cortaría el tallo, si no abrir (0)."""
         return 1.0 if obs.get("peduncle_cuttable") else 0.0
+
+    def _detector_command(self, obs: dict, joints: np.ndarray, gripper: float) -> tuple[np.ndarray, float]:
+        """close_detector: si dispara con la cortadora abierta, cerrar con el brazo en la posición actual."""
+        from splatsim.agents.close_detector import OPEN_MAX
+        if self._latched or self._hold_joints is not None or self._gripper_closed(obs, joints.size) >= OPEN_MAX:
+            return joints, gripper
+        if self.close_detector.fire(obs["wrist_rgb"]):
+            self.detector_fires += 1
+            return np.asarray(obs["joint_positions"][:joints.size], dtype=float), 1.0
+        return joints, gripper
 
     def gripper_command(self) -> float:
         """Orden de la pinza: la predicha o, con gripper_threshold, 0/1."""
@@ -607,6 +632,8 @@ class LeRobotDiffusionAgent:
         gripper = self.gripper_command()
         if self.close_when_cuttable:
             gripper = self._cuttable_command(obs_dict)
+        if self.close_detector is not None:
+            joints, gripper = self._detector_command(obs_dict, joints, gripper)
         if self.hold_while_closing:
             joints, gripper = self._hold_for_closing(obs_dict, joints, gripper)
         if self.latch_closed:

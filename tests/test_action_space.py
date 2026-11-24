@@ -122,6 +122,7 @@ class JointAgentTest(unittest.TestCase):
         agent.hold_while_closing = False
         agent.latch_closed = False
         agent.close_when_cuttable = False
+        agent.close_detector = None
         seen = []
         agent._build_obs = lambda obs: seen.append(obs) or {}
         agent.postprocess = lambda a: a
