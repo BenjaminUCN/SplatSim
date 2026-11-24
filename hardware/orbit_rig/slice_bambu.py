@@ -28,6 +28,7 @@ PLATES = {   # placa: (piezas, cambios al perfil)
     "4_arcos": (["arco_1", "arco_2", "arco_3", "arco_4"], FAST),
     "5_carro_poste": (["carro", "poste", "punta_pedestal"], {**FAST, "wall_loops": "3"}),
     "opcional_colgante": (["punta_colgante"], FAST),
+    "opcional_pedestal_mano": (["pedestal_mano", "punta_pedestal"], {**FAST, "wall_loops": "3"}),
 }
 
 
@@ -46,6 +47,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--stl", type=Path, default=Path.home() / "data" / "cad" / "orbit_rig")
     parser.add_argument("--bambu", type=Path, default=Path.home() / ".local" / "opt" / "bambu")
+    parser.add_argument("--plates", nargs="+", choices=list(PLATES), help="solo estas placas (por defecto, todas)")
     args = parser.parse_args()
     stl, bambu = args.stl.expanduser(), args.bambu.expanduser()
     profiles = bambu / "squashfs-root" / "resources" / "profiles" / "BBL"
@@ -59,6 +61,8 @@ def main():
             (tmp / file).write_text(json.dumps({**flat(profiles, kind, name), "from": "system"}))
         total_min = total_g = 0.0
         for plate, (parts, changes) in PLATES.items():
+            if args.plates and plate not in args.plates:
+                continue
             process = {**flat(profiles, "process", PROCESS), **changes, "from": "system", "name": f"orbit_rig {plate}"}
             (tmp / "process.json").write_text(json.dumps(process))
             work = tmp / plate

@@ -41,6 +41,7 @@ El perfil es "0.28mm Extra Draft" con estos cambios:
 | `5_carro_poste` | carro, poste y punta-pedestal | 46 min | 27 g |
 | total | | **4 h 33 min** | **170 g** |
 | `opcional_colgante` | pinza para colgar el tomate de la rama; se ve desde algunos ángulos | 19 min | 10 g |
+| `opcional_pedestal_mano` | pedestal suelto (pie de 110 mm y poste) con la punta-pedestal, para filmar a mano sin la base giratoria | 1 h 12 min | 36 g |
 
 El tiempo incluye el arranque de cada placa (calentar, nivelar y purgar), unos 8 min por placa. Por eso las piezas chicas van juntas.
 
@@ -79,6 +80,18 @@ Para instalar Bambu Studio sin sudo:
 7. Calzar la pata en el brazo con el M3×20.
 8. Atornillar la cámara a la placa del carro.
 9. Llenar la copa de contrapeso.
+
+## Pedestal para filmar a mano
+
+`pedestal_mano.stl` es el poste con un pie propio de 110 mm, sin base, rotor ni arco. Tiene el mismo encaje que `poste`, así que lleva `punta_pedestal` o `punta_colgante`. Se imprime de pie y no necesita soportes. Con la punta-pedestal metida a fondo, el centro del fruto queda a unos 174 mm de la mesa, para poder filmar también desde un poco más abajo. La placa es `opcional_pedestal_mano`:
+
+```bash
+python3 hardware/orbit_rig/slice_bambu.py --plates opcional_pedestal_mano
+```
+
+- La punta va a presión y se fija con un M3×10 autorroscante en el agujero lateral.
+- Para que no se vuelque si se toca, conviene pegar el pie a la mesa con cinta doble faz o ponerle peso encima.
+- Al grabar, hay que mover la cámara y no el pedestal, por la misma razón que con el soporte: el fondo tiene que quedar quieto respecto al tomate.
 
 ## Captura
 

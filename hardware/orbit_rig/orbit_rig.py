@@ -44,6 +44,7 @@ ARC_FROM, ARC_TO = -20, 88   # grados; la pata baja desde ARC_FROM
 JOINTS = (7.5, 32.5, 57.5)   # uniones entre los tramos del arco (lejos de las marcas cada 5°)
 TOMATO_ABOVE_ROTOR = 110     # centro del tomate sobre la cara superior del rotor
 POST_R = 7
+HAND_POST_H, FOOT_R, FOOT_T = 120, 55, 4   # pedestal suelto (sin la base giratoria), para filmar a mano
 CAM = (90, 25, 25)           # D435i: largo, alto, profundidad
 M3, M3_HEAD, M3_NUT = 3.3, 6.2, 5.8 / math.sqrt(3)     # nut: radio circunscrito de la tuerca
 M4, M4_HEAD, M4_NUT = 4.4, 8.2, 7.1 / math.sqrt(3)
@@ -183,6 +184,17 @@ def pedestal_tip():
     return t
 
 
+def hand_pedestal():
+    """Poste con pie propio, para filmar a mano sin la base giratoria: el mismo encaje (y prisionero M3) que
+    el poste, así que lleva cualquiera de las dos puntas. Se imprime de pie, sin soportes."""
+    top = HAND_POST_H
+    p = cyl(FOOT_R, 0, FOOT_T) + cyl(POST_R, 0, top)
+    p += Pos(0, 0, FOOT_T) * Cone(22, POST_R, 16, align=(Align.CENTER, Align.CENTER, Align.MIN))   # refuerzo
+    p -= cyl(4 + FIT, top - 28, top + 1)                              # encaje de la punta
+    p -= Pos(0, 0, top - 6) * Rot(0, 90, 0) * Cylinder(1.3, 2 * POST_R + 2)   # prisionero M3 (autorrosca)
+    return p
+
+
 def hook_tip():
     """Para colgar el tomate de su rama: sube por el costado y la pinza con un M3."""
     z = Z_POST_TOP
@@ -282,6 +294,7 @@ def printable_parts() -> dict:
     return {
         "base": base(), "rotor": rotor(), "brazo": arm(), "poste": Rot(180, 0, 0) * post(),
         "punta_pedestal": Rot(180, 0, 0) * pedestal_tip(), "punta_colgante": Rot(90, 0, 0) * hook_tip(),
+        "pedestal_mano": hand_pedestal(),
         **{f"arco_{i + 1}": arc_segment(i) for i in range(len(EDGES) - 1)}, "carro": Rot(90, 0, 0) * carriage(),
     }
 
@@ -307,7 +320,7 @@ def fits(shape) -> str:
     return "ok en diagonal" if db.size.X <= BED[0] and db.size.Y <= BED[1] else "NO CABE"
 
 
-def render(parts, path):
+def render(parts, path, lims=((-150, 250), (-200, 200), (0, 400))):
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -322,10 +335,10 @@ def render(parts, path):
             v = np.array([tuple(p) for p in verts])
             ax.add_collection3d(Poly3DCollection(v[np.array(tris)], facecolors=color, edgecolor="none",
                                                  linewidth=0, alpha=1.0, shade=True))
-        ax.set_xlim(-150, 250)
-        ax.set_ylim(-200, 200)
-        ax.set_zlim(0, 400)
-        ax.set_box_aspect((400, 400, 400))
+        ax.set_xlim(*lims[0])
+        ax.set_ylim(*lims[1])
+        ax.set_zlim(*lims[2])
+        ax.set_box_aspect([hi - lo for lo, hi in lims])
         ax.view_init(elev, azim)
         ax.set_axis_off()
     fig.savefig(path, dpi=80, bbox_inches="tight")
@@ -357,6 +370,12 @@ def main():
     ]
     export_step(Compound([s for s, _ in assembly]), str(out / "ensamblado.step"))
     render(assembly, out / "vista_previa.png")
+    # el pedestal suelto con su punta y el tomate
+    lift = HAND_POST_H - Z_POST_TOP
+    render([(hand_pedestal(), "#d8d8d8"), (Pos(0, 0, lift) * pedestal_tip(), "#b0b0b0"),
+            (Pos(0, 0, lift + Z_C - 10 + 2) * Sphere(36.4), "#d23a2a")], out / "pedestal_mano.png",
+           lims=((-110, 110), (-110, 110), (0, 220)))
+    print(f"pedestal_mano: centro del tomate a ~{lift + Z_C - 10 + 2:.0f} mm de la mesa, con la punta-pedestal a fondo")
     lens = [round(x - CAM[2] / 2) for x in SLOT]
     print(f"tomate a {Z_C:.0f} mm de la mesa; frente de la cámara a {lens[0]}–{lens[1]} mm del tomate")
     print(f"-> {out}")
