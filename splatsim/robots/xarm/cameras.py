@@ -37,9 +37,10 @@ def build_splat_camera(server, T_cam_world, name: str, colmap_id: int, fov) -> C
     T_no_scale[:3, 3] = T_cw
     T_wc = torch.linalg.inv(T_no_scale)[:3, 3]   # 3DGS espera (R c2w, T w2c)
 
-    blank = to_pil_image(torch.zeros((3, IMAGE_H, IMAGE_W)).float())
+    width, height = scene_image_size(server)
+    blank = to_pil_image(torch.zeros((3, height, width)).float())
     return Camera(
-        (IMAGE_W, IMAGE_H),
+        (width, height),
         colmap_id,
         R_cw.detach().cpu().numpy(),
         T_wc.detach().cpu().numpy(),
@@ -50,13 +51,22 @@ def build_splat_camera(server, T_cam_world, name: str, colmap_id: int, fov) -> C
     )
 
 
+def scene_image_size(server) -> tuple[int, int]:
+    """(ancho, alto) de las imágenes: camera_image_size [alto, ancho] de la escena (objects.yaml) o
+    IMAGE_W x IMAGE_H."""
+    size = server.object_config[server.robot_name].get("camera_image_size")
+    return (IMAGE_W, IMAGE_H) if size is None else (int(size[1]), int(size[0]))
+
+
 def scene_fov(server, default):
     """(FoVx, FoVy) en radianes. Si la escena define camera_focal_px (objects.yaml), todas las cámaras usan
-    esa focal con píxeles cuadrados a IMAGE_W x IMAGE_H (p.ej. la RGB de la D435i a 640x480); si no, default."""
+    esa focal con píxeles cuadrados sobre scene_image_size (p.ej. la RGB de la D435i en 16:9 a 640x360:
+    ~462 px, 69 x 42 grados); si no, default."""
     focal = server.object_config[server.robot_name].get("camera_focal_px")
     if focal is None:
         return default
-    return 2 * math.atan(IMAGE_W / 2 / focal), 2 * math.atan(IMAGE_H / 2 / focal)
+    width, height = scene_image_size(server)
+    return 2 * math.atan(width / 2 / focal), 2 * math.atan(height / 2 / focal)
 
 
 def rpy_matrix(rpy) -> np.ndarray:

@@ -65,6 +65,15 @@ class CameraTest(unittest.TestCase):
         # píxeles cuadrados: la misma focal en x y en y
         self.assertAlmostEqual(320 / math.tan(fovx / 2), 240 / math.tan(fovy / 2), places=6)
 
+    def test_16_9_matches_base_fov(self):
+        from splatsim.robots.xarm.config import BASE_CAM_FOV
+        self.assertEqual(self.cameras.scene_image_size(self.server), (640, 480))
+        self.server.object_config["scene"].update(camera_image_size=[360, 640], camera_focal_px=462.0)
+        self.assertEqual(self.cameras.scene_image_size(self.server), (640, 360))
+        # 16:9 a 462 px: lo mismo que ven hoy las cámaras base (FOV_16_9), sin estirar
+        for got, want in zip(self.cameras.scene_fov(self.server, None), BASE_CAM_FOV):
+            self.assertAlmostEqual(math.degrees(got), math.degrees(want), delta=0.1)
+
     def test_jitter_moves_pose(self):
         cam = self.cameras.BaseCamera(self.server, "base_rgb", (0.1, 0.2, 0.3), (-1.5, 0.0, -4.7))
         nominal = cam.pose()

@@ -75,6 +75,10 @@ def main(args: Args) -> None:
     out = Path(args.out).expanduser()
     out.mkdir(parents=True, exist_ok=True)
     server = make_server(args.robot_name, BASE + ["wrist_rgb"])
+    global TILE
+    from splatsim.robots.xarm.cameras import scene_image_size
+    width, height = scene_image_size(server)
+    TILE = (320, round(320 * height / width))   # la proporción de la escena
     tag = args.robot_name.replace("xarm5_lite_plant_v3_hand_held_down_cam_down_", "")
 
     wrist_rows, camera_rows, tomato_rows = [], [], []

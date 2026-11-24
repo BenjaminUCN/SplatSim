@@ -511,8 +511,10 @@ xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab:
   gripper: hand_held_xl330
   object_overrides: {plastic_apple: tomato_real_tab}
 # 24-nov, para la transferencia: la de arriba, renderizando wrist_rgb desde la lente RGB real de la D435i (URDF
-# _lens: build_hand_held_urdf.py --camera-down --no-real-blade --lens-camera) y todas las cámaras en 4:3 con la
-# focal de la RGB de la D435i a 640x480 (~615 px: 55 x 43 grados; el resto de las escenas usa FOV_4_3 y FOV_16_9)
+# _lens: build_hand_held_urdf.py --camera-down --no-real-blade --lens-camera) y todas las cámaras como la RGB de
+# la D435i en 16:9 (todo el sensor), a 640x360 con píxeles cuadrados: focal ~462 px, 69.4 x 42.6 grados (del
+# datasheet; medir con rs-enumerate-devices -c). Las base ven lo mismo que en las otras escenas (FOV_16_9, que
+# ahí se estira a 640x480); en 4:3 la D435i recorta a ~55 x 43 y las base dejaban de ver el tomate.
 xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab_lens:
   urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down_lens.urdf]
   base_position:
@@ -542,7 +544,8 @@ xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab_lens:
   use_gripper: true
   gripper: hand_held_xl330
   object_overrides: {plastic_apple: tomato_real_tab}
-  camera_focal_px: 615.0
+  camera_image_size: [360, 640]
+  camera_focal_px: 462.0
 # escena capturada de verdad con la cortadora (video scene_pruner.mp4, 23-nov): alineada sin CloudCompare,
 # con los AprilTag de la pared contra 260729_2003 y luego ajustando el URDF en la pose de reset al splat
 # (recorte: gaussianas de la caja a más de 1.5 cm del URDF o de más de 3 cm, salvo el piso)
