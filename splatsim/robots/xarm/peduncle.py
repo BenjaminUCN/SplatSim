@@ -10,7 +10,7 @@ centro del filo (gripper_center_link), que también es el punto del error.
 """
 import numpy as np
 
-from splatsim.utils.scene.hand_held import real_blade_point_mm
+from splatsim.utils.scene.hand_held import OPENING_TABLES, real_blade_point_mm
 from splatsim.utils.scene.peduncle import (CLOSED_FRACTION, DROPPED, HELD, INTACT, cut_check, cut_target_dtheta,
                                            next_stem_state, real_cut_check, to_world)
 
@@ -21,6 +21,7 @@ PIVOT_LINK = "hand_held_base"        # su eje z es el del pivote de la mandíbul
 
 
 class PeduncleCutter:
+    opening = OPENING_TABLES["b2"]   # apertura de la cortadora real; la escena la cambia con pruner_opening
     def __init__(self, server, stem: dict):
         self.s = server
         self.stem = stem
@@ -30,6 +31,8 @@ class PeduncleCutter:
         self.blade_link = links.get(BLADE_LINK)   # None: esta escena no tiene cortadora, solo se ve el tallo
         self.pivot_link = links.get(PIVOT_LINK)
         self.cut_range_mm = tuple(stem["cut_range_mm"]) if stem.get("cut_range_mm") else None
+        # apertura de la cortadora real: pruner_opening de la escena (b2 por defecto, b3 para la pinza v6)
+        self.opening = OPENING_TABLES[server.object_config[server.robot_name].get("pruner_opening", "b2")]
         self._target_mm = None   # cut_range_mm: punto del filo al que apuntar, en hand_held_base (mm)
         self.state = INTACT
         self.last_check = None
@@ -83,9 +86,13 @@ class PeduncleCutter:
     def target_mm(self) -> np.ndarray:
         """cut_range_mm: el punto del filo al que apuntar, en hand_held_base (mm)."""
         if self._target_mm is None:
-            self._target_mm = real_blade_point_mm(float(np.mean(self.cut_range_mm)), cut_target_dtheta(),
+            self._target_mm = real_blade_point_mm(float(np.mean(self.cut_range_mm)), self.target_dtheta(),
                                                   self.plane_z_mm())
         return self._target_mm
+
+    def target_dtheta(self) -> float:
+        """Grados del filo cerrado hacia el lado abierto a los que apuntar, con la apertura de esta cortadora."""
+        return cut_target_dtheta(opening=self.opening)
 
     def error(self) -> float | None:
         """Distancia (m) del punto del filo (el medio de cut_range_mm o, sin él, el centro del filo) al punto
@@ -107,7 +114,7 @@ class PeduncleCutter:
         if self.cut_range_mm is not None:
             b, t = self._to_base_mm([bottom, top])
             return real_cut_check(b, t, self.plane_z_mm(), self.cut_range_mm,
-                                  radius_mm=self.stem.get("radius", 0.0025) * 1000) == "ok"
+                                  radius_mm=self.stem.get("radius", 0.0025) * 1000, opening=self.opening) == "ok"
         return cut_check(bottom, top, *self._blade()) == "ok"
 
     def reset(self) -> None:
@@ -137,7 +144,7 @@ class PeduncleCutter:
         if self.cut_range_mm is not None:
             b, t = self._to_base_mm([bottom, top])
             self.last_check = real_cut_check(b, t, self.plane_z_mm(), self.cut_range_mm,
-                                             radius_mm=self.stem.get("radius", 0.0025) * 1000)
+                                             radius_mm=self.stem.get("radius", 0.0025) * 1000, opening=self.opening)
         else:
             self.last_check = cut_check(bottom, top, *self._blade())
         print(f"[xArm5] cortadora cerrada, pedúnculo: {self.last_check}")

@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from splatsim.utils.scene.hand_held import (MESH_DIR, blade_polar_mm, flange_from_assembly, read_stl,
-                                           real_blade_point_mm, real_opening_deg)
+                                           real_blade_point_mm, real_opening_deg, OPENING_TABLES)
 from splatsim.utils.scene.peduncle import (
     DROPPED,
     EMBED,
@@ -159,6 +159,15 @@ class RealBladeTest(unittest.TestCase):
         self.assertAlmostEqual(real_opening_deg(0.8), 7.6)
         self.assertAlmostEqual(real_opening_deg(1.0), 0.0)
         self.assertAlmostEqual(cut_target_dtheta(), 3.8)
+
+    def test_opening_b3(self):
+        b3 = OPENING_TABLES["b3"]
+        self.assertAlmostEqual(real_opening_deg(0.0, b3), 35.5)
+        self.assertAlmostEqual(real_opening_deg(1.0, b3), 2.7)
+        self.assertAlmostEqual(cut_target_dtheta(opening=b3), real_opening_deg(0.8, b3) / 2)
+        # cerrada del todo la B3 deja 2.7° entre hoja y filo: lo que la B2 deja fuera, la B3 lo tiene adentro
+        self.assertEqual(self.check(40, 6.0, gripper=1.0), "open_side")
+        self.assertEqual(self.check(40, 6.0, gripper=1.0, opening=b3), "ok")
 
     def test_inside_the_range_between_blade_and_anvil(self):
         self.assertEqual(self.check(30, 3.8), "ok")

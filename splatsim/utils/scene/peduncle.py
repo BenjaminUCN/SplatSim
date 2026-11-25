@@ -13,7 +13,7 @@ la hoja es el perpendicular al eje del pivote. Dos reglas:
 """
 import numpy as np
 
-from .hand_held import blade_polar_mm, real_opening_deg
+from .hand_held import REAL_OPENING_DEG, blade_polar_mm, real_opening_deg
 
 STEM_RGB = (0.27, 0.46, 0.13)
 LENGTH = 0.05           # m de tallo visible sobre el tomate
@@ -92,14 +92,15 @@ def cut_check(bottom, top, blade, pivot_axis, reach: float = BLADE_REACH,
     return "ok"
 
 
-def cut_target_dtheta(closed_fraction: float = CLOSED_FRACTION) -> float:
+def cut_target_dtheta(closed_fraction: float = CLOSED_FRACTION, opening=REAL_OPENING_DEG) -> float:
     """Grados desde el filo cerrado hacia el lado abierto al que apuntar: el medio del ángulo entre hoja y
-    yunque cuando el simulador decide el corte."""
-    return real_opening_deg(closed_fraction) / 2
+    yunque cuando el simulador decide el corte. opening: tabla de apertura de la cortadora (hand_held.OPENING_TABLES)."""
+    return real_opening_deg(closed_fraction, opening) / 2
 
 
 def real_cut_check(bottom_mm, top_mm, plane_z_mm: float, range_mm, radius_mm: float = RADIUS * 1000,
-                   gripper: float = CLOSED_FRACTION, max_tilt_deg: float = MAX_TILT_DEG) -> str:
+                   gripper: float = CLOSED_FRACTION, max_tilt_deg: float = MAX_TILT_DEG,
+                   opening=REAL_OPENING_DEG) -> str:
     """Regla con la hoja real, con el tallo en hand_held_base (mm; el eje del pivote es z y el plano de la hoja
     z = plane_z_mm). "ok" o por qué no: tilted, misses_plane, near_pivot (más cerca que range_mm[0]), past_range
     (más lejos que range_mm[1]), anvil_side (pasó el filo hacia el yunque) u open_side (fuera de la hoja)."""
@@ -119,6 +120,6 @@ def real_cut_check(bottom_mm, top_mm, plane_z_mm: float, range_mm, radius_mm: fl
     margin = np.degrees(radius_mm / r)          # el tallo tiene grosor
     if dtheta < -margin:
         return "anvil_side"
-    if dtheta > real_opening_deg(gripper) + margin:
+    if dtheta > real_opening_deg(gripper, opening) + margin:
         return "open_side"
     return "ok"

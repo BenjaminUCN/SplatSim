@@ -8,6 +8,10 @@
     python scripts/xarm5/robot/build_hand_held_urdf.py --camera-down --dst .../xarm5_hand_held_down_cam_down.urdf
     python scripts/xarm5/robot/build_hand_held_urdf.py --camera-down --no-real-blade --lens-camera \
         --dst .../xarm5_hand_held_down_cam_down_lens.urdf                        # render desde la lente real
+    python scripts/xarm5/robot/build_hand_held_urdf.py --camera-down --no-real-blade --lens-camera --camera-wedge-deg 15 \
+        --dst .../xarm5_hand_held_down_cam_down_lens_wedge15.urdf                # cámara sobre la cuña de 15°
+    python scripts/xarm5/robot/build_hand_held_urdf.py --camera-down --no-real-blade --lens-camera --camera-wedge-deg 12 \
+        --camera-fit-deg 6.5 4.0 --dst .../xarm5_hand_held_down_cam_down_lens_wedge12_fit.urdf  # D435 real, 24-nov
 
 Salida: xarm5_hand_held.urdf y la carpeta hand_held_xl330/ junto al URDF de entrada.
 """
@@ -37,6 +41,15 @@ def main() -> None:
     parser.add_argument("--lens-camera", action="store_true",
                         help="put wrist_camera_link (the frame the sim renders from) on the D435i RGB lens "
                              "(physical_wrist_camera_pose) instead of the source URDF's frame")
+    parser.add_argument("--camera-fit-deg", type=float, nargs=2, default=(0.0, 0.0), metavar=("PITCH", "YAW"),
+                        help="rotation of the real camera vs the nominal pose, measured by silhouette fit: pitch > 0 "
+                             "moves the scene up in the image, yaw > 0 to the right; needs --lens-camera")
+    parser.add_argument("--camera-model", choices=("d435", "d415"), default="d435",
+                        help="camera on the stand (CAMERA_MODELS in hand_held.py: lens position in the housing); "
+                             "needs --lens-camera for d415")
+    parser.add_argument("--camera-wedge-deg", type=float, default=0.0,
+                        help="D435i on the wedge of this angle bolted to the stand's tab (WEDGE_* in hand_held.py), "
+                             "tilted towards the flange axis to see the pruner; needs --lens-camera")
     parser.add_argument("--no-real-blade", action="store_true",
                         help="leave out blade_pivot/heel/mid/tip_link (the measured pruner, see REAL_PIVOT_MM)")
     parser.add_argument("--blade-tip-mm", type=float,
@@ -50,7 +63,9 @@ def main() -> None:
     travel = Linkage.from_manifest(linkage).travel_rad if linkage else HAND_HELD_TRAVEL_RAD
     info = build_urdf(src, dst, travel, mesh_dir=args.mesh_dir, roll_deg=args.roll_deg, extra_horn_mesh=args.moving_part,
                       camera_down=args.camera_down, real_blade=not args.no_real_blade,
-                      blade_tip_radius_mm=args.blade_tip_mm, lens_camera=args.lens_camera)
+                      blade_tip_radius_mm=args.blade_tip_mm, lens_camera=args.lens_camera,
+                      camera_wedge_deg=args.camera_wedge_deg, camera_fit_deg=tuple(args.camera_fit_deg),
+                      camera_model=args.camera_model)
     print(f"Wrote {dst}")
     print(f"Removed links: {', '.join(info['removed'])}")
     print(f"Kept and moved to {info['parent']}: {', '.join(info['reparented']) or '-'}")

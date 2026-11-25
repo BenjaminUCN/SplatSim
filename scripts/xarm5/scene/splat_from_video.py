@@ -184,6 +184,7 @@ def run_colmap(scene: Path, matcher: str) -> None:
         log(f"⚠️ solo {registered / photos:.0%} de las fotos tienen pose: revisa la escena antes de alinearla")
     if best != 0:        # convert.py y quien lo lea después esperan el modelo en sparse/0
         shutil.rmtree(distorted / "sparse" / "0", ignore_errors=True)
+        (distorted / "sparse" / "0").mkdir()
         model.write(distorted / "sparse" / "0")
 
     log("COLMAP: quitar la distorsión")

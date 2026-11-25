@@ -63,7 +63,6 @@ from splatsim.utils.render.camera_view import CameraView, mask_stats  # noqa: E4
 from splatsim.utils.scene.apple_grid import load_random_shape, sample_hemisphere  # noqa: E402
 from splatsim.utils.scene.hand_held import real_blade_point_mm  # noqa: E402
 from splatsim.utils.scene.leaf_variation import EpisodeDraw, arm_points, place_episode_leaf  # noqa: E402
-from splatsim.utils.scene.peduncle import cut_target_dtheta  # noqa: E402
 from splatsim.utils.scene.perception_design import (  # noqa: E402
     ARM_CONFIGS,
     TOMATO_CATEGORIES,
@@ -560,7 +559,7 @@ def main(args: Args):
         aim_offset = np.asarray(server.peduncle.stem["cut"])     # del centro del tomate al punto de corte
         if server.peduncle.cut_range_mm is not None:             # hoja real: un punto del filo por episodio
             base_pos, base_rot = link_in_ee(server.urdf_path, "hand_held_base")
-            z_mm, dtheta = server.peduncle.plane_z_mm(), cut_target_dtheta()
+            z_mm, dtheta = server.peduncle.plane_z_mm(), server.peduncle.target_dtheta()
 
             def cut_point(r_mm):
                 return base_pos + base_rot @ real_blade_point_mm(r_mm, dtheta, z_mm) / 1000

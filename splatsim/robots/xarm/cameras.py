@@ -17,10 +17,12 @@ from .config import (
 )
 
 
-def build_splat_camera(server, T_cam_world, name: str, colmap_id: int, fov) -> Camera:
+def build_splat_camera(server, T_cam_world, name: str, colmap_id: int, fov, principal_px=None) -> Camera:
     """
     Convierte una pose 4x4 de cámara en el mundo PyBullet a un `Camera` del 3DGS.
     Aquí vive todo el bloque que antes estaba repetido 3 veces.
+    principal_px: (cx, cy) del centro óptico en píxeles (convención OpenCV, sobre scene_image_size); None = el
+    centro de la imagen, como el 3DGS.
     """
     inv = server.transformations_cache[server.robot_name]["inv_transformation"]
     inv = torch.as_tensor(inv, dtype=torch.float32)
@@ -39,7 +41,7 @@ def build_splat_camera(server, T_cam_world, name: str, colmap_id: int, fov) -> C
 
     width, height = scene_image_size(server)
     blank = to_pil_image(torch.zeros((3, height, width)).float())
-    return Camera(
+    camera = Camera(
         (width, height),
         colmap_id,
         R_cw.detach().cpu().numpy(),
@@ -49,6 +51,21 @@ def build_splat_camera(server, T_cam_world, name: str, colmap_id: int, fov) -> C
         name, 0,
         scale=scale.detach().cpu().numpy(),
     )
+    if principal_px is not None:
+        shift_principal_point(camera, principal_px, width, height)
+    return camera
+
+
+def shift_principal_point(camera: Camera, principal_px, width: int, height: int) -> None:
+    """Corre el centro óptico de la proyección a principal_px (frustum descentrado). El rasterizador lleva el NDC a
+    píxeles como ((ndc + 1) * W - 1) / 2, así que con P[0, 2] = 0 el eje cae en W/2 - 0.5 (OpenCV); el término
+    P[0, 2] = 2 (cx + 0.5 - W/2) / W lo lleva a cx (y lo mismo en y). projection_matrix está traspuesta."""
+    cx, cy = principal_px
+    P = camera.projection_matrix.clone()
+    P[2, 0] = 2.0 * (cx + 0.5 - width / 2) / width
+    P[2, 1] = 2.0 * (cy + 0.5 - height / 2) / height
+    camera.projection_matrix = P
+    camera.full_proj_transform = camera.world_view_transform.unsqueeze(0).bmm(P.unsqueeze(0)).squeeze(0)
 
 
 def scene_image_size(server) -> tuple[int, int]:
@@ -136,7 +153,9 @@ class WristCamera:
         st = client.getLinkState(self.s.dummy_robot, self.link_index,
                                  computeForwardKinematics=True)
         T = _pose_matrix(st[4], client.getMatrixFromQuaternion(st[5]))
-        return build_splat_camera(self.s, T, self.name, 1, scene_fov(self.s, WRIST_CAM_FOV))
+        # centro óptico de la wrist real (calibración de fábrica), si la escena lo da
+        principal = self.s.object_config[self.s.robot_name].get("wrist_camera_principal_px")
+        return build_splat_camera(self.s, T, self.name, 1, scene_fov(self.s, WRIST_CAM_FOV), principal)
 
 
 class AppleCamera:

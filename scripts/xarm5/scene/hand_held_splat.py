@@ -2,8 +2,8 @@
 
     python scripts/xarm5/scene/hand_held_splat.py --scene xarm5_lite_plant_v3
     python scripts/xarm5/scene/hand_held_splat.py --scene xarm5_lite_plant_v3_hand_held_down --replace-gripper \
-        --new-scene xarm5_lite_plant_v3_hand_held_down_b3 --mesh-dir splatsim/robot_definitions/meshes/hand_held_b3 \
-        --urdf ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_b3_down.urdf    # cambia el gripper de mano
+        --new-scene xarm5_b3_base --mesh-dir splatsim/robot_definitions/meshes/hand_held_b3 \
+        --urdf ~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3.urdf    # cambia el gripper de mano
 
 Copia la escena: quita del splat las gaussianas del gripper del xArm, agrega gaussianas de colores
 planos sobre las mallas del CAD y reordena las etiquetas por link. Agrega <scene>_hand_held a
