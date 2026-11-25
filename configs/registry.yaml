@@ -3,7 +3,7 @@
 # Edita a mano solo name / description / notes: se conservan al regenerar.
 #   name: nombre corto para elegir el modelo (vacío -> se usa suggested_name)
 #   description: qué se intentó mejorar (p.ej. "1 cámara, más pasos")
-generated: 2026-11-24 20:09
+generated: 2026-11-24 21:26
 roots: {recordings: ~/data/bc_data, datasets: ~/lerobot/splatsim_test_data, models: ~/lerobot/examples/tutorial/diffusion/outputs}
 recordings:
   cut_400:
@@ -1057,7 +1057,7 @@ datasets:
     state_dim: 6
     sources:
     - {recording: perception_400_10hz_lr, recording_episodes: 0-392, dataset_episodes: 0-392, matched_episodes: meta}
-    models: [robot_learning_tutorial/cam_a4j_s2_30k_1117]
+    models: [robot_learning_tutorial/cam_a4j_s1_30k_1117, robot_learning_tutorial/cam_a4j_s2_30k_1117, robot_learning_tutorial/cam_a4j_s3_30k_1117]
   splatsim_xarm5_lite_10fps_261118_cut400_4cam:
     name: ''
     description: ''
@@ -1092,7 +1092,8 @@ datasets:
     - {recording: cut_400, recording_episodes: 0-392, dataset_episodes: 0-392, matched_episodes: meta, converted_from: 'cut_400_10hz
         (10 fps, base_rgb, base_left_rgb, base_right_rgb, wrist_rgb; no está en esta máquina)'}
     models: [robot_learning_tutorial/cut_a0j_s1_30k_1121, robot_learning_tutorial/cut_a4j_s1_30k_1118, robot_learning_tutorial/cut_a4j_s2_30k_1118,
-      robot_learning_tutorial/cut_a4j_s3_30k_1118, robot_learning_tutorial/flow_a4j_s1_30k_1120, robot_learning_tutorial/flow_a4j_s3_30k_1120]
+      robot_learning_tutorial/cut_a4j_s3_30k_1118, robot_learning_tutorial/flow_a4j_s1_30k_1120, robot_learning_tutorial/flow_a4j_s2_30k_1120,
+      robot_learning_tutorial/flow_a4j_s3_30k_1120]
   splatsim_xarm5_lite_10fps_261119_cutreal400_4cam_joints:
     name: ''
     description: ''
@@ -1109,7 +1110,8 @@ datasets:
     sources:
     - {recording: cut_real_400, recording_episodes: 0-395, dataset_episodes: 0-395, matched_episodes: meta, converted_from: 'cut_real_400_10hz
         (10 fps, base_rgb, base_left_rgb, base_right_rgb, wrist_rgb; no está en esta máquina)'}
-    models: [robot_learning_tutorial/cutr_a4j_s1_30k_1119, robot_learning_tutorial/cutr_a4j_s3_30k_1119, robot_learning_tutorial/flowr_a4j_s1_30k_1119]
+    models: [robot_learning_tutorial/cutr_a4j_s1_30k_1119, robot_learning_tutorial/cutr_a4j_s2_30k_1119, robot_learning_tutorial/cutr_a4j_s3_30k_1119,
+      robot_learning_tutorial/flowr_a4j_s1_30k_1119, robot_learning_tutorial/flowr_a4j_s2_30k_1119]
   splatsim_xarm5_lite_10fps_261120_cut400leaf_4cam_joints:
     name: ''
     description: ''
@@ -2314,6 +2316,71 @@ models:
     dataset_match: stats
     same_stats_datasets: [splatsim_xarm5_lite_10fps_261112_percep400]
     suggested_name: 3cam-perception_400_10hz_lr-393ep-h16-1118
+  robot_learning_tutorial/cam_a4j_s1_30k_1117:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/cam_a4j_s1_30k_1117
+    started: null
+    saved: 2026-11-18 03:37
+    finished: true
+    policy: diffusion
+    cameras: [base_left_rgb, base_right_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 16
+    n_action_steps: 8
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: []
+    train_config:
+      model_name: cam_a4j_s1_30k_1117
+      name: ''
+      description: ''
+      output_root: /home/usuario/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial
+      device: cuda
+      dataset_id: local/splatsim_xarm5_lite_10fps_261114_percep400_4cam_joints
+      dataset_root: /home/usuario/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261114_percep400_4cam_joints
+      cameras: null
+      arrangement: 3cam
+      n_obs_steps: 2
+      horizon: 16
+      n_action_steps: 8
+      resize_shape: null
+      pretrained_backbone: null
+      group_norm: true
+      seed: 1
+      lr_scheduler: true
+      lr_warmup_steps: 500
+      ema: true
+      ema_power: 0.75
+      ema_max_decay: 0.9999
+      training_steps: 30000
+      batch_size: 32
+      grad_accumulation: 2
+      num_workers: 12
+      prefetch_factor: 1
+      image_augmentation: true
+      camera_dropout: []
+      camera_dropout_p: 0.3
+      relative_actions: false
+      torch_compile: true
+      log_freq: 1
+      resume_every: 1000
+      save_freq: 30000
+      push_to_hub: false
+      hub_user: LuEduSoHu
+      wandb: true
+      wandb_project: splatsim-diffusion
+      wandb_entity: null
+      wandb_mode: offline
+      wandb_log_freq: 10
+      wandb_run: /home/usuario/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/cam_a4j_s1_30k_1117/wandb/offline-run-20261117_235353-abunl38a/files
+      wandb_id: abunl38a
+    dataset: splatsim_xarm5_lite_10fps_261114_percep400_4cam_joints
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 3cam-perception_400_10hz_lr-393ep-h16-1118
   robot_learning_tutorial/cam_a4j_s2_30k_1117:
     name: ''
     description: ''
@@ -2375,6 +2442,71 @@ models:
       wandb_log_freq: 10
       wandb_run: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/cam_a4j_s2_30k_1117/wandb/offline-run-20261118_014452-6n4w5klh/files
       wandb_id: 6n4w5klh
+    dataset: splatsim_xarm5_lite_10fps_261114_percep400_4cam_joints
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 3cam-perception_400_10hz_lr-393ep-h16-1118
+  robot_learning_tutorial/cam_a4j_s3_30k_1117:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/cam_a4j_s3_30k_1117
+    started: null
+    saved: 2026-11-18 07:47
+    finished: true
+    policy: diffusion
+    cameras: [base_left_rgb, base_right_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 16
+    n_action_steps: 8
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: []
+    train_config:
+      model_name: cam_a4j_s3_30k_1117
+      name: ''
+      description: ''
+      output_root: /home/usuario/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial
+      device: cuda
+      dataset_id: local/splatsim_xarm5_lite_10fps_261114_percep400_4cam_joints
+      dataset_root: /home/usuario/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261114_percep400_4cam_joints
+      cameras: null
+      arrangement: 3cam
+      n_obs_steps: 2
+      horizon: 16
+      n_action_steps: 8
+      resize_shape: null
+      pretrained_backbone: null
+      group_norm: true
+      seed: 3
+      lr_scheduler: true
+      lr_warmup_steps: 500
+      ema: true
+      ema_power: 0.75
+      ema_max_decay: 0.9999
+      training_steps: 30000
+      batch_size: 32
+      grad_accumulation: 2
+      num_workers: 12
+      prefetch_factor: 1
+      image_augmentation: true
+      camera_dropout: []
+      camera_dropout_p: 0.3
+      relative_actions: false
+      torch_compile: true
+      log_freq: 1
+      resume_every: 1000
+      save_freq: 30000
+      push_to_hub: false
+      hub_user: LuEduSoHu
+      wandb: true
+      wandb_project: splatsim-diffusion
+      wandb_entity: null
+      wandb_mode: offline
+      wandb_log_freq: 10
+      wandb_run: /home/usuario/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/cam_a4j_s3_30k_1117/wandb/offline-run-20261118_040453-77y4w5c0/files
+      wandb_id: 77y4w5c0
     dataset: splatsim_xarm5_lite_10fps_261114_percep400_4cam_joints
     dataset_match: stats
     same_stats_datasets: []
@@ -3721,6 +3853,71 @@ models:
     dataset_match: stats
     same_stats_datasets: []
     suggested_name: 3cam-cut_real_400-396ep-h16-1119
+  robot_learning_tutorial/cutr_a4j_s2_30k_1119:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/cutr_a4j_s2_30k_1119
+    started: null
+    saved: 2026-11-19 21:41
+    finished: true
+    policy: diffusion
+    cameras: [base_left_rgb, base_right_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 16
+    n_action_steps: 8
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: []
+    train_config:
+      model_name: cutr_a4j_s2_30k_1119
+      name: ''
+      description: ''
+      output_root: /home/usuario/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial
+      device: cuda
+      dataset_id: local/splatsim_xarm5_lite_10fps_261119_cutreal400_4cam_joints
+      dataset_root: /home/usuario/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261119_cutreal400_4cam_joints
+      cameras: null
+      arrangement: 3cam
+      n_obs_steps: 2
+      horizon: 16
+      n_action_steps: 8
+      resize_shape: null
+      pretrained_backbone: null
+      group_norm: true
+      seed: 2
+      lr_scheduler: true
+      lr_warmup_steps: 500
+      ema: true
+      ema_power: 0.75
+      ema_max_decay: 0.9999
+      training_steps: 30000
+      batch_size: 32
+      grad_accumulation: 2
+      num_workers: 12
+      prefetch_factor: 1
+      image_augmentation: true
+      camera_dropout: []
+      camera_dropout_p: 0.3
+      relative_actions: false
+      torch_compile: true
+      log_freq: 1
+      resume_every: 1000
+      save_freq: 30000
+      push_to_hub: false
+      hub_user: LuEduSoHu
+      wandb: true
+      wandb_project: splatsim-diffusion
+      wandb_entity: null
+      wandb_mode: offline
+      wandb_log_freq: 10
+      wandb_run: /home/usuario/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/cutr_a4j_s2_30k_1119/wandb/offline-run-20261119_141154-zh080u2v/files
+      wandb_id: zh080u2v
+    dataset: splatsim_xarm5_lite_10fps_261119_cutreal400_4cam_joints
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 3cam-cut_real_400-396ep-h16-1119
   robot_learning_tutorial/cutr_a4j_s3_30k_1119:
     name: ''
     description: ''
@@ -4251,6 +4448,73 @@ models:
     dataset_match: stats
     same_stats_datasets: [splatsim_xarm5_lite_10fps_261120_cut400leaf_4cam_joints]
     suggested_name: 3cam-cut_400-393ep-h16-1120
+  robot_learning_tutorial/flow_a4j_s2_30k_1120:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/flow_a4j_s2_30k_1120
+    started: null
+    saved: 2026-11-20 15:11
+    finished: true
+    policy: diffusion
+    cameras: [base_left_rgb, base_right_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 16
+    n_action_steps: 8
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: []
+    train_config:
+      model_name: flow_a4j_s2_30k_1120
+      name: ''
+      description: ''
+      output_root: /home/usuario/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial
+      device: cuda
+      dataset_id: local/splatsim_xarm5_lite_10fps_261118_cut400_4cam_joints
+      dataset_root: /home/usuario/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261118_cut400_4cam_joints
+      cameras: null
+      arrangement: 3cam
+      n_obs_steps: 2
+      horizon: 16
+      n_action_steps: 8
+      resize_shape: null
+      pretrained_backbone: null
+      group_norm: true
+      seed: 2
+      lr_scheduler: true
+      lr_warmup_steps: 500
+      ema: true
+      ema_power: 0.75
+      ema_max_decay: 0.9999
+      training_steps: 30000
+      batch_size: 32
+      grad_accumulation: 2
+      num_workers: 12
+      prefetch_factor: 1
+      image_augmentation: true
+      camera_dropout: []
+      camera_dropout_p: 0.3
+      relative_actions: false
+      torch_compile: true
+      objective: flow
+      flow_steps: 10
+      log_freq: 1
+      resume_every: 1000
+      save_freq: 30000
+      push_to_hub: false
+      hub_user: LuEduSoHu
+      wandb: true
+      wandb_project: splatsim-diffusion
+      wandb_entity: null
+      wandb_mode: offline
+      wandb_log_freq: 10
+      wandb_run: /home/usuario/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/flow_a4j_s2_30k_1120/wandb/offline-run-20261120_135907-ztkkx664/files
+      wandb_id: ztkkx664
+    dataset: splatsim_xarm5_lite_10fps_261118_cut400_4cam_joints
+    dataset_match: stats
+    same_stats_datasets: [splatsim_xarm5_lite_10fps_261120_cut400leaf_4cam_joints]
+    suggested_name: 3cam-cut_400-393ep-h16-1120
   robot_learning_tutorial/flow_a4j_s3_30k_1120:
     name: ''
     description: ''
@@ -4381,6 +4645,73 @@ models:
       wandb_log_freq: 10
       wandb_run: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/flowr_a4j_s1_30k_1119/wandb/offline-run-20261119_230358-9ws2219y/files
       wandb_id: 9ws2219y
+    dataset: splatsim_xarm5_lite_10fps_261119_cutreal400_4cam_joints
+    dataset_match: stats
+    same_stats_datasets: []
+    suggested_name: 3cam-cut_real_400-396ep-h16-1120
+  robot_learning_tutorial/flowr_a4j_s2_30k_1119:
+    name: ''
+    description: ''
+    notes: ''
+    path: ~/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/flowr_a4j_s2_30k_1119
+    started: null
+    saved: 2026-11-20 02:25
+    finished: true
+    policy: diffusion
+    cameras: [base_left_rgb, base_right_rgb, wrist_rgb]
+    n_obs_steps: 2
+    horizon: 16
+    n_action_steps: 8
+    resize_shape: null
+    crop_shape: null
+    vision_backbone: resnet18
+    checkpoint_steps: []
+    train_config:
+      model_name: flowr_a4j_s2_30k_1119
+      name: ''
+      description: ''
+      output_root: /home/usuario/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial
+      device: cuda
+      dataset_id: local/splatsim_xarm5_lite_10fps_261119_cutreal400_4cam_joints
+      dataset_root: /home/usuario/lerobot/splatsim_test_data/splatsim_xarm5_lite_10fps_261119_cutreal400_4cam_joints
+      cameras: null
+      arrangement: 3cam
+      n_obs_steps: 2
+      horizon: 16
+      n_action_steps: 8
+      resize_shape: null
+      pretrained_backbone: null
+      group_norm: true
+      seed: 2
+      lr_scheduler: true
+      lr_warmup_steps: 500
+      ema: true
+      ema_power: 0.75
+      ema_max_decay: 0.9999
+      training_steps: 30000
+      batch_size: 32
+      grad_accumulation: 2
+      num_workers: 12
+      prefetch_factor: 1
+      image_augmentation: true
+      camera_dropout: []
+      camera_dropout_p: 0.3
+      relative_actions: false
+      torch_compile: true
+      objective: flow
+      flow_steps: 10
+      log_freq: 1
+      resume_every: 1000
+      save_freq: 30000
+      push_to_hub: false
+      hub_user: LuEduSoHu
+      wandb: true
+      wandb_project: splatsim-diffusion
+      wandb_entity: null
+      wandb_mode: offline
+      wandb_log_freq: 10
+      wandb_run: /home/usuario/lerobot/examples/tutorial/diffusion/outputs/robot_learning_tutorial/flowr_a4j_s2_30k_1119/wandb/offline-run-20261119_221000-5w5xbvfv/files
+      wandb_id: 5w5xbvfv
     dataset: splatsim_xarm5_lite_10fps_261119_cutreal400_4cam_joints
     dataset_match: stats
     same_stats_datasets: []
