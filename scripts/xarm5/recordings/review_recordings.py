@@ -78,6 +78,7 @@ from splatsim.utils.trials.grasp_point import (  # noqa: E402
     tomato_in_ee,
 )
 from splatsim.utils.trials import run_index, trial_table  # noqa: E402
+from splatsim.utils.scene.peduncle import CLOSED_FRACTION  # noqa: E402
 from splatsim.utils.data.stop_labels import (  # noqa: E402
     VALID_RADIUS,
     auto_valid_from,
@@ -192,7 +193,7 @@ class RecordingFolder:
         with self._lock:
             entry = self._cache.get(name)
         ep = self.path / name
-        if entry and entry["mtime"] == ep.stat().st_mtime and "rpy" in entry:
+        if entry and entry["mtime"] == ep.stat().st_mtime and "cut_err" in entry:
             return entry
         return None
 
@@ -203,6 +204,7 @@ class RecordingFolder:
             return entry
         ep = self.path / name
         ee, rpy, grip, t, apple, bad, src, joints = [], [], [], [], None, [], [], []
+        cut_err, cuttable, cut = [], [], []   # escenas con pedúnculo (server.py: peduncle_*)
         for p in sorted(ep.glob("*.pkl"), key=_pkl_key):
             try:
                 with open(p, "rb") as f:
@@ -219,13 +221,20 @@ class RecordingFolder:
                 apple = np.asarray(obs[APPLE_KEY], dtype=float)
             if "source_frames" in obs:
                 src.append(obs["source_frames"])
+            e = obs.get("peduncle_error")
+            cut_err.append(np.nan if e is None else float(e))
+            cuttable.append(bool(obs.get("peduncle_cuttable")))
+            cut.append(bool(obs.get("peduncle_cut")))
         entry = {"mtime": ep.stat().st_mtime, "ee": np.array(ee).reshape(-1, 3),
                  "rpy": np.array(rpy).reshape(-1, 3),
                  "gripper": np.array(grip), "sim_time": np.array(t, dtype=float), "apple": apple,
                  "unreadable": bad,
                  "joints": np.array(joints).reshape(len(joints), -1),
                  # render_recordings.py: (frame i, frame i+1, peso) de la grabación original
-                 "source_frames": np.array(src, dtype=float) if src else None}
+                 "source_frames": np.array(src, dtype=float) if src else None,
+                 # distancia (m) del filo al punto de corte; None sin pedúnculo en la escena
+                 "cut_err": np.array(cut_err) if np.isfinite(cut_err).any() else None,
+                 "cuttable": np.array(cuttable, dtype=bool), "peduncle_cut": np.array(cut, dtype=bool)}
         with self._lock:
             self._cache[name] = entry
         return entry
@@ -443,6 +452,14 @@ class Reviewer:
                  {"label": f"in position ≤ {VALID_RADIUS * 100:.0f} cm", "stroke": "#008300",
                   "width": 1, "dash": [4, 3]}),
                 height=170, aspect=2.0)
+            self.cut_plot = gui.add_uplot(
+                (np.arange(2.0), np.zeros(2), np.zeros(2)),
+                ({"label": "frame"},
+                 {"label": "blade → cut point (cm)", "stroke": "#2a78d6", "width": 2},
+                 {"label": "pruner closed (%)", "stroke": "#eb6834", "width": 1, "dash": [4, 3], "scale": "%"}),
+                scales={"x": {"time": False}, "%": {"auto": False, "range": (0, 100)}},
+                axes=({}, {"label": "cm"}, {"scale": "%", "side": 1, "label": "%", "grid": {"show": False}}),
+                height=170, aspect=2.0, visible=False)
             set1 = gui.add_button_group("Label", ["Accept auto", "Valid from this frame"])
             set2 = gui.add_button_group("Other", ["No valid frames", "Exclude", "Reset"])
         with gui.add_folder("Playback"):
@@ -881,17 +898,37 @@ class Reviewer:
             head = f"{'**manual**' if source == 'manual' else 'auto (not reviewed)'}: {where}"
         counts = f"{(labels == 1).sum()} in position · {(labels == 0).sum()} not · {(labels == -1).sum()} unused"
         lines = [head, counts]
-        if err is not None:
+        cut = d.get("cut_err")
+        if cut is not None:   # corrida de corte: el filo al punto de corte en vez del error de agarre
+            lines.append(self._cut_summary(d))
+        elif err is not None:
             lines.append(f"grasp error: last frame {err[-1] * 100:.1f} cm, min {err.min() * 100:.1f} cm")
             if source == "manual" and manual.get("valid_from") is not None and \
                     err[manual["valid_from"]:].max() > 2 * VALID_RADIUS:
                 lines.append("⚠ the arm is > 6 cm from the grasp point after valid_from")
         done = sum(1 for n_ in f.names if n_ in f.stop_labels)
         lines.append(f"folder: {done}/{len(f.names)} episodes labeled by hand")
-        self.stop_info.content = "  \n".join(lines)
         x = np.arange(n, dtype=float)
-        y = err * 100 if err is not None else np.zeros(n)
-        self.stop_plot.data = (x, y, np.full(n, VALID_RADIUS * 100))
+        self.stop_plot.visible, self.cut_plot.visible = cut is None, cut is not None
+        if cut is not None:
+            self.cut_plot.data = (x, np.nan_to_num(cut, nan=0.0) * 100, np.clip(d["gripper"], 0, 1) * 100)
+        else:
+            y = err * 100 if err is not None else np.zeros(n)
+            self.stop_plot.data = (x, y, np.full(n, VALID_RADIUS * 100))
+        self.stop_info.content = "  \n".join(lines)
+
+    @staticmethod
+    def _cut_summary(d: dict) -> str:
+        """Resumen del corte: el filo al punto de corte (mínimo y al cerrar), cuándo se podía cortar y si cortó."""
+        cut, frames = d["cut_err"], np.flatnonzero
+        closed = frames(d["gripper"] >= CLOSED_FRACTION)
+        at_closed = (f", when closed (frame {closed[0]}) {cut[closed[0]] * 100:.1f} cm"
+                     if len(closed) and np.isfinite(cut[closed[0]]) else ", never closed")
+        ok = frames(d["cuttable"])
+        when = f"frames {ok[0]}–{ok[-1]} ({len(ok)})" if len(ok) else "never"
+        done = frames(d["peduncle_cut"])
+        return (f"blade → cut point: min {np.nanmin(cut) * 100:.1f} cm{at_closed}  \n"
+                f"cuttable: {when} · peduncle {'cut at frame ' + str(done[0]) if len(done) else 'not cut'}")
 
     def _show_info(self):
         d, f = self.trail_data, self.folder
@@ -1057,6 +1094,9 @@ class Reviewer:
             if "center" in h:
                 dist = np.linalg.norm(d["apple"] - h["center"].position)
                 lines.append(f"tomato–gripper center {dist * 100:.1f} cm")
+        if d.get("cut_err") is not None and np.isfinite(d["cut_err"][k]):
+            state = "cut" if d["peduncle_cut"][k] else "cuttable" if d["cuttable"][k] else "not cuttable"
+            lines.append(f"blade → cut point {d['cut_err'][k] * 100:.1f} cm ({state})")
         self.frame_info.content = "  \n".join(lines)
 
     def _source_trail(self) -> dict | None:
