@@ -50,6 +50,9 @@ def main() -> None:
     parser.add_argument("--camera-wedge-deg", type=float, default=0.0,
                         help="D435i on the wedge of this angle bolted to the stand's tab (WEDGE_* in hand_held.py), "
                              "tilted towards the flange axis to see the pruner; needs --lens-camera")
+    parser.add_argument("--camera-shift-mm", type=float, nargs=3, default=(0.0, 0.0, 0.0), metavar=("X", "Y", "Z"),
+                        help="whole camera translated in its own axes (x right in the image, y down, z forward), not "
+                             "rotated, e.g. by hardware/camera_shift; the stand and wedge meshes stay; needs --lens-camera")
     parser.add_argument("--no-real-blade", action="store_true",
                         help="leave out blade_pivot/heel/mid/tip_link (the measured pruner, see REAL_PIVOT_MM)")
     parser.add_argument("--blade-tip-mm", type=float,
@@ -65,7 +68,7 @@ def main() -> None:
                       camera_down=args.camera_down, real_blade=not args.no_real_blade,
                       blade_tip_radius_mm=args.blade_tip_mm, lens_camera=args.lens_camera,
                       camera_wedge_deg=args.camera_wedge_deg, camera_fit_deg=tuple(args.camera_fit_deg),
-                      camera_model=args.camera_model)
+                      camera_model=args.camera_model, camera_shift_mm=tuple(args.camera_shift_mm))
     print(f"Wrote {dst}")
     print(f"Removed links: {', '.join(info['removed'])}")
     print(f"Kept and moved to {info['parent']}: {', '.join(info['reparented']) or '-'}")
