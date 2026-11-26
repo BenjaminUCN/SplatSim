@@ -918,7 +918,44 @@ xarm5_pruner_w15s50:
   object_overrides: {plastic_apple: tomato_real_tab}
   camera_image_size: [360, 640]
   camera_focal_px: 454.22
-  wrist_camera_principal_px: [318.54, 185.60]
+  wrist_camera_principal_px: [320.46, 173.40]   # D415 invertida: (639 - 318.54, 359 - 185.60)
+# w15s50 con el giro de la D415 real medido en 3 poses con los joints leídos (25-nov, render_s50.py contra
+# d415_wrist_flip_{home_tilt,j4_m10,j1_p10}, la D415 reasentada en la placa a las 20:3x): --camera-fit-deg 2.69 -1.02 0.14
+# (cabeceo, guiñada, rolido; antes de reasentarla, 1.75 -1.47 1.61)
+xarm5_pruner_w15s50_fit:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3_d415_w15_s50_fit.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  splat_joint_states:
+  - [0.0, 0.0, -0.4969, -0.5096, -0.6299, 0.0293, 0.0]
+  source_path: ~/data/Colmaps/scene_pruner_w12
+  model_path: ~/data/Colmaps/scene_pruner_w12/output_trimmed_b3_world
+  transformation:
+    matrix:
+    - [-0.078703, 0.002286, -0.156519, 0.067812]
+    - [0.155620, 0.020075, -0.077957, -0.032625]
+    - [0.016916, -0.174039, -0.011047, 0.513427]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.5066, -0.1189, -0.0]
+    - [0.2521, 0.0866, 0.6063]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3
+  splat_gripper_value: 1.00
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 454.22
+  wrist_camera_principal_px: [320.46, 173.40]   # D415 invertida: (639 - 318.54, 359 - 185.60)
+
 # Escena real del 25-nov (video 1, cortadora cerrada, brazo en el home inclinado) + foto de la D415 de la muñeca;
 # alineada por AprilTags a w12 y rígida contra el URDF _fit con q fija: mediana 6.8 mm. ~/data/experiments/261126_realscan
 xarm5_realscan_v1:

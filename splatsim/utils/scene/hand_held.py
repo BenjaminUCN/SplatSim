@@ -153,6 +153,28 @@ WEDGE_WIDTH_MM = 60.0
 WEDGE_LIP_MM = (2.0, 36.0)          # pestaña de registro: largo en x más allá del borde y ancho en z
 WEDGE_MESH = "camera_wedge_{:g}.stl"
 
+# Placa adaptadora (hardware/camera_shift, 25-nov): se atornilla en los M3 de la pestaña (a ±22.5 mm del centro de la
+# cámara sin correr) y lleva la cámara corrida (y, con camera_flipped, invertida). Espesor = shift_mm[2].
+SHIFT_PLATE_HOLES_MM = 22.5         # M3 de la pestaña y de la cámara, a cada lado de su centro
+SHIFT_PLATE_MARGIN_MM = 9.0
+SHIFT_PLATE_MESH = "camera_shift_plate.stl"
+R_Z180 = np.diag([-1.0, -1.0, 1.0, 1.0])
+
+
+def shift_plate_box_m(shift_mm, camera_model: str = "d415", flipped: bool = False):
+    """(tamaño, centro) en m de la placa en el marco óptico nominal de la cámara ya corrida (sin fit_deg): x a lo
+    largo de la cámara, apoyada bajo su espalda. Los agujeros de la pestaña quedan donde estaba el centro de la
+    cámara sin correr; los de la cámara, a cada lado del centro de la carcasa (al otro lado de la RGB si va invertida)."""
+    depth, center_in_rgb = CAMERA_MODELS[camera_model]
+    sx, _, thick = (v / 1000 for v in shift_mm)
+    h, mg = SHIFT_PLATE_HOLES_MM / 1000, SHIFT_PLATE_MARGIN_MM / 1000
+    body = -center_in_rgb[0] if flipped else center_in_rgb[0]
+    xs = [center_in_rgb[0] - sx - h, center_in_rgb[0] - sx + h, body - h, body + h]
+    x0, x1 = min(xs) - mg, max(xs) + mg
+    back = center_in_rgb[2] - depth / 2
+    height = {"d415": D415_SIZE_M[1]}.get(camera_model, 0.025)
+    return (x1 - x0, height, thick), ((x0 + x1) / 2, 0.0, back - thick / 2)
+
 
 def wedge_face_y_mm(x_mm: float, wedge_deg: float) -> float:
     """Altura (y del STL) de la cara inclinada de la cuña: pasa por WEDGE_CONTACT_MM."""
@@ -203,12 +225,14 @@ def write_binary_stl(path: str, vertices: np.ndarray, faces: np.ndarray) -> None
 
 def camera_fit_rotation(fit_deg) -> np.ndarray:
     """Giro (3x3) de los puntos en el marco de la cámara (x derecha, y abajo, z al frente) que corrige la pose
-    nominal contra una imagen real: fit_deg = (pitch, yaw) en grados; pitch > 0 sube la escena en la imagen y
-    yaw > 0 la corre a la derecha (scripts de ajuste por silueta, 24-nov)."""
-    ax, ay = (math.radians(a) for a in fit_deg)
+    nominal contra una imagen real: fit_deg = (pitch, yaw) o (pitch, yaw, roll) en grados; pitch > 0 sube la escena
+    en la imagen, yaw > 0 la corre a la derecha y roll > 0 la gira en sentido horario (scripts de ajuste por silueta,
+    24-nov; giro sim->real de render_s50.py, 25-nov)."""
+    ax, ay, az = (math.radians(a) for a in (*fit_deg, 0.0)[:3])
     Rx = np.array([[1, 0, 0], [0, math.cos(ax), -math.sin(ax)], [0, math.sin(ax), math.cos(ax)]])
     Ry = np.array([[math.cos(ay), 0, math.sin(ay)], [0, 1, 0], [-math.sin(ay), 0, math.cos(ay)]])
-    return Ry @ Rx
+    Rz = np.array([[math.cos(az), -math.sin(az), 0], [math.sin(az), math.cos(az), 0], [0, 0, 1]])
+    return Rz @ Ry @ Rx
 
 
 def physical_wrist_camera_pose(camera_down: bool = False, wedge_deg: float = 0.0, fit_deg=(0.0, 0.0),
@@ -237,9 +261,9 @@ def physical_wrist_camera_pose(camera_down: bool = False, wedge_deg: float = 0.0
     T = np.eye(4)
     T[:3, :3] = R
     T[:3, 3] = center - R @ np.array(center_in_rgb)
+    T[:3, 3] += R @ np.asarray(shift_mm, float) / 1000     # la placa corre la cámara en los ejes nominales
     if any(fit_deg):
         T[:3, :3] = R @ camera_fit_rotation(fit_deg).T
-    T[:3, 3] += T[:3, :3] @ np.asarray(shift_mm, float) / 1000
     return T
 
 
@@ -351,11 +375,13 @@ def _mesh_visual(link, name: str, T: np.ndarray, filename: str, scale: str, rgba
 
 def add_wrist_camera_model(root, camera_parent: str, T_parent_camera: np.ndarray, mesh_prefix: str,
                            camera_down: bool = False, wedge_deg: float = 0.0, fit_deg=(0.0, 0.0),
-                           camera_model: str = "d435", shift_mm=(0.0, 0.0, 0.0)) -> None:
+                           camera_model: str = "d435", shift_mm=(0.0, 0.0, 0.0), flipped: bool = False) -> None:
     """Cambia el prisma de wrist_camera_link por el soporte y una D435i, como visuales del mismo link: ni el
     marco de la cámara ni los índices de los links de PyBullet cambian. Las piezas se ubican en link_eef.
     wedge_deg: también la cuña (WEDGE_MESH, junto al URDF) y la D435i sobre ella. fit_deg: la D435i girada
-    como la cámara real (physical_wrist_camera_pose)."""
+    como la cámara real (physical_wrist_camera_pose). shift_mm: también la placa adaptadora (SHIFT_PLATE_MESH),
+    en su pose nominal sobre la cuña: con fit_deg se ve cuánto se aparta la cámara de ella. flipped: la carcasa
+    invertida sobre la lente (el marco de render no cambia: la imagen se endereza en el nodo de la cámara)."""
     link = next(l for l in root.findall("link") if l.get("name") == CAMERA_LINK)
     if camera_parent != "link_eef":
         raise ValueError(f"{CAMERA_LINK} hangs from {camera_parent}; the stand is placed in link_eef")
@@ -369,7 +395,13 @@ def add_wrist_camera_model(root, camera_parent: str, T_parent_camera: np.ndarray
     if wedge_deg:
         _mesh_visual(link, "camera_wedge", T_camera_eef @ T_eef_stand,
                      f"{mesh_prefix}/{WEDGE_MESH.format(wedge_deg)}", "0.001 0.001 0.001", "0.85 0.45 0.1 1")
+    if any(shift_mm):
+        T_plate = T_camera_eef @ physical_wrist_camera_pose(camera_down, wedge_deg, (0.0, 0.0), camera_model, shift_mm)
+        _mesh_visual(link, "camera_shift_plate", T_plate, f"{mesh_prefix}/{SHIFT_PLATE_MESH}", "1 1 1",
+                     "0.35 0.55 0.85 1")
     T_d435i = T_camera_eef @ physical_wrist_camera_pose(camera_down, wedge_deg, fit_deg, camera_model, shift_mm)
+    if flipped:
+        T_d435i = T_d435i @ R_Z180
     meshes = D435I_MESHES if camera_model == "d435" else ((D415_MESH, D435I_MESHES[0][1]),)
     for filename, rgba in meshes:
         _mesh_visual(link, filename.removesuffix(".stl"), T_d435i, f"{mesh_prefix}/{filename}", "1 1 1", rgba)
@@ -383,7 +415,7 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
                extra_horn_mesh: str | None = None, keep_links=KEEP_LINKS, camera_down: bool = False,
                real_blade: bool = True, blade_tip_radius_mm: float | None = None, lens_camera: bool = False,
                camera_wedge_deg: float = 0.0, camera_fit_deg=(0.0, 0.0), camera_model: str = "d435",
-               camera_shift_mm=(0.0, 0.0, 0.0)) -> dict:
+               camera_shift_mm=(0.0, 0.0, 0.0), camera_flipped: bool = False) -> dict:
     """Escribe dst: src sin el gripper del xArm y con el hand_held_XL330, y copia las mallas al lado.
     Los links de keep_links (y lo que cuelga de ellos) siguen en la misma pose. extra_horn_mesh: STL
     (mm, marco del ensamble) de lo que gira con el horn, p.ej. la hoja móvil. lens_camera: wrist_camera_link
@@ -392,7 +424,8 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
     camera_fit_deg: (pitch, yaw) de la cámara real respecto de la nominal (camera_fit_rotation; solo con lens_camera).
     camera_model: la cámara del soporte, "d435" o "d415" (CAMERA_MODELS; la d415 solo con lens_camera).
     camera_shift_mm: (x, y, z) mm, la cámara trasladada en sus ejes (physical_wrist_camera_pose; solo con
-    lens_camera); el soporte y la cuña quedan donde estaban."""
+    lens_camera); el soporte y la cuña quedan donde estaban, y se agrega la placa (shift_plate_box_m).
+    camera_flipped: la carcasa invertida sobre la lente (solo el visual; ver add_wrist_camera_model)."""
     if camera_model != "d435" and not lens_camera:
         raise ValueError("camera_model needs lens_camera: the sim frame would stay on the D435 lens")
     if (camera_wedge_deg or any(camera_fit_deg) or any(camera_shift_mm)) and not lens_camera:
@@ -551,6 +584,9 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
                              *wedge_mesh_mm(camera_wedge_deg))
         if camera_model == "d415":
             write_binary_stl(os.path.join(camera_dir, D415_MESH), *box_mesh(D415_SIZE_M, D415_CENTER_IN_RGB_M))
+        if any(camera_shift_mm):
+            write_binary_stl(os.path.join(camera_dir, SHIFT_PLATE_MESH),
+                             *box_mesh(*shift_plate_box_m(camera_shift_mm, camera_model, camera_flipped)))
         camera_joint = joints[CAMERA_LINK]
         T_parent_camera = origin_matrix(camera_joint.find("origin"))
         if lens_camera:
@@ -561,7 +597,8 @@ def build_urdf(src: str, dst: str, travel_rad: float, mesh_dir: str = MESH_DIR, 
             T_parent_camera = flip_camera_frame(T_parent_camera)
             _set_origin(camera_joint, T_parent_camera)
         add_wrist_camera_model(root, camera_joint.find("parent").get("link"), T_parent_camera, camera_prefix,
-                               camera_down, camera_wedge_deg, camera_fit_deg, camera_model, camera_shift_mm)
+                               camera_down, camera_wedge_deg, camera_fit_deg, camera_model, camera_shift_mm,
+                               camera_flipped)
 
     if real_blade:
         # hoja real (ver REAL_PIVOT_MM): links fijos a hand_held_base, al final para no mover los índices de los

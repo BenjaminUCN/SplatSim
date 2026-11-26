@@ -41,9 +41,10 @@ def main() -> None:
     parser.add_argument("--lens-camera", action="store_true",
                         help="put wrist_camera_link (the frame the sim renders from) on the D435i RGB lens "
                              "(physical_wrist_camera_pose) instead of the source URDF's frame")
-    parser.add_argument("--camera-fit-deg", type=float, nargs=2, default=(0.0, 0.0), metavar=("PITCH", "YAW"),
-                        help="rotation of the real camera vs the nominal pose, measured by silhouette fit: pitch > 0 "
-                             "moves the scene up in the image, yaw > 0 to the right; needs --lens-camera")
+    parser.add_argument("--camera-fit-deg", type=float, nargs="+", default=(0.0, 0.0), metavar="DEG",
+                        help="PITCH YAW [ROLL]: rotation of the real camera vs the nominal pose, measured against a real "
+                             "image: pitch > 0 moves the scene up in the image, yaw > 0 to the right, roll > 0 clockwise; "
+                             "needs --lens-camera")
     parser.add_argument("--camera-model", choices=("d435", "d415"), default="d435",
                         help="camera on the stand (CAMERA_MODELS in hand_held.py: lens position in the housing); "
                              "needs --lens-camera for d415")
@@ -53,11 +54,16 @@ def main() -> None:
     parser.add_argument("--camera-shift-mm", type=float, nargs=3, default=(0.0, 0.0, 0.0), metavar=("X", "Y", "Z"),
                         help="whole camera translated in its own axes (x right in the image, y down, z forward), not "
                              "rotated, e.g. by hardware/camera_shift; the stand and wedge meshes stay; needs --lens-camera")
+    parser.add_argument("--camera-flipped", action="store_true",
+                        help="camera body mounted upside down on its lens (visual only: the image is rotated back in "
+                             "the camera node, so the render frame stays upright)")
     parser.add_argument("--no-real-blade", action="store_true",
                         help="leave out blade_pivot/heel/mid/tip_link (the measured pruner, see REAL_PIVOT_MM)")
     parser.add_argument("--blade-tip-mm", type=float,
                         help="real pivot -> blade tip distance in mm (default: BLADE_TIP in hand_held.py)")
     args = parser.parse_args()
+    if len(args.camera_fit_deg) not in (2, 3):
+        parser.error("--camera-fit-deg takes PITCH YAW [ROLL]")
 
     src = os.path.expanduser(args.src)
     dst = os.path.expanduser(args.dst) if args.dst else os.path.join(os.path.dirname(src), "xarm5_hand_held.urdf")
@@ -68,7 +74,7 @@ def main() -> None:
                       camera_down=args.camera_down, real_blade=not args.no_real_blade,
                       blade_tip_radius_mm=args.blade_tip_mm, lens_camera=args.lens_camera,
                       camera_wedge_deg=args.camera_wedge_deg, camera_fit_deg=tuple(args.camera_fit_deg),
-                      camera_model=args.camera_model, camera_shift_mm=tuple(args.camera_shift_mm))
+                      camera_model=args.camera_model, camera_shift_mm=tuple(args.camera_shift_mm), camera_flipped=args.camera_flipped)
     print(f"Wrote {dst}")
     print(f"Removed links: {', '.join(info['removed'])}")
     print(f"Kept and moved to {info['parent']}: {', '.join(info['reparented']) or '-'}")
