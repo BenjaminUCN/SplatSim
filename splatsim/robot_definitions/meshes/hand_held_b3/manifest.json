@@ -1,0 +1,258 @@
+{
+ "source": "pinza_trabajo (laptop): b3/ pinza v6 base, tapa and z19 pinion; v5/ pruner at the measured pivot O; v3 XL330 and horn moved to the B3 horn; mount_xarm5 from v3; inner gears left out",
+ "units": "mm",
+ "gripper": "hand_held_xl330",
+ "horn_axis_mm": [
+  24.25,
+  7.25
+ ],
+ "pivot_mm": [
+  3.2786,
+  50.7997
+ ],
+ "jaw_travel_rad": 0.57355,
+ "jaw_open_rad": 0.62065,
+ "jaw_tips_mm": {
+  "r_jaw": 71.1,
+  "r_anvil": 70.0,
+  "open": 43.1,
+  "closed": 3.5
+ },
+ "gripper_center_mm": [
+  -16.281,
+  88.83,
+  -20.965
+ ],
+ "plate_dz_mm": -16.75,
+ "b3": {
+  "ratio": 8.43859649122807,
+  "servo_deg": 787.9535966863936,
+  "crank_deg": [
+   -62.46645199419174,
+   30.9085064488944
+  ]
+ },
+ "parts": [
+  {
+   "name": "mount_xarm5",
+   "file": "mount_xarm5.stl",
+   "link": "base",
+   "rgb": [
+    0.35,
+    0.35,
+    0.38
+   ],
+   "collision": true,
+   "volume_mm3": 35019.5,
+   "com_mm": [
+    -0.0,
+    -46.586,
+    -15.954
+   ]
+  },
+  {
+   "name": "xl330",
+   "file": "xl330.stl",
+   "link": "base",
+   "rgb": [
+    0.14,
+    0.15,
+    0.17
+   ],
+   "collision": true,
+   "volume_mm3": 15162.7,
+   "com_mm": [
+    24.275,
+    0.018,
+    -40.876
+   ]
+  },
+  {
+   "name": "tornillos_m2",
+   "file": "tornillos_m2.stl",
+   "link": "base",
+   "rgb": [
+    0.15,
+    0.35,
+    0.75
+   ],
+   "collision": false,
+   "volume_mm3": 150.5,
+   "com_mm": [
+    24.25,
+    -0.25,
+    -30.205
+   ]
+  },
+  {
+   "name": "horn",
+   "file": "horn.stl",
+   "link": "horn",
+   "rgb": [
+    0.62,
+    0.64,
+    0.68
+   ],
+   "collision": false,
+   "volume_mm3": 645.7,
+   "com_mm": [
+    24.25,
+    7.247,
+    -28.065
+   ]
+  },
+  {
+   "name": "bottom_plate",
+   "file": "bottom_plate.stl",
+   "link": "base",
+   "rgb": [
+    0.85,
+    0.35,
+    0.1
+   ],
+   "collision": true,
+   "volume_mm3": 60592.6,
+   "com_mm": [
+    0.414,
+    -7.289,
+    -24.952
+   ]
+  },
+  {
+   "name": "top_cover",
+   "file": "top_cover.stl",
+   "link": "base",
+   "rgb": [
+    0.2,
+    0.5,
+    0.85
+   ],
+   "collision": true,
+   "volume_mm3": 15159.7,
+   "com_mm": [
+    -0.078,
+    0.392,
+    2.288
+   ]
+  },
+  {
+   "name": "fixed_steel",
+   "file": "fixed_steel.stl",
+   "link": "base",
+   "rgb": [
+    0.35,
+    0.38,
+    0.4
+   ],
+   "collision": false,
+   "volume_mm3": 9408.3,
+   "com_mm": [
+    -14.792,
+    45.504,
+    -27.47
+   ]
+  },
+  {
+   "name": "anvil",
+   "file": "anvil.stl",
+   "link": "base",
+   "rgb": [
+    0.95,
+    0.62,
+    0.15
+   ],
+   "collision": true,
+   "volume_mm3": 5595.9,
+   "com_mm": [
+    -21.164,
+    84.399,
+    -21.915
+   ]
+  },
+  {
+   "name": "anvil_lip",
+   "file": "anvil_lip.stl",
+   "link": "base",
+   "rgb": [
+    0.95,
+    0.62,
+    0.15
+   ],
+   "collision": true,
+   "volume_mm3": 1424.1,
+   "com_mm": [
+    -22.489,
+    90.016,
+    -16.805
+   ]
+  },
+  {
+   "name": "pivot_bolt",
+   "file": "pivot_bolt.stl",
+   "link": "base",
+   "rgb": [
+    0.8,
+    0.8,
+    0.8
+   ],
+   "collision": false,
+   "volume_mm3": 1770.2,
+   "com_mm": [
+    3.278,
+    50.796,
+    -29.345
+   ]
+  },
+  {
+   "name": "moving_jaw",
+   "file": "moving_jaw.stl",
+   "link": "jaw",
+   "rgb": [
+    0.75,
+    0.75,
+    0.72
+   ],
+   "collision": true,
+   "volume_mm3": 6021.9,
+   "com_mm": [
+    -5.946,
+    88.356,
+    -20.965
+   ]
+  },
+  {
+   "name": "moving_plate",
+   "file": "moving_plate.stl",
+   "link": "jaw",
+   "rgb": [
+    0.08,
+    0.08,
+    0.09
+   ],
+   "collision": false,
+   "volume_mm3": 7678.3,
+   "com_mm": [
+    -8.223,
+    72.595,
+    -31.425
+   ]
+  },
+  {
+   "name": "pinon_z19",
+   "file": "pinon_z19.stl",
+   "link": "horn",
+   "rgb": [
+    0.9,
+    0.9,
+    0.88
+   ],
+   "collision": false,
+   "volume_mm3": 1391.2,
+   "com_mm": [
+    24.25,
+    7.25,
+    -22.923
+   ]
+  }
+ ]
+}

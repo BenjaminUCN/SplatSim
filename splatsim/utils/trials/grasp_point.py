@@ -6,7 +6,7 @@ Lo que importa es la posición del tomate en el marco del efector: en el último
 demos es muy consistente (≈ 17 cm sobre el eje de la herramienta). El error de agarre de un
 frame es la distancia entre esa posición y el punto de agarre medio.
 
-configs/grasp_point.yaml lo escribe scripts/xarm5/estimate_grasp_point.py.
+configs/grasp_point.yaml lo escribe scripts/xarm5/scene/estimate_grasp_point.py.
 """
 import numpy as np
 import yaml
@@ -55,6 +55,22 @@ def gripper_center(urdf_path: str) -> np.ndarray:
             corners = np.array([rot.T @ (np.array(v) - ee[4]) for v in itertools.product(*zip(lo, hi))])
             centers.append((corners.min(0) + corners.max(0)) / 2)
         return np.mean(centers, axis=0)
+    finally:
+        c.disconnect()
+
+
+def link_in_ee(urdf_path: str, link: str) -> tuple[np.ndarray, np.ndarray]:
+    """Posición y rotación de `link` en el marco del efector, desde la URDF (links fijos al efector)."""
+    import pybullet as p
+    from pybullet_utils.bullet_client import BulletClient
+    c = BulletClient(connection_mode=p.DIRECT)
+    try:
+        body = c.loadURDF(urdf_path, useFixedBase=True)
+        links = {c.getJointInfo(body, i)[12].decode(): i for i in range(c.getNumJoints(body))}
+        ee = c.getLinkState(body, links[EE_LINK], computeForwardKinematics=True)
+        other = c.getLinkState(body, links[link], computeForwardKinematics=True)
+        rot = np.array(c.getMatrixFromQuaternion(ee[5])).reshape(3, 3)
+        return rot.T @ (np.array(other[4]) - ee[4]), rot.T @ np.array(c.getMatrixFromQuaternion(other[5])).reshape(3, 3)
     finally:
         c.disconnect()
 

@@ -12,7 +12,7 @@ import yaml
 APPLE_GRID_PATH = "configs/apple_grid.yaml"
 EVAL_GRID_PATH = "configs/eval_grid_4x4.yaml"   # grilla de evaluación (run_policy_trials.py --grid_path)
 _HEADER = """\
-# Tomato positions (x, y, z) in PyBullet world coordinates used by scripts/xarm5/run_policy_trials.py,
+# Tomato positions (x, y, z) in PyBullet world coordinates used by scripts/xarm5/trials/run_policy_trials.py,
 # added with "Save Position to Grid" in the control panel (or by hand), and random_range: the box
 # (min, max per axis, m) or random_hemisphere: where "Random Position" puts it, chosen by random_shape
 # (panel: Tomato > Random range). The hemisphere: center (m), radius [min, max] (m), facing (deg, the

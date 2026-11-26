@@ -24,7 +24,7 @@ from pathlib import Path
 
 import yaml
 
-from scripts.xarm5.data_jobs import dataset_path
+from scripts.xarm5.training.data_jobs import dataset_path
 from splatsim.cloud.estimate import (SEED_HISTORY, Estimate, Workload, convert_workload, prefer_machines, rank,
                                      splat_workload, train_workload)
 from splatsim.cloud.providers import Offer, Requirements
@@ -45,6 +45,9 @@ WAIT_RETRY_S = 120              # sin ofertas o sin saldo: cuánto esperar antes
 DISK_MARGIN_GB = 20
 OFFERS_TO_TRY = 5
 MACHINE_MEMORY_S = 14 * 24 * 3600   # después, el host pudo borrar la imagen o haberse arreglado
+# Mientras el pod sube el resultado (fase "upload" del runner) el tope de costo se estira en esta
+# fracción: cortar ahí pierde un entrenamiento ya terminado (le pasó al #24 del 13-nov en $1.55)
+UPLOAD_GRACE = 0.25
 RESET_ON_RETRY = ("offer", "estimate", "phase", "progress", "run_ts", "started_ts", "billing_ts", "boot_s", "result",
                   "settled", "phase_since", "moved_ts", "detail")
 POD_PYTHON = "/opt/venv/bin/python"
@@ -111,6 +114,11 @@ def folder_gb(path: Path) -> float:
 
 def disk_for(work: Workload) -> int:
     return math.ceil(work.down_gb - work.image_gb + work.image_disk_gb + work.up_gb + DISK_MARGIN_GB)
+
+
+def cost_limit(job: dict) -> float:
+    """Costo con que se corta el pod: max_cost, o max_cost × (1 + UPLOAD_GRACE) mientras sube el resultado."""
+    return job["max_cost"] * (1 + UPLOAD_GRACE) if job.get("phase") == "upload" else job["max_cost"]
 
 
 class Orchestrator:
@@ -291,7 +299,7 @@ class Orchestrator:
 
     def submit_trials(self, name: str, args: dict, req: Requirements, max_cost: float,
                       offer_id: int | None = None, description: str = "") -> dict:
-        """Evaluación en el sim de un pod (scripts/xarm5/cloud_trials.py). args: model (carpeta), dataset
+        """Evaluación en el sim de un pod (scripts/xarm5/cloud/cloud_trials.py). args: model (carpeta), dataset
         (con que se entrenó; se sube solo su meta/), run_name, arrangement, hz, grid_path y, como en
         run_policy_trials.py, occlusion_targets, trials_per_position, trial_seconds, positions,
         ik_orientation, stop_on_success, leaf_dir, keep_images_pos y step (checkpoint intermedio)."""
@@ -541,9 +549,10 @@ class Orchestrator:
                 self._retry_or_fail(job, "el pod se reinicia en bucle")
                 self.save()
                 return
-        if job.get("cost", 0.0) > job["max_cost"]:
+        if job.get("cost", 0.0) > cost_limit(job):
             self._release(job)
-            self._fail(job, f"superó el máximo de ${job['max_cost']:.2f}")
+            uploading = " (con el margen de subida)" if job.get("phase") == "upload" else ""
+            self._fail(job, f"superó el máximo de ${job['max_cost']:.2f}{uploading}")
         elif instance is None:
             self._retry_or_fail(job, "el pod desapareció")
         elif instance.status == "exited" and now - job["seen_ts"] > EXIT_GRACE_S:

@@ -1,4 +1,4 @@
-# Evaluation grid for scripts/xarm5/run_policy_trials.py --grid_path configs/eval_grid_4x4.yaml.
+# Evaluation grid for scripts/xarm5/trials/run_policy_trials.py --grid_path configs/eval_grid_4x4.yaml.
 # 4 columns in y x 4 rows in z at x = -0.80, row by row from the bottom (z) and left to right (y):
 # pos_idx = 4 * row + column. Every point is in frame with a 40 px margin in base_rgb, base_left_rgb
 # and base_right_rgb (u 162-483, v 76-385 in base_rgb) and 0.81-0.89 m from the center of the

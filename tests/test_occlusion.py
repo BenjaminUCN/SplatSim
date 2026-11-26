@@ -14,6 +14,7 @@ from splatsim.utils.render.occlusion import (
     OUT_OF_VIEW,
     fit_lateral_offset,
     fit_message,
+    fruit_indices,
     measure_camera,
     occlusion_level,
 )
@@ -97,6 +98,31 @@ class MeasureTest(unittest.TestCase):
         self.assertTrue(measure([], [], [], tomato=(0, 20, 10, 30))["cut_by_frame"])
 
 
+class FruitTest(unittest.TestCase):
+    """Tomate con rama: la rama sale del cuadro, el fruto no."""
+    CONFIG = {"transformation": {"matrix": [[2, 0, 0, 0], [0, 2, 0, 0], [0, 0, 2, 0], [0, 0, 0, 1]]},
+              "aabb": {"bounding_box": [[-1, -1, -1], [1, 1, 1]]}, "occlusion_max_z": 0.2}
+    # ply: fuera de la caja, fruto, rama, fruto (marco del objeto = 2 * ply)
+    XYZ = torch.tensor([[0.0, 0.0, 0.9], [0.0, 0.0, 0.0], [0.0, 0.0, 0.3], [0.0, 0.0, 0.05]])
+
+    def test_without_branch(self):
+        # índices entre las que quedan tras el aabb (fruto, rama, fruto)
+        self.assertEqual(fruit_indices(self.CONFIG, self.XYZ).tolist(), [0, 2])
+
+    def test_whole_object_without_key(self):
+        config = {k: v for k, v in self.CONFIG.items() if k != "occlusion_max_z"}
+        self.assertIsNone(fruit_indices(config, self.XYZ))
+        self.assertIsNone(fruit_indices({**self.CONFIG, "occlusion_max_z": 5.0}, self.XYZ))
+
+    def test_branch_out_of_frame_does_not_count(self):
+        # fruto en el centro, rama hasta el borde: con índices no se marca cut_by_frame
+        g = FakeGaussians([TOMATO, (0, 10, 18, 22)], [1.0, 1.0], [1.0, 1.0], [RED, GREEN])
+        self.assertTrue(measure_camera(fake_render, g, slice(0, 2), None, torch.ones(3))["cut_by_frame"])
+        result = measure_camera(fake_render, g, torch.tensor([0]), None, torch.ones(3))
+        self.assertFalse(result["cut_by_frame"])
+        self.assertEqual(result["occlusion"], 0.0)
+
+
 class LevelTest(unittest.TestCase):
     def test_edges(self):
         self.assertEqual([occlusion_level(v) for v in (0, 24.9, 25, 50, 75, 100)],
@@ -135,8 +161,8 @@ class SummaryTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         # measure_occlusion.py importa render_recordings: el servidor solo se importa al usarlo
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-        import measure_occlusion
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from scripts.xarm5.recordings import measure_occlusion
         cls.module = measure_occlusion
 
     def test_summary_starts_at_the_first_frame_in_view(self):

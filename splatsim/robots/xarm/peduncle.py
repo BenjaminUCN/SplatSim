@@ -2,10 +2,17 @@
 él lo corta y lo sujeta, así que el tomate se mueve con ella; si se abre lo suficiente, cae.
 
 El tallo no tiene cuerpo en PyBullet: no lo empuja nada y se mueve con el tomate.
+
+Con cut_range_mm en el pedúnculo (objects.yaml), el corte se decide con la hoja real (real_cut_check) en ese
+tramo del filo, y el error es la distancia al punto del filo al que apuntan las demos: el medio del tramo,
+cut_target_dtheta() grados hacia el lado abierto. Sin cut_range_mm, como antes: a lo más BLADE_REACH del
+centro del filo (gripper_center_link), que también es el punto del error.
 """
 import numpy as np
 
-from splatsim.utils.scene.peduncle import CLOSED_FRACTION, DROPPED, HELD, INTACT, cut_check, next_stem_state, to_world
+from splatsim.utils.scene.hand_held import OPENING_TABLES, real_blade_point_mm
+from splatsim.utils.scene.peduncle import (CLOSED_FRACTION, DROPPED, HELD, INTACT, cut_check, cut_target_dtheta,
+                                           next_stem_state, real_cut_check, to_world)
 
 from .config import APPLE_NAME
 
@@ -14,6 +21,7 @@ PIVOT_LINK = "hand_held_base"        # su eje z es el del pivote de la mandíbul
 
 
 class PeduncleCutter:
+    opening = OPENING_TABLES["b2"]   # apertura de la cortadora real; la escena la cambia con pruner_opening
     def __init__(self, server, stem: dict):
         self.s = server
         self.stem = stem
@@ -22,6 +30,10 @@ class PeduncleCutter:
         links = {client.getJointInfo(robot, i)[12].decode(): i for i in range(client.getNumJoints(robot))}
         self.blade_link = links.get(BLADE_LINK)   # None: esta escena no tiene cortadora, solo se ve el tallo
         self.pivot_link = links.get(PIVOT_LINK)
+        self.cut_range_mm = tuple(stem["cut_range_mm"]) if stem.get("cut_range_mm") else None
+        # apertura de la cortadora real: pruner_opening de la escena (b2 por defecto, b3 para la pinza v6)
+        self.opening = OPENING_TABLES[server.object_config[server.robot_name].get("pruner_opening", "b2")]
+        self._target_mm = None   # cut_range_mm: punto del filo al que apuntar, en hand_held_base (mm)
         self.state = INTACT
         self.last_check = None
         self._was_closed = False
@@ -57,11 +69,53 @@ class PeduncleCutter:
         quat = c.getLinkState(robot, self.pivot_link, computeForwardKinematics=True)[5]
         return np.array(blade), np.reshape(c.getMatrixFromQuaternion(quat), (3, 3))[:, 2]
 
+    def _base(self) -> tuple[np.ndarray, np.ndarray]:
+        """Posición y rotación de hand_held_base (el eje del pivote es su z)."""
+        c = self.s.pybullet_client
+        state = c.getLinkState(self.s.dummy_robot, self.pivot_link, computeForwardKinematics=True)
+        return np.array(state[4]), np.reshape(c.getMatrixFromQuaternion(state[5]), (3, 3))
+
+    def _to_base_mm(self, points) -> list[np.ndarray]:
+        pos, rot = self._base()
+        return [rot.T @ (np.asarray(x) - pos) * 1000 for x in points]
+
+    def plane_z_mm(self) -> float:
+        """z del plano de la hoja en hand_held_base: la de gripper_center_link (a media altura de la mandíbula)."""
+        return float(self._to_base_mm([self._blade()[0]])[0][2])
+
+    def target_mm(self) -> np.ndarray:
+        """cut_range_mm: el punto del filo al que apuntar, en hand_held_base (mm)."""
+        if self._target_mm is None:
+            self._target_mm = real_blade_point_mm(float(np.mean(self.cut_range_mm)), self.target_dtheta(),
+                                                  self.plane_z_mm())
+        return self._target_mm
+
+    def target_dtheta(self) -> float:
+        """Grados del filo cerrado hacia el lado abierto a los que apuntar, con la apertura de esta cortadora."""
+        return cut_target_dtheta(opening=self.opening)
+
     def error(self) -> float | None:
-        """Distancia (m) del centro del filo al punto de corte."""
+        """Distancia (m) del punto del filo (el medio de cut_range_mm o, sin él, el centro del filo) al punto
+        de corte del tallo."""
         if self.blade_link is None:
             return None
+        if self.cut_range_mm is not None:
+            pos, rot = self._base()
+            return float(np.linalg.norm(pos + rot @ self.target_mm() / 1000 - self._stem_world()[2]))
         return float(np.linalg.norm(self._blade()[0] - self._stem_world()[2]))
+
+    def would_cut(self) -> bool | None:
+        """Si la cortadora cortara al cerrar ahora, con el brazo quieto: la misma regla que update() aplica al
+        llegar a CLOSED_FRACTION, sobre la posición actual del tallo. None sin cortadora o con el tallo ya cortado.
+        Es información de la simulación, que la política no ve (--close_when_cuttable la usa como oráculo)."""
+        if self.blade_link is None or self.state != INTACT:
+            return None
+        bottom, top, _ = self._stem_world()
+        if self.cut_range_mm is not None:
+            b, t = self._to_base_mm([bottom, top])
+            return real_cut_check(b, t, self.plane_z_mm(), self.cut_range_mm,
+                                  radius_mm=self.stem.get("radius", 0.0025) * 1000, opening=self.opening) == "ok"
+        return cut_check(bottom, top, *self._blade()) == "ok"
 
     def reset(self) -> None:
         """El tomate volvió a su lugar: tiene el tallo entero."""
@@ -87,7 +141,12 @@ class PeduncleCutter:
 
     def _check(self) -> str:
         bottom, top, _ = self._stem_world()
-        self.last_check = cut_check(bottom, top, *self._blade())
+        if self.cut_range_mm is not None:
+            b, t = self._to_base_mm([bottom, top])
+            self.last_check = real_cut_check(b, t, self.plane_z_mm(), self.cut_range_mm,
+                                             radius_mm=self.stem.get("radius", 0.0025) * 1000, opening=self.opening)
+        else:
+            self.last_check = cut_check(bottom, top, *self._blade())
         print(f"[xArm5] cortadora cerrada, pedúnculo: {self.last_check}")
         return self.last_check
 

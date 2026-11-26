@@ -1,4 +1,4 @@
-"""Hojas recortadas del splat (scripts/xarm5/segment_leaf.py) agregadas a la escena como oclusores.
+"""Hojas recortadas del splat (scripts/xarm5/scene/segment_leaf.py) agregadas a la escena como oclusores.
 
 Solo existen en las imágenes: no tienen cuerpo en PyBullet, así que no chocan con el brazo. La
 pose se aplica con transform_object, la misma función de los objetos del splat, que también rota

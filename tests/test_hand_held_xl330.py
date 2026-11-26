@@ -16,7 +16,7 @@ import numpy as np
 
 from splatsim.robots.xl330_gripper import ALERT_BIT, XL330Gripper
 from splatsim.utils.scene.hand_held import (
-    FLANGE_CENTER_MM, GRIPPER_CENTER_MM, JAW_JOINT, JAW_TRAVEL_RAD, MESH_DIR, PIVOT_MM, build_urdf, in_box, load_manifest, merge_splat, origin_matrix, read_ply, read_stl, sample_surface, write_ply,
+    FLANGE_CENTER_MM, GRIPPER_CENTER_MM, JAW_JOINT, JAW_TRAVEL_RAD, MESH_DIR, PIVOT_MM, STAND_THICKNESS_M, build_urdf, in_box, load_manifest, merge_splat, origin_matrix, read_ply, read_stl, sample_surface, write_ply,
 )
 
 OPEN, CLOSED = 1000, 2224
@@ -387,6 +387,16 @@ class TestUrdf(unittest.TestCase):
         self.build()
         np.testing.assert_allclose(fk(self.dst, "camera_optical"), before, atol=1e-7)
 
+    def test_camera_down_mirrors_the_camera_and_keeps_the_image_upright(self):
+        def in_eef(link):
+            return np.linalg.inv(fk(self.dst, "link_eef")) @ fk(self.dst, link)
+        self.build()
+        up = in_eef("wrist_camera_link")
+        self.build(camera_down=True)
+        down = in_eef("wrist_camera_link")
+        np.testing.assert_allclose(down[:3, :3], up[:3, :3], atol=1e-7)   # mismos ejes: la imagen no se da vuelta
+        np.testing.assert_allclose(down[:3, 3], up[:3, 3] * (-1, -1, 1), atol=1e-7)   # al otro lado de la brida
+
     def test_tool_geometry(self):
         self.build(roll_deg=0)
         # con el marco viejo girado 0.3 rad alrededor de z, se compara en ese marco
@@ -395,9 +405,11 @@ class TestUrdf(unittest.TestCase):
         rel = np.linalg.inv(T_flange) @ T_base
         def in_flange(mm):
             return (rel @ np.array([*np.array(mm) / 1000, 1]))[:3]
-        np.testing.assert_allclose(in_flange((0, -51.63, -15.8)), (0, 0, 0), atol=1e-7)  # centro de la brida
-        np.testing.assert_allclose(in_flange((-2, 158.27, -15.8)), (0, -0.002, 0.2099), atol=1e-7)  # punta
-        np.testing.assert_allclose(in_flange((0, -51.63, 50)), (0.0658, 0, 0), atol=1e-7)  # z del ensamble hacia +x
+        # la placa del soporte de la cámara (3 mm) queda entre la brida y el disco
+        gap = STAND_THICKNESS_M
+        np.testing.assert_allclose(in_flange((0, -51.63, -15.8)), (0, 0, gap), atol=1e-7)  # centro de la brida
+        np.testing.assert_allclose(in_flange((-2, 158.27, -15.8)), (0, -0.002, 0.2099 + gap), atol=1e-7)  # punta
+        np.testing.assert_allclose(in_flange((0, -51.63, 50)), (0.0658, 0, gap), atol=1e-7)  # z del ensamble hacia +x
         self.assertAlmostEqual(np.linalg.det(rel[:3, :3]), 1.0)
 
     def test_disc_is_bolted_to_the_plate(self):
@@ -413,7 +425,7 @@ class TestUrdf(unittest.TestCase):
         self.build(roll_deg=180)
         T_flange = fk(self.src, "xarm_gripper_base_link")
         rel = np.linalg.inv(T_flange) @ fk(self.dst, "hand_held_base")
-        np.testing.assert_allclose((rel @ np.array([0, -0.05163, 0.05, 1]))[:3], (-0.0658, 0, 0), atol=1e-7)
+        np.testing.assert_allclose((rel @ np.array([0, -0.05163, 0.05, 1]))[:3], (-0.0658, 0, STAND_THICKNESS_M), atol=1e-7)
 
     def test_horn_joint(self):
         self.build()
@@ -460,6 +472,24 @@ class TestUrdf(unittest.TestCase):
             self.assertIn("hand_held_xl330/hoja.stl", f.read())
         with self.assertRaises(ValueError):
             build_urdf(self.dst, self.dst + ".2", 1.878)
+
+    def test_real_blade_links_go_last_and_match_the_measurements(self):
+        from splatsim.utils.scene import hand_held as hh
+        self.build(real_blade=False)
+        before = [j.get("name") for j in ET.parse(self.dst).getroot().iter("joint")]
+        self.build(blade_tip_radius_mm=70.0)
+        joints = {j.get("name"): j for j in ET.parse(self.dst).getroot().iter("joint")}
+        names = list(joints)
+        self.assertEqual(names[:len(before)], before)                 # los links de antes no cambian de índice
+        self.assertEqual(names[len(before):], ["blade_pivot_fix", "blade_heel_fix", "blade_mid_fix", "blade_tip_fix"])
+        xyz = {n: np.array(joints[n].find("origin").get("xyz").split(), float) * 1000 for n in names[len(before):]}
+        pivot = xyz["blade_pivot_fix"]
+        np.testing.assert_allclose(pivot[:2], hh.REAL_PIVOT_MM, atol=1e-3)
+        self.assertAlmostEqual(np.linalg.norm(pivot[:2] - np.array([-17.6, -11.6])), 65.8, delta=0.05)   # medido
+        self.assertAlmostEqual(np.linalg.norm(xyz["blade_tip_fix"][:2] - pivot[:2]), 70.0, delta=1e-3)
+        self.assertAlmostEqual(pivot[2], GRIPPER_CENTER_MM[2], delta=1e-3)
+        for n in xyz:
+            self.assertEqual(joints[n].find("parent").get("link"), "hand_held_base")
 
     def test_all_mesh_references_exist(self):
         self.build()
@@ -645,7 +675,7 @@ class TestSimGripper(unittest.TestCase):
 
 class TestCalibrationFile(unittest.TestCase):
     def test_only_the_two_lines_change(self):
-        spec = importlib.util.spec_from_file_location("xl330_cli", "scripts/xarm5/xl330_gripper.py")
+        spec = importlib.util.spec_from_file_location("xl330_cli", "scripts/xarm5/robot/xl330_gripper.py")
         cli = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cli)
         with open("configs/xarm5_real.yaml", "rb") as f:

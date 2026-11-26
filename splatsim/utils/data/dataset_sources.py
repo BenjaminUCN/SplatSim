@@ -1,6 +1,6 @@
 """De qué grabación sale cada episodio de un dataset LeRobot (<dataset>/meta/splatsim_sources.yaml).
 
-Lo escribe splatsim/utils/data/lerobot_conversion.py al convertir y lo lee scripts/xarm5/build_registry.py.
+Lo escribe splatsim/utils/data/lerobot_conversion.py al convertir y lo lee scripts/xarm5/dataset/build_registry.py.
 Viaja dentro del dataset, así que el enlace dataset -> grabación sobrevive aunque la carpeta
 convertida no exista en esta máquina (p.ej. un render hecho en un pod de la nube, del que solo
 se baja el dataset). Si la carpeta convertida es un render de render_recordings.py, se guarda
@@ -11,11 +11,11 @@ from pathlib import Path
 import yaml
 
 SOURCES_FILE = "splatsim_sources.yaml"
-RENDER_INFO_FILE = "render_info.yaml"   # lo escribe scripts/xarm5/render_recordings.py
+RENDER_INFO_FILE = "render_info.yaml"   # lo escribe scripts/xarm5/recordings/render_recordings.py
 
 _HEADER = """\
 # Recording folder of each episode of this dataset (written by splatsim/utils/data/lerobot_conversion.py,
-# read by scripts/xarm5/build_registry.py). dataset_episodes[i] comes from episodes[i] of `folder`.
+# read by scripts/xarm5/dataset/build_registry.py). dataset_episodes[i] comes from episodes[i] of `folder`.
 """
 
 

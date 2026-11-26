@@ -4,7 +4,7 @@ La cámara base es fija (eye-to-hand). Cada muestra es un episodio del planifica
 pose A y termina en el tomate, como los grupos de 5 episodios por posición de tomate de gello_3plants
 (cada grupo parte de las 5 poses). Por cada posición de tomate hay 4 categorías x 5 poses = 20
 episodios. Aquí están las definiciones y las reglas con que se acepta o marca el primer instante de
-cada episodio; la generación vive en scripts/xarm5/plan_perception_episodes.py.
+cada episodio; la generación vive en scripts/xarm5/recordings/plan_perception_episodes.py.
 
 Sin dependencias pesadas: se prueba sin PyBullet ni GPU.
 """

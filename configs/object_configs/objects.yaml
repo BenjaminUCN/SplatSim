@@ -346,6 +346,10 @@ plastic_apple_peduncle:
     top: [0.0016, -0.0013, 0.1153]
     cut: [0.0016, -0.0013, 0.0903]
     radius: 0.0025
+    # corte con la hoja real (splatsim/robots/xarm/peduncle.py): todo el filo, del talón a la punta, en mm desde
+    # el pivote real (20-nov; el 19-nov la cortadora real solo cortaba de la mitad hacia el pivote, [17, 42]);
+    # sin esta línea, la regla de antes (1.5 cm del centro del filo)
+    cut_range_mm: [17, 67]
 xarm5_lite_plant_v3_hand_held_down:
   urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down.urdf]
   base_position:
@@ -363,7 +367,7 @@ xarm5_lite_plant_v3_hand_held_down:
     - [0.0, 0.0, 0.0, 1.0]
   aabb:
     bounding_box:
-    - [-0.5189, -0.119, -0.0008]
+    - [-0.5219, -0.119, -0.0008]
     - [0.2504, 0.102, 0.6086]
     urdf_bbox_adjustment:
     - [0.0, 0.1]
@@ -372,3 +376,766 @@ xarm5_lite_plant_v3_hand_held_down:
   use_gripper: true
   gripper: hand_held_xl330
   object_overrides: {plastic_apple: plastic_apple_peduncle}
+xarm5_lite_plant_v3_hand_held_down_cam_down:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  object_overrides: {plastic_apple: plastic_apple_peduncle}
+# la misma escena con la muñeca inclinada hacia abajo en la pose de reset (joint4 +0.325 rad, 22-nov): desde ahí
+# wrist_rgb ve las 16 posiciones de configs/eval_grid_4x4.yaml (con -0.6108, solo las filas z 0.22 y 0.34)
+xarm5_lite_plant_v3_hand_held_down_cam_down_tilt:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  # el splat se capturó en la pose de cam_down (joint4 -0.6108): es la referencia de sus gaussianas
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  object_overrides: {plastic_apple: plastic_apple_peduncle}
+xarm5_lite_plant_v3_hand_held_v4_down:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_v4_down.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_v4_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5218, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330_v4
+  object_overrides: {plastic_apple: plastic_apple_peduncle}
+tomato_real_tab:
+  transformation:
+    matrix:
+    - [-0.074807, 0.006208, -0.043246, 0.009076]
+    - [0.029685, 0.07014, -0.04128, 0.033905]
+    - [0.032056, -0.050465, -0.062694, 0.259083]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.0415, -0.0412, -0.0078]
+    - [0.0795, 0.04, 0.1862]
+  ply_path: ~/data/output/tomato_real_tab/point_cloud/iteration_30000/point_cloud.ply
+  peduncle:
+    bottom: [0.0, 0.0, 0.0674]
+    top: [0.0, 0.0, 0.1014]
+    cut: [0.0, 0.0, 0.0954]
+    radius: 0.0029
+    cut_range_mm: [17, 67]
+  # la oclusión (hojas, measure_occlusion) se mide sobre el fruto y el tallo, hasta peduncle.top: sin la
+  # rama, que deja el tomate siempre cortado por el borde de wrist_rgb (24-nov)
+  occlusion_max_z: 0.1014
+  urdf_path: ~/data/output/tomato_real_tab/urdf/model.urdf
+xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  # el splat se capturó en la pose de cam_down (joint4 -0.6108): es la referencia de sus gaussianas
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  object_overrides: {plastic_apple: tomato_real_tab}
+# 24-nov, para la transferencia: la de arriba, renderizando wrist_rgb desde la lente RGB real de la D435i (URDF
+# _lens: build_hand_held_urdf.py --camera-down --no-real-blade --lens-camera) y todas las cámaras como la RGB de
+# la D435i en 16:9 (todo el sensor), a 640x360 con píxeles cuadrados: focal ~462 px, 69.4 x 42.6 grados (del
+# datasheet; medir con rs-enumerate-devices -c). Las base ven lo mismo que en las otras escenas (FOV_16_9, que
+# ahí se estira a 640x480); en 4:3 la D435i recorta a ~55 x 43 y las base dejaban de ver el tomate.
+xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab_lens:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down_lens.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  # el splat se capturó en la pose de cam_down (joint4 -0.6108): es la referencia de sus gaussianas
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 462.0
+# 25-nov, propuesta (sin datasets ni entrenamientos): la _lens con la D435i sobre una cuña de 15° atornillada al
+# soporte (build_hand_held_urdf.py ... --lens-camera --camera-wedge-deg 15), inclinada hacia el eje de la brida
+# para que wrist_rgb vea el pruner; mismos links que _lens (sirven sus labels)
+xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab_lens_wedge15:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down_lens_wedge15.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  # el splat se capturó en la pose de cam_down (joint4 -0.6108): es la referencia de sus gaussianas
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 462.0
+# la misma con la cuña de 10° (mismo punto de apoyo de la cámara que la de 15°, menos inclinación)
+xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab_lens_wedge10:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down_lens_wedge10.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  # el splat se capturó en la pose de cam_down (joint4 -0.6108): es la referencia de sus gaussianas
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 462.0
+# la misma con la cuña de 12° (mismo punto de apoyo de la cámara que la de 15°, menos inclinación)
+xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab_lens_wedge12:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down_lens_wedge12.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  # el splat se capturó en la pose de cam_down (joint4 -0.6108): es la referencia de sus gaussianas
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 462.0
+# xarm5_b3_d415 = la de _lens_wedge12 (tomate real, cuña de 12°) con lo montado el 24-nov: pinza B3 (mallas hand_held_b3: pruner en el pivote medido y toda la caja corrida -16.75 mm en z de la placa
+# según el pie de metro; splat output_b3) y la D415 (…184) sobre la cuña de 12°, sin corrección:
+# contra d415_wrist_640x{480,360}_now.png (cerrada) la silueta calza con IoU 0.83-0.85 y la rotación óptima es
+# de ±0.5°. Focal de la D415; su centro óptico (318.54, 185.60) no se modela
+# Mandíbula medida (ley de cosenos, puntas a 71.1/70.0 mm del pivote): 35.5° abierta en el home, 2.7° cerrada,
+# 32.8° de recorrido (jaw_open_rad / jaw_travel_rad del manifest)
+xarm5_b3_d415:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3_d415.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  # el splat se capturó en la pose de cam_down (joint4 -0.6108): es la referencia de sus gaussianas
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_b3
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3              # apertura de la B3 para la regla de corte (hand_held.OPENING_TABLES)
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 454.22          # D415 …184 a 640x360: fx 454.22 fy 453.58; cx 318.54 cy 185.60 (el render centra: -1.5/+5.6 px)
+# INVÁLIDA (24-nov): su yaw de 4° era el pivote de las mallas v3 corrido 10 mm, no la cámara; no usar.
+# la de 12° con la D435 (…924) tal como quedó montada: el ajuste por silueta contra sus capturas (24-nov,
+# d435_*_after_failed_home.png) gira la cámara pitch 6.5° y yaw 4.0° (--camera-fit-deg); obsoleta si se
+# corrige el asiento de la cámara o de la cuña
+xarm5_lite_plant_v3_hand_held_down_cam_down_tilt_tomato_real_tab_lens_wedge12_fit:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down_lens_wedge12_fit.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  # el splat se capturó en la pose de cam_down (joint4 -0.6108): es la referencia de sus gaussianas
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_hand_held_down
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 456.81          # D435 …924 a 640x360: fx 456.81 fy 455.97; cx 326.49 cy 188.36 (el render centra: +6.5/+8.4 px)
+# escena capturada de verdad con la cortadora (video scene_pruner.mp4, 23-nov): alineada sin CloudCompare,
+# con los AprilTag de la pared contra 260729_2003 y luego ajustando el URDF en la pose de reset al splat
+# (recorte: gaussianas de la caja a más de 1.5 cm del URDF o de más de 3 cm, salvo el piso)
+# (URDF→splat mediana 7.3 mm; la escena vieja da 11.8 mm con la misma medida)
+xarm5_lite_plant_v4_pruner:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/scene_pruner
+  model_path: ~/data/Colmaps/scene_pruner/output_trimmed
+  transformation:
+    matrix:
+    - [-0.016184, -0.084016, -0.138755, -0.249791]
+    - [0.161774, -0.018573, -0.007622, -0.084945]
+    - [-0.011881, -0.138456, 0.085221, 0.528389]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.519, -0.1187, -0.0]
+    - [0.2502, 0.0865, 0.6076]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  splat_gripper_value: 0.20
+  object_overrides: {plastic_apple: tomato_real_tab}
+# la misma escena con el reset de _cam_down_tilt (joint4 +0.325 rad); el splat sigue en la pose de captura
+xarm5_lite_plant_v4_pruner_tilt:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_hand_held_down_cam_down.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/scene_pruner
+  model_path: ~/data/Colmaps/scene_pruner/output_trimmed
+  transformation:
+    matrix:
+    - [-0.016184, -0.084016, -0.138755, -0.249791]
+    - [0.161774, -0.018573, -0.007622, -0.084945]
+    - [-0.011881, -0.138456, 0.085221, 0.528389]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.519, -0.1187, -0.0]
+    - [0.2502, 0.0865, 0.6076]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  splat_gripper_value: 0.20
+  object_overrides: {plastic_apple: tomato_real_tab}
+# xarm5_pruner_d415 (24-nov): el splat real de scene_pruner (video del 23-nov) con lo montado: pinza B3 (hand_held_b3,
+# medida) y la D415 (…184) sobre la cuña de 12°. Etiquetas y recorte rehechos con el URDF B3 (output_trimmed_b3;
+# output_trimmed, el del v3, no se tocó); URDF B3 -> gaussianas de la pinza: mediana 4.5 mm. joint_states = el reset del
+# robot real (configs/xarm5_real.yaml home_joints); splat_joint_states = la pose en que se capturó.
+# Fondo girado 2.83° alrededor de la wrist cam en el reset (output_trimmed_b3_world) para que calce con la D415 real
+# (55 puntos SIFT de la pared, d415_wrist_640x360_now.png); las gaussianas del robot no se tocan. El pruner escaneado
+# (el del 23-nov, montado distinto) va llevado al B3 con un ajuste rígido: 7.3°, 11.5 mm en el pivote, mediana 1.1 mm
+# (output_trimmed_b3_world_pruner); apertura de la captura 0.45
+xarm5_pruner_d415:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3_d415.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.48, -0.5149, -0.6056, 0.0035, 0.0]
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/scene_pruner
+  model_path: ~/data/Colmaps/scene_pruner/output_trimmed_b3_world_pruner
+  transformation:
+    matrix:
+    - [-0.016184, -0.084016, -0.138755, -0.249791]
+    - [0.161774, -0.018573, -0.007622, -0.084945]
+    - [-0.011881, -0.138456, 0.085221, 0.528389]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.511, -0.1189, -0.0]
+    - [0.2506, 0.0864, 0.6077]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3              # apertura de la B3 para la regla de corte (hand_held.OPENING_TABLES)
+  splat_gripper_value: 0.45
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 454.22          # D415 …184 a 640x360 (fx 454.22 fy 453.58)
+  wrist_camera_principal_px: [318.54, 185.60]   # su centro óptico (calibración de fábrica)
+xarm5_b3_base:
+  urdf_path: [/home/magister/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.6108, 0.0, 0.0]
+  source_path: ~/data/Colmaps/260729_2003
+  model_path: ~/data/Colmaps/260729_2003/output_b3
+  transformation:
+    matrix:
+    - [0.05331, -0.06126, -0.281102, -0.1197]
+    - [0.283493, -0.037529, 0.061943, -0.069551]
+    - [-0.049024, -0.283641, 0.052516, 0.80521]
+    - [0.0, 0.0, 0.0, 1.0]
+  aabb:
+    bounding_box:
+    - [-0.5219, -0.119, -0.0008]
+    - [0.2504, 0.102, 0.6086]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3              # apertura de la B3 para la regla de corte (hand_held.OPENING_TABLES)
+  object_overrides: {plastic_apple: plastic_apple_peduncle}
+# video scene_pruner_w12.mp4 (24-nov), con la B3 + cuña 12° + D415: tags contra scene_pruner y ajuste del URDF B3+D415
+# (q libre desde los dos resets: los dos dan la misma pose, ~el reset viejo; URDF->splat mediana 7 mm; la cortadora sale cerrada)
+# fondo (fuera de la caja) girado 2.86° alrededor de la wrist en el reset viejo para calzar d415_wrist_640x360_now (queda 0.16°);
+# el mismo giro que scene_pruner (2.83°): la pose ajustada difiere del reset del panel ~2° de cabeceo (J2+J3+J4)
+xarm5_pruner_w12:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3_d415.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  splat_joint_states:
+  - [0.0, 0.0, -0.4969, -0.5096, -0.6299, 0.0293, 0.0]
+  source_path: ~/data/Colmaps/scene_pruner_w12
+  model_path: ~/data/Colmaps/scene_pruner_w12/output_trimmed_b3_world
+  transformation:
+    matrix:
+    - [-0.078703, 0.002286, -0.156519, 0.067812]
+    - [0.155620, 0.020075, -0.077957, -0.032625]
+    - [0.016916, -0.174039, -0.011047, 0.513427]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.5066, -0.1189, -0.0]
+    - [0.2521, 0.0866, 0.6063]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3
+  splat_gripper_value: 1.00
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 454.22
+  wrist_camera_principal_px: [318.54, 185.60]
+# piloto 25-nov: la escena de la cuña de 15° con la D415 invertida sobre la placa hardware/camera_shift (carcasa corrida a y = -20 mm,
+# la RGB en y = +15.2 mm de link_eef, sobre el plano de la hoja, y 5 mm más adelante): el punto de corte al centro
+# de wrist_rgb. Mismo splat que xarm5_pruner_w12 y sus etiquetas (los índices de los links no cambian)
+xarm5_pruner_w15s50:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3_d415_w15_s50.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  splat_joint_states:
+  - [0.0, 0.0, -0.4969, -0.5096, -0.6299, 0.0293, 0.0]
+  source_path: ~/data/Colmaps/scene_pruner_w12
+  model_path: ~/data/Colmaps/scene_pruner_w12/output_trimmed_b3_world
+  transformation:
+    matrix:
+    - [-0.078703, 0.002286, -0.156519, 0.067812]
+    - [0.155620, 0.020075, -0.077957, -0.032625]
+    - [0.016916, -0.174039, -0.011047, 0.513427]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.5066, -0.1189, -0.0]
+    - [0.2521, 0.0866, 0.6063]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3
+  splat_gripper_value: 1.00
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 454.22
+  wrist_camera_principal_px: [320.46, 173.40]   # D415 invertida: (639 - 318.54, 359 - 185.60)
+# w15s50 con el giro de la D415 real medido en 3 poses con los joints leídos (25-nov, render_s50.py contra
+# d415_wrist_flip_{home_tilt,j4_m10,j1_p10}, la D415 reasentada en la placa a las 20:3x): --camera-fit-deg 2.69 -1.02 0.14
+# (cabeceo, guiñada, rolido; antes de reasentarla, 1.75 -1.47 1.61)
+xarm5_pruner_w15s50_fit:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3_d415_w15_s50_fit.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  splat_joint_states:
+  - [0.0, 0.0, -0.4969, -0.5096, -0.6299, 0.0293, 0.0]
+  source_path: ~/data/Colmaps/scene_pruner_w12
+  model_path: ~/data/Colmaps/scene_pruner_w12/output_trimmed_b3_world
+  transformation:
+    matrix:
+    - [-0.078703, 0.002286, -0.156519, 0.067812]
+    - [0.155620, 0.020075, -0.077957, -0.032625]
+    - [0.016916, -0.174039, -0.011047, 0.513427]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.5066, -0.1189, -0.0]
+    - [0.2521, 0.0866, 0.6063]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3
+  splat_gripper_value: 1.00
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 454.22
+  wrist_camera_principal_px: [320.46, 173.40]   # D415 invertida: (639 - 318.54, 359 - 185.60)
+
+# Escena real del 25-nov (video 1, cortadora cerrada, brazo en el home inclinado) + foto de la D415 de la muñeca;
+# alineada por AprilTags a w12 y rígida contra el URDF _fit con q fija: mediana 6.8 mm. ~/data/experiments/261126_realscan
+xarm5_realscan_v1:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3_d415_w15_s50_fit.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  source_path: ~/data/Colmaps/scene_vid1_1125
+  model_path: ~/data/Colmaps/scene_vid1_1125/output_trimmed
+  transformation:
+    matrix:
+    - [-0.036443, -0.031027, -0.162623, -0.103232]
+    - [0.165157, 0.004755, -0.037918, 0.033893]
+    - [0.011501, -0.166589, 0.029207, 0.470246]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.5283, -0.119, -0.0]
+    - [0.2506, 0.0866, 0.6076]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3
+  splat_gripper_value: 1.00
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 454.22
+  wrist_camera_principal_px: [320.46, 173.40]   # D415 invertida
+
+# Como xarm5_realscan_v1, con la foto de la muñeca repetida 40 veces en el entrenamiento
+xarm5_realscan_v1r:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3_d415_w15_s50_fit.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  source_path: ~/data/Colmaps/scene_vid1_rep40
+  model_path: ~/data/Colmaps/scene_vid1_rep40/output_trimmed
+  transformation:
+    matrix:
+    - [-0.036448, -0.030626, -0.162698, -0.104103]
+    - [0.165194, 0.004286, -0.037813, 0.034087]
+    - [0.010944, -0.166676, 0.028923, 0.469585]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.5284, -0.1187, -0.0]
+    - [0.2504, 0.0864, 0.6076]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3
+  splat_gripper_value: 1.00
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 454.22
+  wrist_camera_principal_px: [320.46, 173.40]   # D415 invertida
+
+# Como xarm5_realscan_v1, con la foto de la muñeca (x20) en la pose de la cámara del sim, no la de COLMAP
+xarm5_realscan_v1w:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3_d415_w15_s50_fit.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  source_path: ~/data/Colmaps/scene_vid1_simwrist
+  model_path: ~/data/Colmaps/scene_vid1_simwrist/output_trimmed
+  transformation:
+    matrix:
+    - [-0.036941, -0.030925, -0.162530, -0.103313]
+    - [0.165079, 0.004211, -0.038321, 0.033994]
+    - [0.011027, -0.166622, 0.029198, 0.470534]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.5263, -0.1189, -0.0]
+    - [0.2503, 0.0865, 0.6077]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3
+  splat_gripper_value: 1.00
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 454.22
+  wrist_camera_principal_px: [320.46, 173.40]   # D415 invertida
+
+# Como xarm5_realscan_v1w, con la foto de la muñeca x100
+xarm5_realscan_v1w100:
+  # 26-nov (usuario): base_left/right sobre la plataforma negra, con los soportes de hardware/base_camera_mount
+  # atornillados a los M3 de las esquinas delanteras (a ~35 mm del borde delantero, en x = -0.295, y = ∓0.22/0.25).
+  # x = -0.18 (camera_poses.yaml: -0.079): los 16 puntos de eval_grid_4x4 entran en las dos cámaras con el tomate entero
+  # (con -0.20 la fila de arriba del mismo lado se salía 0.2°), y el soporte cabe en 180 mm.
+  # y = ±0.19 (no ±0.22: la RGB de la D435 está en un extremo de la carcasa y con ±0.22 la derecha sobresalía 14 mm
+  # del borde, en y = ±0.288 según el escaneo). z y giro (14.3° hacia el centro) iguales que en camera_poses.yaml.
+  base_camera_poses:
+    base_left_rgb: {xyz: [-0.18, -0.19, 0.142], rpy: [-1.562, 0.0, -4.958]}
+    base_right_rgb: {xyz: [-0.18, 0.19, 0.142], rpy: [-1.562, 0.0, -4.458]}
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3_d415_w15_s50_rs.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  source_path: ~/data/Colmaps/scene_vid1_simwrist100
+  model_path: ~/data/Colmaps/scene_vid1_simwrist100/output_trimmed
+  transformation:
+    matrix:
+    - [-0.037556, -0.030867, -0.162400, -0.103445]
+    - [0.165002, 0.003132, -0.038752, 0.034870]
+    - [0.010056, -0.166657, 0.029351, 0.469325]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.5298, -0.1188, -0.0]
+    - [0.2503, 0.0863, 0.6077]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3
+  splat_gripper_value: 1.00
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 454.22
+  wrist_camera_principal_px: [320.46, 173.40]   # D415 invertida
+# realscan videos 1+2 (25-nov) + muñeca x100; URDF _rs (26-nov). PEOR que v1w100: fondo doble y cortadora corrida, giro 1.1°
+xarm5_realscan_v12:
+  urdf_path: [~/data/xarm5_lite_urdf/ufactory_xarm5_urdf/xarm5_b3_d415_w15_s50_rs.urdf]
+  base_position:
+  - [0, 0, 0]
+  wrist_camera_link_name: wrist_camera_link
+  joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  splat_joint_states:
+  - [0.0, 0.0, -0.4886, -0.5235, -0.2858, 0.0, 0.0]
+  source_path: ~/data/Colmaps/scene_vid12_w100
+  model_path: ~/data/Colmaps/scene_vid12_w100/output_trimmed
+  transformation:
+    matrix:
+    - [-0.064640, 0.032456, -0.196746, -0.132635]
+    - [0.193849, -0.038261, -0.070000, 0.002946]
+    - [-0.046750, -0.203528, -0.018215, 0.510066]
+    - [0.000000, 0.000000, 0.000000, 1.000000]
+  aabb:
+    bounding_box:
+    - [-0.5282, -0.1188, -0.0]
+    - [0.2505, 0.0866, 0.6077]
+    urdf_bbox_adjustment:
+    - [0.0, 0.1]
+    - [0.0, 0.0]
+    - [0.0, 0.0]
+  use_gripper: true
+  gripper: hand_held_xl330
+  pruner_opening: b3
+  splat_gripper_value: 1.00
+  object_overrides: {plastic_apple: tomato_real_tab}
+  camera_image_size: [360, 640]
+  camera_focal_px: 454.22
+  wrist_camera_principal_px: [320.46, 173.40]   # D415 invertida

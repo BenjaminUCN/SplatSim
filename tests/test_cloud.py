@@ -32,7 +32,7 @@ from splatsim.cloud.orchestrator import Orchestrator, Settings, describe_progres
 from splatsim.cloud.providers import Instance, Offer, Requirements, VastProvider  # noqa: E402
 from splatsim.cloud import runner  # noqa: E402
 from splatsim.cloud.runner import Run, run_stage  # noqa: E402
-from scripts.xarm5.data_jobs import plan_pipeline  # noqa: E402
+from scripts.xarm5.training.data_jobs import plan_pipeline  # noqa: E402
 from splatsim.cloud import stages  # noqa: E402
 from splatsim.cloud.stages import describe_pipeline, scan_recordings, scan_states  # noqa: E402
 from splatsim.cloud.storage import EpisodePacks, Storage, write_pack  # noqa: E402
@@ -314,6 +314,19 @@ class TestPipeline(Base):
         self.assertEqual(job["status"], "failed")
         self.assertIn("máximo", job["error"])
         self.assertEqual(self.provider.live, {})
+
+    def test_cost_limit_waits_for_the_upload(self):
+        self.provider.autostart = False
+        job = self.submit(max_cost=1.0)
+        self.run_until(lambda: job["status"] == "starting")
+        job["phase"] = "upload"
+        job["billing_ts"] = time.time() - 1.1 * 3600   # $1.10: dentro del margen de subida
+        self.orch.tick()
+        self.assertNotEqual(job["status"], "failed")
+        job["billing_ts"] = time.time() - 1.3 * 3600   # $1.30: pasa el margen
+        self.orch.tick()
+        self.assertEqual(job["status"], "failed")
+        self.assertIn("margen de subida", job["error"])
 
 
 def make_recordings(root: Path, episodes=("000", "001"), cameras=("base_rgb", "wrist_rgb"), discarded=()):
@@ -1240,7 +1253,7 @@ class TestLeafRender(unittest.TestCase):
         self.assertIsNone(render.rate({**leaves, **result}))
 
     def test_meta_paths_also_work_in_the_lab(self):
-        from scripts.xarm5.render_recordings import portable_path
+        from scripts.xarm5.recordings.render_recordings import portable_path
         self.assertEqual(str(portable_path(Path.home() / "data/hoja.ply")), "~/data/hoja.ply")
         self.assertEqual(str(portable_path(Path("/otra/hoja.ply"))), "/otra/hoja.ply")
 

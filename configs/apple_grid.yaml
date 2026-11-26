@@ -1,4 +1,4 @@
-# Tomato positions (x, y, z) in PyBullet world coordinates used by scripts/xarm5/run_policy_trials.py,
+# Tomato positions (x, y, z) in PyBullet world coordinates used by scripts/xarm5/trials/run_policy_trials.py,
 # added with "Save Position to Grid" in the control panel (or by hand), and random_range: the box
 # (min, max per axis, m) or random_hemisphere: where "Random Position" puts it, chosen by random_shape
 # (panel: Tomato > Random range). The hemisphere: center (m), radius [min, max] (m), facing (deg, the
@@ -25,6 +25,6 @@ random_hemisphere:
   center: [0.0, 0.0, 0.267]
   radius: [0.6, 0.9]
   facing: 180.0
-  z: [-0.4, 0.6]
+  z: [-0.3, 0.45]
   x: [-0.9, -0.3]
   y: [-0.4, 0.4]

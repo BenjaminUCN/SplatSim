@@ -9,7 +9,8 @@ import time
 import numpy as np
 
 from splatsim.utils.render.camera_setup import base_camera_poses
-from splatsim.utils.render.occlusion import measure_camera
+from splatsim.utils.render.occlusion import fruit_indices, measure_camera
+from splatsim.utils.scene.scene_variation import turn_about_own_z
 from splatsim.utils.robot_splat_render_utils import get_curr_link_states
 
 # antes que gaussian_renderer: importar gaussian_splatting agrega su carpeta al path
@@ -53,7 +54,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
     # métodos que el cliente puede llamar por ZMQ además de los de ZMQRobotServer
     REMOTE_METHODS = ("reset_robot", "start_recording", "stop_recording", "get_preview",
                       "set_control_mode", "operator_prompt", "operator_answer", "measure_occlusion",
-                      "place_trial_leaf")
+                      "place_trial_leaf", "robot_urdf", "set_camera_jitter")
 
     def __init__(self, traj_save_path: str | None = None, move_apple: bool = False,
                  show_apple_window: bool = True, control_hz: int = CONTROL_HZ,
@@ -70,7 +71,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
         "realtime": el serve_loop la avanza continuamente al ritmo del reloj y los comandos solo
         cambian el objetivo (teleoperación con GELLO); las grabaciones guardan solo el estado,
         un frame por comando, y las imágenes se renderizan después con
-        scripts/xarm5/render_recordings.py.
+        scripts/xarm5/recordings/render_recordings.py.
         occluders: archivo con hojas recortadas del splat que se agregan a la escena (ver
         splatsim/robots/xarm/occluders.py); None = ninguna.
         trail: dibuja el recorrido del efector durante cada grabación (líneas de PyBullet)."""
@@ -112,6 +113,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
             self, MAX_RECORD_SECONDS, RECORD_EVERY, state_only_max_seconds=TELEOP_MAX_RECORD_SECONDS)
         self.gripper = None  # se crea en setup_gripper(), que XArm5SimBase llama en su __init__
         self.occluders = None
+        self.tomato_yaw = 0.0            # restore_state gira los objetos esto alrededor de su z (rad)
         super().__init__(**kwargs)
         if occluders:
             self.occluders = OccluderSet(self, occluders)
@@ -174,6 +176,8 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
     def _step(self, n: int = 1) -> None:
         for _ in range(n):
             self.pybullet_client.stepSimulation()
+            if self.gripper is not None:    # sin use_gripper no se crea
+                self.gripper.follow()       # gripper v4: mandíbula y bastón siguen al horn
         self.sim_steps += n
 
     def _advance(self, n: int) -> None:
@@ -289,7 +293,15 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
     def prep_image_rendering(self, data, cached_link_states=None):
         super().prep_image_rendering(data, cached_link_states=cached_link_states)
         # los objetos (el tomate) van después de la escena y antes de los oclusores
-        self._object_gaussians = slice(self.gaussians_backup._xyz.shape[0], self.robot_gaussian._xyz.shape[0])
+        start = self.gaussians_backup._xyz.shape[0]
+        self._object_gaussians = slice(start, self.robot_gaussian._xyz.shape[0])
+        if not hasattr(self, "_fruit"):     # la oclusión se mide sobre el fruto y el tallo, sin la rama
+            self._fruit = None
+            if len(self.object_gaussians) == 1:
+                name = self.splat_object_name_list[0]
+                self._fruit = fruit_indices(self.object_config[name], self.object_gaussians[0].get_xyz.detach())
+        if self._fruit is not None:
+            self._object_gaussians = self._fruit + start
         if self.occluders is not None:
             self.occluders.append_to(self.robot_gaussian)
 
@@ -386,13 +398,32 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
             self.occluders = OccluderSet(self)
         return self.occluders.set_episode(entries)
 
+    def robot_urdf(self) -> str:
+        """urdf_path para los clientes (run_policy_trials.py calcula con él la pose de pregrasp)."""
+        return self.urdf_path
+
+    def set_camera_jitter(self, jitter: dict | None = None) -> None:
+        """Corre y gira las cámaras base respecto de su pose nominal: {nombre: [dx, dy, dz, droll, dpitch,
+        dyaw]} (m, rad; splatsim/utils/scene/scene_variation.py). Las que no están vuelven a la nominal."""
+        jitter = jitter or {}
+        unknown = set(jitter) - {n for n, cam in self.cameras.items() if hasattr(cam, "jitter")}
+        if unknown:
+            raise ValueError(f"set_camera_jitter: {sorted(unknown)} no son cámaras base")
+        with self.lock:
+            for name, cam in self.cameras.items():
+                if hasattr(cam, "jitter"):
+                    cam.jitter = tuple(float(v) for v in jitter.get(name, (0.0,) * 6))
+
     def place_trial_leaf(self, leaf_dir: str, target: float, key: int, seed: int = 0,
-                         cameras: list[str] | None = None) -> dict:
+                         cameras: list[str] | None = None, reference_q: list[float] | None = None) -> dict:
         """Ensayos con oclusión (run_policy_trials.py --occlusion-targets): con el brazo y el tomate
         ya en su lugar, pone una hoja de leaf_dir que tape target % del tomate, ajustada como en
         render_recordings.py --leaf_dir (splatsim/utils/scene/leaf_variation.py). El sorteo (hoja,
         cámara, dirección, giro) depende solo de seed y key, así todos los modelos ven la misma hoja.
-        target 0 quita las hojas del ensayo anterior. Devuelve el ajuste (leaf_fit)."""
+        target 0 quita las hojas del ensayo anterior. Devuelve el ajuste (leaf_fit).
+        reference_q: articulaciones del brazo (5) en que se ajusta la hoja, p. ej. la pose de pregrasp
+        para la cámara de muñeca, que en la pose inicial no ve el tomate. El brazo se pone ahí solo
+        para medir (sin física) y vuelve a donde estaba; la hoja queda fija en el mundo."""
         from pathlib import Path
         from splatsim.utils.scene.leaf_variation import draw_episode, place_episode_leaf
         leaves = sorted(Path(leaf_dir).expanduser().glob("*.ply"))
@@ -401,8 +432,25 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
         cameras = list(cameras) if cameras else [c for c in self.camera_names if "wrist" not in c]
         draw = draw_episode(str(int(key)), leaves, (float(target),), seed)
         with self.lock:
-            _, fit = place_episode_leaf(self, draw, cameras)
-        return fit
+            if reference_q is None:
+                _, fit = place_episode_leaf(self, draw, cameras)
+                return fit
+            c, robot = self.pybullet_client, self.dummy_robot
+            saved = [c.getJointState(robot, i)[:2] for i in range(c.getNumJoints(robot))]
+            arm = [i for i in range(c.getNumJoints(robot))
+                   if c.getJointInfo(robot, i)[2] != c.JOINT_FIXED][:len(reference_q)]
+            try:
+                for i, q in zip(arm, reference_q):
+                    c.resetJointState(robot, i, float(q))
+                for i in range(c.getNumJoints(robot)):   # sin FK, getLinkState daría la pose anterior
+                    c.getLinkState(robot, i, computeForwardKinematics=True)
+                _, fit = place_episode_leaf(self, draw, cameras)
+            finally:
+                for i, (q, v) in enumerate(saved):
+                    c.resetJointState(robot, i, q, v)
+                for i in range(c.getNumJoints(robot)):
+                    c.getLinkState(robot, i, computeForwardKinematics=True)
+        return {**fit, "reference_q": [round(float(q), 4) for q in reference_q]}
 
     def measure_occlusion(self, camera_names=None) -> dict:
         """Cuánto del tomate tapa la escena en cada cámara (splatsim/utils/render/occlusion.py), con el
@@ -462,6 +510,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
             obs["peduncle_error"] = self.peduncle.error()
             obs["peduncle_cut"] = self.peduncle.cut
             obs["peduncle_held"] = self.peduncle.held
+            obs["peduncle_cuttable"] = self.peduncle.would_cut()
 
     def active_camera_names(self) -> list[str]:
         return self.recorder.cameras_to_capture(self.camera_names)
@@ -479,7 +528,7 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
 
     def restore_state(self, obs: dict) -> None:
         """Pone la escena en el estado de una observación grabada (sim_joint_positions y objetos);
-        lo usa scripts/xarm5/render_recordings.py."""
+        lo usa scripts/xarm5/recordings/render_recordings.py."""
         c = self.pybullet_client
         with self.lock:
             for i, q in enumerate(obs["sim_joint_positions"]):
@@ -488,8 +537,10 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
                 c.getLinkState(self.dummy_robot, i, computeForwardKinematics=True)
             for name, body in zip(self.splat_object_name_list, self.urdf_object_list):
                 if f"{name}_position" in obs:
-                    c.resetBasePositionAndOrientation(
-                        body, obs[f"{name}_position"], obs[f"{name}_orientation"])
+                    orientation = obs[f"{name}_orientation"]
+                    if self.tomato_yaw:   # el giro del episodio (render_recordings.py --variation)
+                        orientation = turn_about_own_z(orientation, self.tomato_yaw)
+                    c.resetBasePositionAndOrientation(body, obs[f"{name}_position"], orientation)
 
     # ── control remoto (REMOTE_METHODS) ──────────────────────────────────────
     def reset_joint_command(self) -> np.ndarray:
@@ -559,14 +610,18 @@ class XArm5PybulletRobotServerCamera(OperatorMixin, XArm5SimBase):
             self.serve_loop()
 
     def setup_scene(self) -> None:
-        """Pone el robot en la pose inicial y guarda los estados de referencia del render."""
+        """Guarda los estados de referencia del render (el brazo en la pose del splat,
+        splat_joint_states) y pone el robot en la pose inicial (joint_states)."""
         c = self.pybullet_client
         for i in range(len(self.initial_joint_state)):
             c.setJointMotorControl2(self.dummy_robot, i, c.VELOCITY_CONTROL, force=0)
+        for i in range(1, len(self.splat_joint_state)):
+            c.resetJointState(self.dummy_robot, i,
+                              self.splat_joint_state[i - 1] * self.joint_signs[i - 1])
+        self.initial_link_states = get_curr_link_states(self.dummy_robot, self.use_link_centers)
         for i in range(1, len(self.initial_joint_state)):
             c.resetJointState(self.dummy_robot, i,
                               self.initial_joint_state[i - 1] * self.joint_signs[i - 1])
-        self.initial_link_states = get_curr_link_states(self.dummy_robot, self.use_link_centers)
 
         for i in range(1, self.num_dofs()):
             c.setJointMotorControl2(self.dummy_robot, i, c.VELOCITY_CONTROL,

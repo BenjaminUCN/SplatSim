@@ -152,7 +152,7 @@ Congrats! Your static splat is now being simulated! 🚀
 
 ## xArm5 Lite tomato harvesting
 
-The xArm5 workflow of this fork is documented in **[docs/xarm5.md](docs/xarm5.md)**: the simulation and real-robot servers, the control panel, GELLO teleoperation and recording, rendering recordings at a fixed rate, training and its queue, the registry of recordings, datasets and models, and policy trials and their comparison. Its scripts are in `scripts/xarm5/`; `scripts/` keeps SplatSim's own, three of which (`launch_nodes.py`, `run_env_sim.py`, `launch_camera_nodes.py`) are also entry points of the xArm5 workflow.
+The xArm5 workflow of this fork is documented in **[docs/xarm5.md](docs/xarm5.md)**: the simulation and real-robot servers, the control panel, GELLO teleoperation and recording, rendering recordings at a fixed rate, training and its queue, the registry of recordings, datasets and models, and policy trials and their comparison. Its scripts are in `scripts/xarm5/`, one folder per stage (scene, robot, recordings, dataset, training, trials, cloud, upkeep); `scripts/` keeps SplatSim's own, three of which (`launch_nodes.py`, `run_env_sim.py`, `launch_camera_nodes.py`) are also entry points of the xArm5 workflow.
 
 # Optional
 
@@ -210,6 +210,8 @@ Add `your_robot_name` to `configs/object_configs/objects.yaml`. First, copy-past
 - Set `source_path` to the folder with the image data and colmap outputs (ex: `~/data/your_robot_name/input`)
 
 - Set `joint_states` (radians) to the joint angles that the robot had when the gaussian splat data was collected. There might be an extra 0 preceding the base joint (ex: [0, 0, 1.57, ...])
+
+- The xArm5 sim (`splatsim/robots/xarm`) also resets the robot to `joint_states`. To reset it to another pose with the same splat, set `joint_states` to that pose and `splat_joint_states` to the capture pose (same format). Without `splat_joint_states`, both are `joint_states`.
 
 - If you have a different URDF, change `urdf_path`. Note that `robot_iphone` is a UR5 robot.
 

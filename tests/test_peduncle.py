@@ -8,15 +8,18 @@ from pathlib import Path
 
 import numpy as np
 
-from splatsim.utils.scene.hand_held import MESH_DIR, flange_from_assembly, read_stl
+from splatsim.utils.scene.hand_held import (MESH_DIR, blade_polar_mm, flange_from_assembly, read_stl,
+                                           real_blade_point_mm, real_opening_deg, OPENING_TABLES)
 from splatsim.utils.scene.peduncle import (
     DROPPED,
     EMBED,
     HELD,
     INTACT,
     cut_check,
+    cut_target_dtheta,
     cylinder_points,
     next_stem_state,
+    real_cut_check,
     stem_from_tomato,
     to_world,
 )
@@ -101,8 +104,8 @@ class CutAndHoldTest(unittest.TestCase):
 
 class MountTest(unittest.TestCase):
     def test_default_mount_puts_the_top_cover_down(self):
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-        from build_hand_held_urdf import DEFAULT_ROLL_DEG
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from scripts.xarm5.robot.build_hand_held_urdf import DEFAULT_ROLL_DEG
         T = flange_from_assembly(DEFAULT_ROLL_DEG)
         cover = T[:3, :3] @ (read_stl(f"{MESH_DIR}/top_cover.stl").reshape(-1, 3).mean(0) / 1000) + T[:3, 3]
         self.assertLess(cover[0], -0.005)   # +x: arriba con joint5 en 0
@@ -111,8 +114,8 @@ class MountTest(unittest.TestCase):
 class ObjectsYamlTest(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "xarm5"))
-        import add_peduncle
+        sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+        from scripts.xarm5.scene import add_peduncle
         cls.module = add_peduncle
 
     TEXT = "# comment\na:\n  x: 1\n  # keep\nb:\n- 1\n- 2\nc: 3\n"
@@ -132,6 +135,89 @@ class ObjectsYamlTest(unittest.TestCase):
         text = "plastic_apple:\n  x: 1\nplastic_apple_peduncle:\n  y: 2\n"
         self.assertEqual(self.module.replace_block(text, "plastic_apple_peduncle", "plastic_apple_peduncle: 3\n"),
                          "plastic_apple:\n  x: 1\nplastic_apple_peduncle: 3\n")
+
+
+class RealBladeTest(unittest.TestCase):
+    Z = -10.9
+
+    def stem_through(self, xy_mm, tilt_deg=0.0):
+        """Tallo de 40 mm que cruza el plano de la hoja en xy_mm."""
+        x = np.array([*xy_mm[:2], self.Z])
+        d = np.array([np.sin(np.radians(tilt_deg)), 0, np.cos(np.radians(tilt_deg))]) * 20
+        return x - d, x + d
+
+    def check(self, r, dtheta, **kw):
+        return real_cut_check(*self.stem_through(real_blade_point_mm(r, dtheta, self.Z)), self.Z, (17, 42), **kw)
+
+    def test_polar_round_trip(self):
+        r, dth = blade_polar_mm(real_blade_point_mm(30, 3.8))
+        self.assertAlmostEqual(r, 30)
+        self.assertAlmostEqual(dth, 3.8)
+
+    def test_opening(self):
+        self.assertAlmostEqual(real_opening_deg(0.0), 53.7)
+        self.assertAlmostEqual(real_opening_deg(0.8), 7.6)
+        self.assertAlmostEqual(real_opening_deg(1.0), 0.0)
+        self.assertAlmostEqual(cut_target_dtheta(), 3.8)
+
+    def test_opening_b3(self):
+        b3 = OPENING_TABLES["b3"]
+        self.assertAlmostEqual(real_opening_deg(0.0, b3), 35.5)
+        self.assertAlmostEqual(real_opening_deg(1.0, b3), 2.7)
+        self.assertAlmostEqual(cut_target_dtheta(opening=b3), real_opening_deg(0.8, b3) / 2)
+        # cerrada del todo la B3 deja 2.7° entre hoja y filo: lo que la B2 deja fuera, la B3 lo tiene adentro
+        self.assertEqual(self.check(40, 6.0, gripper=1.0), "open_side")
+        self.assertEqual(self.check(40, 6.0, gripper=1.0, opening=b3), "ok")
+
+    def test_inside_the_range_between_blade_and_anvil(self):
+        self.assertEqual(self.check(30, 3.8), "ok")
+        self.assertEqual(self.check(17.5, 0), "ok")
+        self.assertEqual(self.check(41.5, 7), "ok")
+
+    def test_along_the_edge(self):
+        self.assertEqual(self.check(15, 3.8), "near_pivot")
+        self.assertEqual(self.check(45, 3.8), "past_range")
+
+    def test_across_the_edge(self):
+        self.assertEqual(self.check(30, -10), "anvil_side")
+        self.assertEqual(self.check(30, 20), "open_side")
+        self.assertEqual(self.check(30, 20, gripper=0.0), "ok")   # abierta, la hoja todavía está más allá
+        self.assertEqual(self.check(30, -3), "ok")               # el grosor del tallo da margen
+
+    def test_tilt_and_plane(self):
+        tilted = self.stem_through(real_blade_point_mm(30, 3.8, self.Z), tilt_deg=50)
+        self.assertEqual(real_cut_check(*tilted, self.Z, (17, 42)), "tilted")
+        b, t = self.stem_through(real_blade_point_mm(30, 3.8, self.Z))
+        self.assertEqual(real_cut_check(b + [0, 0, 30], t + [0, 0, 30], self.Z, (17, 42)), "misses_plane")
+
+
+class WouldCutTest(unittest.TestCase):
+    """PeduncleCutter.would_cut, el oráculo de --close_when_cuttable: la misma regla que el corte, ahora."""
+    Z = RealBladeTest.Z
+
+    def cutter(self, stem_mm, state=INTACT, blade_link=7):
+        from splatsim.robots.xarm.peduncle import PeduncleCutter
+        c = object.__new__(PeduncleCutter)
+        c.blade_link, c.state, c.cut_range_mm, c.stem = blade_link, state, (17, 67), {"radius": 0.0025}
+        c._stem_world = lambda: (None, None, None)
+        c._to_base_mm = lambda points: list(stem_mm)
+        c.plane_z_mm = lambda: self.Z
+        return c
+
+    def stem(self, r, dtheta):
+        return RealBladeTest.stem_through(self, real_blade_point_mm(r, dtheta, self.Z))
+
+    def test_stem_in_the_cutting_zone(self):
+        self.assertTrue(self.cutter(self.stem(42, 3.8)).would_cut())
+        self.assertTrue(self.cutter(self.stem(60, 3.8)).would_cut())   # cerca de la punta, dentro de 17–67
+
+    def test_stem_outside(self):
+        self.assertFalse(self.cutter(self.stem(42, 20)).would_cut())   # lado abierto
+        self.assertFalse(self.cutter(self.stem(70, 3.8)).would_cut())  # más allá de la punta
+
+    def test_none_without_pruner_or_after_the_cut(self):
+        self.assertIsNone(self.cutter(self.stem(42, 3.8), blade_link=None).would_cut())
+        self.assertIsNone(self.cutter(self.stem(42, 3.8), state=HELD).would_cut())
 
 
 if __name__ == "__main__":

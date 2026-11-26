@@ -14,5 +14,8 @@ cameras:
     rpy: [-1.562, 0.0, -4.458]
 arrangements:
   1cam: [base_rgb]
+  1cam_wrist: [wrist_rgb]
   2cam: [base_rgb, wrist_rgb]
+  2cam_left: [base_left_rgb, wrist_rgb]
+  2cam_right: [base_right_rgb, wrist_rgb]
   3cam: [base_left_rgb, base_right_rgb, wrist_rgb]

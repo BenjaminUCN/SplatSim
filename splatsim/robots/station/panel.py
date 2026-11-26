@@ -68,9 +68,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 TOOLS_LOG_DIR = Path("~/.cache/splatsim/tools").expanduser()
 # herramientas con su propio panel viser que se pueden lanzar desde la pestaña Tools
 TOOLS = (
-    ("Recordings review", "scripts/xarm5/review_recordings.py", 8081,
+    ("Recordings review", "scripts/xarm5/recordings/review_recordings.py", 8081,
      "GELLO recordings: trails, episode selection and stop labels"),
-    ("Training queue", "scripts/xarm5/train_server.py", 8082,
+    ("Training queue", "scripts/xarm5/training/train_server.py", 8082,
      "Queue trainings; stopping this panel does not stop a training in progress"),
 )
 
@@ -659,7 +659,7 @@ class StationPanel:
 
     def _show_model_info(self):
         if self._model_select.value not in self._models:
-            self._model_info.content = "No models: run `python scripts/xarm5/build_registry.py`"
+            self._model_info.content = "No models: run `python scripts/xarm5/dataset/build_registry.py`"
             return
         key, m = self._models[self._model_select.value]
         ds = self._datasets.get(m.get("dataset")) or {}
@@ -739,7 +739,7 @@ class StationPanel:
         self._start_trials(label, model, extra, n)
 
     def _start_trials(self, label, model, extra: list, n: int):
-        cmd = ["scripts/xarm5/run_policy_trials.py", "--checkpoint", model["path"], *self._dataset_args(model),
+        cmd = ["scripts/xarm5/trials/run_policy_trials.py", "--checkpoint", model["path"], *self._dataset_args(model),
                "--run_name", label.removesuffix(LOCAL_SUFFIX),
                "--robot_port", str(self.s.zmq_port),
                "--trial_seconds", str(float(self._trial_seconds.value)), *extra]
@@ -918,7 +918,7 @@ class StationPanel:
     # ── reproducción de grabaciones ──────────────────────────────────────────
     def _build_replay_gui(self):
         """Reproduce episodios grabados en uno o varios modos de control
-        (scripts/xarm5/replay_recordings.py), para comparar los modos con la misma trayectoria."""
+        (scripts/xarm5/recordings/replay_recordings.py), para comparar los modos con la misma trayectoria."""
         real = not hasattr(self.s, "sim_clock")
         with self.v.gui.add_folder("Replay", expand_by_default=False):
             self._replay_source = self.v.gui.add_dropdown(
@@ -961,7 +961,7 @@ class StationPanel:
             self._replay_info = {"note": f"**Episodes {missing} do not exist**" if missing
                                  else "**Pick at least one mode**"}
             return
-        cmd = ["scripts/xarm5/replay_recordings.py", str(folder), "--hz", str(self.s.control_hz),
+        cmd = ["scripts/xarm5/recordings/replay_recordings.py", str(folder), "--hz", str(self.s.control_hz),
                "--robot_port", str(self.s.zmq_port), "--modes", *modes,
                "--record" if self._replay_record.value else "--no-record",
                "--ask", str(bool(self._replay_ask.value))]

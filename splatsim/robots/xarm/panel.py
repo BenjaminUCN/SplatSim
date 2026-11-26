@@ -1,6 +1,9 @@
 """Panel de control del sim (viser): el panel compartido (splatsim/robots/station/panel.py) más
 la escena: tomate y grilla de posiciones, poses de las cámaras base y el reloj de la simulación.
 """
+import functools
+import os
+
 import numpy as np
 import viser
 
@@ -15,16 +18,22 @@ from splatsim.utils.scene.apple_grid import (
     in_hemisphere,
     load_grid,
 )
+from splatsim.utils.scene.camera_tripod import tripod_mesh
+from splatsim.utils.scene.hand_held import CAMERA_MESH_DIR, D435I_MESHES, read_stl
 from splatsim.utils.scene.leaf_segmentation import place_between, saved_leaves
 from splatsim.utils.scene.peduncle import DROPPED, EMBED, HELD, INTACT
 from splatsim.utils.render.occlusion import fit_lateral_offset, fit_message
 
 from .config import APPLE_NAME, BASE_CAM_FOV, SIM_CLOCKS
+from .cameras import scene_fov
 
 RANGE_COLOR = (255, 170, 0)   # caja del rango aleatorio (como las esferas de la grilla)
 # tallo en la vista 3D: entero (el verde del splat), cortado y sujeto, cortado y suelto
 STEM_COLORS = {INTACT: (69, 117, 33), HELD: (40, 200, 220), DROPPED: (140, 140, 140)}
 CUT_COLOR = (255, 230, 0)     # punto de corte del tallo
+ROT_TOL = np.radians(0.5)     # giro del tomate que el panel considera un cambio
+SPLAT_MESH_OPACITY = 0.45     # malla del tomate (splat_object_urdf.py): deja ver el tallo y su punto de corte
+TRIPOD_COLOR = (35, 35, 38)   # trípode de mesa de las cámaras base
 
 
 def fruit_sphere(config: dict) -> tuple[np.ndarray, float]:
@@ -39,6 +48,51 @@ def fruit_sphere(config: dict) -> tuple[np.ndarray, float]:
     if stem:
         hi[2] = min(hi[2], stem["bottom"][2] + EMBED)
     return (lo + hi) / 2, float(np.mean(hi - lo) / 2)
+
+
+def splat_object_glb(config: dict, opacity: float = SPLAT_MESH_OPACITY) -> bytes | None:
+    """GLB semitransparente de la malla con color por vértice que splat_object_urdf.py deja junto al urdf_path
+    del objeto, o None. trimesh no le pone material, así que se le agrega uno con alphaMode BLEND (el color
+    de cada vértice se multiplica por baseColorFactor)."""
+    urdf = config.get("urdf_path")
+    path = os.path.join(os.path.dirname(os.path.expanduser(urdf)), "visual_colors.ply") if urdf else None
+    if path is None or not os.path.exists(path):
+        return None
+    import json
+    import struct
+
+    import trimesh
+    glb = trimesh.load(path, process=False).export(file_type="glb")
+    length = struct.unpack("<I", glb[12:16])[0]
+    gltf = json.loads(glb[20:20 + length])
+    gltf["materials"] = [{"pbrMetallicRoughness": {"baseColorFactor": [1, 1, 1, opacity], "metallicFactor": 0,
+                                                   "roughnessFactor": 1},
+                          "alphaMode": "BLEND", "doubleSided": True}]
+    for mesh in gltf["meshes"]:
+        for primitive in mesh["primitives"]:
+            primitive["material"] = 0
+    text = json.dumps(gltf, separators=(",", ":")).encode()
+    text += b" " * (-len(text) % 4)                 # los chunks de un GLB van alineados a 4 bytes
+    rest = glb[20 + length:]                        # el chunk binario, tal cual
+    body = struct.pack("<I", len(text)) + b"JSON" + text + rest
+    return glb[:8] + struct.pack("<I", 12 + len(body)) + body
+
+
+@functools.cache
+def d435i_meshes() -> dict:
+    """Mallas de la D435i (scripts/xarm5/robot/build_d435i_mesh.py): vértices, caras y color por parte."""
+    meshes = {}
+    for filename, rgba in D435I_MESHES:
+        triangles = read_stl(os.path.join(CAMERA_MESH_DIR, filename)).reshape(-1, 3)
+        vertices, faces = np.unique(triangles.round(7), axis=0, return_inverse=True)
+        color = tuple(int(float(v) * 255) for v in rgba.split()[:3])
+        meshes[filename.removesuffix(".stl")] = (vertices.astype(np.float32), faces.reshape(-1, 3).astype(np.uint32), color)
+    return meshes
+
+
+def quat_angle(a, b) -> float:
+    """Ángulo (rad) entre dos cuaterniones del mismo orden."""
+    return 2 * float(np.arccos(min(1.0, abs(float(np.dot(a, b))))))
 
 
 def z_to(axis) -> tuple:
@@ -78,7 +132,8 @@ class SimPanel(StationPanel):
     def _update_status_extra(self):
         # la manzana también se mueve desde fuera (p.ej. run_policy_trials.py)
         pos = self._apple_pos()
-        if np.abs(np.subtract(pos, self._apple_xyz.value)).max() > 1e-3:
+        if (np.abs(np.subtract(pos, self._apple_xyz.value)).max() > 1e-3
+                or quat_angle(self._apple_quat(), self._shown_quat) > ROT_TOL):
             self._sync_apple_ui(pos)
         self._draw_fruit()
         if self._stem is not None:
@@ -90,7 +145,7 @@ class SimPanel(StationPanel):
 
     # ── cámaras base ─────────────────────────────────────────────────────────
     def _build_camera_gui(self):
-        fovx, fovy = BASE_CAM_FOV
+        fovx, fovy = scene_fov(self.s, BASE_CAM_FOV)
         aspect = np.tan(fovx / 2) / np.tan(fovy / 2)
         self._cam_ui = {}
         with self.v.gui.add_folder("Base cameras"):
@@ -106,6 +161,9 @@ class SimPanel(StationPanel):
                     f"/cams/{cam.name}/frustum", fov=fovy, aspect=aspect, scale=0.08,
                     color=(30, 120, 255), thickness=1.5, thickness_units="screen")
                 self.v.scene.add_label(f"/cams/{cam.name}/label", cam.name)
+                # la D435i con su lente RGB en la pose de la cámara (mallas en el marco óptico de la RGB)
+                for part, (vertices, faces, color) in d435i_meshes().items():
+                    self.v.scene.add_mesh_simple(f"/cams/{cam.name}/{part}", vertices, faces, color=color)
                 self._cam_ui[cam.name] = (xyz, rpy, gizmo)
 
                 self._on_user(xyz, lambda _, c=cam: self._set_cam(c, xyz=self._cam_ui[c.name][0].value))
@@ -123,6 +181,7 @@ class SimPanel(StationPanel):
         xyz_ui.value, rpy_ui.value = cam.xyz, cam.rpy
         gizmo.position = cam.xyz
         gizmo.wxyz = xyzw_to_wxyz(self.s.pybullet_client.getQuaternionFromEuler(cam.rpy))
+        self._draw_tripod(cam)
 
     def _cam_from_gizmo(self, cam):
         _, _, gizmo = self._cam_ui[cam.name]
@@ -130,6 +189,19 @@ class SimPanel(StationPanel):
         cam.set_pose(tuple(float(v) for v in gizmo.position), tuple(float(v) for v in rpy))
         xyz_ui, rpy_ui, _ = self._cam_ui[cam.name]
         xyz_ui.value, rpy_ui.value = cam.xyz, cam.rpy
+        self._draw_tripod(cam)
+
+    def _draw_tripod(self, cam):
+        """El trípode queda vertical bajo el tornillo de la cámara, así que va en el mundo y no bajo el gizmo."""
+        c = self.s.pybullet_client
+        T = np.eye(4)
+        T[:3, :3] = np.array(c.getMatrixFromQuaternion(c.getQuaternionFromEuler(cam.rpy))).reshape(3, 3)
+        T[:3, 3] = cam.xyz
+        mesh = tripod_mesh(T)
+        if mesh is None:
+            self.v.scene.remove_by_name(f"/tripods/{cam.name}")
+        else:
+            self.v.scene.add_mesh_simple(f"/tripods/{cam.name}", *mesh, color=TRIPOD_COLOR)
 
     def _save_cam_poses(self):
         save_camera_poses(self.base_cams)
@@ -141,7 +213,7 @@ class SimPanel(StationPanel):
         with self.v.gui.add_folder("Occluders"):
             self._occ_saved = self.v.gui.add_dropdown(
                 "Saved leaf", list(self._saved_leaves) or ["-"],
-                hint="Leaves cut with scripts/xarm5/segment_leaf.py")
+                hint="Leaves cut with scripts/xarm5/scene/segment_leaf.py")
             add = self.v.gui.add_button("Add to Scene", hint="The same leaf can be added several times")
             self._occ_select = self.v.gui.add_dropdown("Occluder", ["-"])
             self._occ_enabled = self.v.gui.add_checkbox("Enabled", True)
@@ -280,6 +352,11 @@ class SimPanel(StationPanel):
             if self.s.peduncle is not None:
                 self._peduncle_text = self.v.gui.add_markdown("")
             self._apple_xyz = self.v.gui.add_vector3("xyz (m)", pos, step=0.001)
+            self._apple_rpy = self.v.gui.add_vector3(
+                "rpy (deg)", self._apple_rpy_now(), step=1.0,
+                hint="Rotation of the tomato: roll, pitch, yaw about the world x, y, z axes (yaw turns it about "
+                     "the vertical; 0, 0, 0 = upright). Also with the rings of its gizmo. Random Position and grid "
+                     "positions keep it")
             rand = self.v.gui.add_button("Random Position")
             self._grid_which = self.v.gui.add_dropdown(
                 "Grid", list(GRIDS), initial_value="custom",
@@ -297,13 +374,19 @@ class SimPanel(StationPanel):
             self._grid_confirm = self.v.gui.add_button_group("Confirm", ["Remove", "Cancel"], visible=False)
             self._build_range_gui()
         self._apple_gizmo = self.v.scene.add_transform_controls(
-            "/apple", scale=0.12, position=pos, disable_rotations=True)
+            "/apple", scale=0.12, position=pos, wxyz=xyzw_to_wxyz(self._apple_quat()))
         self._fruit_center, radius = fruit_sphere(self.s.object_config[APPLE_NAME])
-        self._fruit = self.v.scene.add_icosphere("/apple/sphere", radius=radius, color=(230, 40, 30))
+        glb = splat_object_glb(self.s.object_config[APPLE_NAME])
+        if glb is not None:     # la malla del splat (splat_object_urdf.py), en el marco del cuerpo; se ve el tallo a través
+            self._fruit = self.v.scene.add_glb("/apple/mesh", glb, cast_shadow=False)
+            self._fruit_center = np.zeros(3)
+        else:
+            self._fruit = self.v.scene.add_icosphere("/apple/sphere", radius=radius, color=(230, 40, 30))
+        self._shown_quat = self._apple_quat()      # el giro que muestran rpy y el gizmo
         self._draw_fruit()
         self._stem = None
         if self.s.peduncle is not None:
-            # el tallo va en el marco del mundo (el gizmo del tomate no gira), con su punto de corte
+            # el tallo va en el marco del mundo (su largo y color cambian), con su punto de corte
             p = self.s.peduncle
             self._stem = self.v.scene.add_cylinder(
                 "/peduncle", radius=max(p.stem.get("radius", 0.0025), 0.002), height=0.05,
@@ -312,8 +395,11 @@ class SimPanel(StationPanel):
             self._draw_stem()
 
         self._on_user(self._apple_xyz, lambda h: self._move_apple(h.value))
+        self._on_user(self._apple_rpy, lambda h: self._move_apple(
+            self._apple_pos(), self.s.pybullet_client.getQuaternionFromEuler(np.radians(h.value))))
         self._apple_gizmo.on_update(
-            lambda _: self._do(self._move_apple, tuple(float(v) for v in self._apple_gizmo.position)))
+            lambda _: self._do(self._move_apple, tuple(float(v) for v in self._apple_gizmo.position),
+                               wxyz_to_xyzw(tuple(float(v) for v in self._apple_gizmo.wxyz))))
         self._on_click(rand, self._random_apple)
         self._on_click(self._grid_save, self._save_apple)
         self._on_user(self._grid_which, lambda _: self._switch_grid())
@@ -457,22 +543,33 @@ class SimPanel(StationPanel):
         self._range_info.content = text + ("" if saved else "  \n**not saved**: Random Position "
                                            "uses it now; Save Range keeps it for next time")
 
-    def _move_apple(self, xyz):
-        self.s.apple.move_to(xyz)
+    def _move_apple(self, xyz, orientation=None):
+        self.s.apple.move_to(xyz, orientation)
         self._sync_apple_ui(self._apple_pos())
 
     def _sync_apple_ui(self, pos):
         self._apple_xyz.value = pos
+        quat = self._apple_quat()
+        self._shown_quat = quat
+        self._apple_rpy.value = self._apple_rpy_now()
+        # no se pisa al gizmo mientras se arrastra
         if np.abs(np.subtract(pos, self._apple_gizmo.position)).max() > 1e-3:
-            self._apple_gizmo.position = pos  # no se pisa al gizmo mientras se arrastra
+            self._apple_gizmo.position = pos
+        if quat_angle(quat, wxyz_to_xyzw(self._apple_gizmo.wxyz)) > ROT_TOL:
+            self._apple_gizmo.wxyz = xyzw_to_wxyz(quat)
+
+    def _apple_quat(self):
+        _, quat = self.s.pybullet_client.getBasePositionAndOrientation(self.s.apple.body_id)
+        return tuple(float(v) for v in quat)
+
+    def _apple_rpy_now(self):
+        rpy = np.degrees(self.s.pybullet_client.getEulerFromQuaternion(self._apple_quat()))
+        return tuple(round(float(v), 1) + 0.0 for v in rpy)
 
     def _draw_fruit(self):
         """La esfera del tomate en su centro real: el origen del cuerpo está en su base, no en el
-        centro. Es hija del gizmo (que no gira), así que el desplazamiento se gira aquí."""
-        c = self.s.pybullet_client
-        _, quat = c.getBasePositionAndOrientation(self.s.apple.body_id)
-        rot = np.reshape(c.getMatrixFromQuaternion(quat), (3, 3))
-        self._fruit.position = rot @ self._fruit_center
+        centro. Es hija del gizmo, que gira con el tomate, así que va en el marco del cuerpo."""
+        self._fruit.position = tuple(float(v) for v in self._fruit_center)
 
     def _draw_stem(self):
         """El cilindro del tallo donde está ahora (sigue al tomate, también sujeto o al caer); el
